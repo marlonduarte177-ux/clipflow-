@@ -24,12 +24,22 @@ No hay nada que borrar ni migrar. Se construye desde cero, sin deuda técnica.
 - Sección 19: "NO hay apps móviles ... no dejes arquitectura pendiente para eso".
 - Sección 23: pide separar una carpeta `mobile`.
 
-Propuesta: **no crear `mobile/`**. La web será responsive/mobile-first (sección 19 manda).
+Decisión: **no crear `mobile/`**. La web será responsive/mobile-first y se usa desde el
+navegador del celular. Como la API es independiente del frontend, una app nativa futura
+podría agregarse sin cambiar el backend.
+
+## Proveedor de IA previsto: OpenAI
+
+OpenAI será el proveedor de IA (transcripción/subtítulos, análisis y sugerencias de clips).
+No se integra en las primeras fases: se construye primero la interfaz `AIAnalysisProvider`
+y después se agrega `OpenAIProvider` sin reconstruir el backend. La clave de OpenAI vivirá
+en AWS Secrets Manager y solo la leerá el worker (nunca el frontend ni GitHub).
 
 ## Decisiones técnicas propuestas (a confirmar en Fase 2)
 
 | Área | Propuesta | Por qué |
 |---|---|---|
+| IA | Interfaz `AIAnalysisProvider`; `OpenAIProvider` en Fase 11 | Desacoplado; OpenAI se conecta sin reescribir |
 | Lenguaje | TypeScript en todo (web, API, worker, infra) | Un solo lenguaje para aprender |
 | Monorepo | npm workspaces | Sin herramientas extra |
 | Frontend | Next.js en **AWS Amplify Hosting** | Soporta Next.js con SSR de forma administrada, HTTPS y dominio propio |
