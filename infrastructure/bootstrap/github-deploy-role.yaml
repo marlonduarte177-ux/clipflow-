@@ -1,0 +1,85 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  ClipFlow - permite que GitHub Actions despliegue en esta cuenta usando OIDC
+  (credenciales temporales, sin claves guardadas). Se sube UNA vez desde la
+  consola de CloudFormation.
+
+Parameters:
+  GitHubOwner:
+    Type: String
+    Default: marlonduarte177-ux
+    Description: Usuario u organizacion de GitHub duena del repositorio.
+  GitHubRepo:
+    Type: String
+    Default: clipflow-
+    Description: Nombre del repositorio (sin el usuario).
+  CreateOIDCProvider:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      "true" la primera vez. Usa "false" solo si tu cuenta ya tiene el proveedor
+      token.actions.githubusercontent.com (IAM > Identity providers).
+  CdkQualifier:
+    Type: String
+    Default: hnb659fds
+    Description: Calificador por defecto de "cdk bootstrap". No lo cambies.
+
+Conditions:
+  ShouldCreateOIDCProvider: !Equals [!Ref CreateOIDCProvider, "true"]
+
+Resources:
+  GitHubOIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: ShouldCreateOIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+
+  GitHubDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: clipflow-github-deploy
+      Description: Rol que GitHub Actions asume para desplegar ClipFlow con AWS CDK.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                # Solo jobs de ESTE repositorio que usen un "environment" de
+                # GitHub (staging / production) pueden asumir el rol.
+                token.actions.githubusercontent.com:sub:
+                  - !Sub repo:${GitHubOwner}/${GitHubRepo}:environment:staging
+                  - !Sub repo:${GitHubOwner}/${GitHubRepo}:environment:production
+      Policies:
+        - PolicyName: assume-cdk-roles-only
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Minimo privilegio: este rol no crea recursos directamente.
+              # Solo puede asumir los roles que crea "cdk bootstrap", que son
+              # los que despliegan a traves de CloudFormation.
+              - Sid: AssumeCdkBootstrapRoles
+                Effect: Allow
+                Action: sts:AssumeRole
+                Resource:
+                  - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-deploy-role-${AWS::AccountId}-*
+                  - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-file-publishing-role-${AWS::AccountId}-*
+                  - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-image-publishing-role-${AWS::AccountId}-*
+                  - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-lookup-role-${AWS::AccountId}-*
+
+Outputs:
+  DeployRoleArn:
+    Description: Copia este valor a GitHub como variable AWS_DEPLOY_ROLE_ARN (no es secreto).
+    Value: !GetAtt GitHubDeployRole.Arn
