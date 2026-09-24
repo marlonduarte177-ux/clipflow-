@@ -28,18 +28,22 @@ Decisión: **no crear `mobile/`**. La web será responsive/mobile-first y se usa
 navegador del celular. Como la API es independiente del frontend, una app nativa futura
 podría agregarse sin cambiar el backend.
 
-## Proveedor de IA previsto: OpenAI
+## Proveedor de IA: OpenAI desde la primera versión
 
-OpenAI será el proveedor de IA (transcripción/subtítulos, análisis y sugerencias de clips).
-No se integra en las primeras fases: se construye primero la interfaz `AIAnalysisProvider`
-y después se agrega `OpenAIProvider` sin reconstruir el backend. La clave de OpenAI vivirá
-en AWS Secrets Manager y solo la leerá el worker (nunca el frontend ni GitHub).
+Decisión del usuario (cambia la regla original de "no OpenAI todavía"): OpenAI se usa
+**desde la primera versión** para transcripción/subtítulos y detección de momentos.
+
+- Se mantiene la interfaz `AIAnalysisProvider` para no acoplar el backend a OpenAI.
+- `OpenAIProvider` es la implementación real; `MockAIProvider` queda solo para tests
+  automáticos y desarrollo sin clave (nunca se muestra como resultado real al usuario).
+- La clave de OpenAI vive en AWS Secrets Manager y solo la lee el worker
+  (nunca el frontend, GitHub ni el chat).
 
 ## Decisiones técnicas propuestas (a confirmar en Fase 2)
 
 | Área | Propuesta | Por qué |
 |---|---|---|
-| IA | Interfaz `AIAnalysisProvider`; `OpenAIProvider` en Fase 11 | Desacoplado; OpenAI se conecta sin reescribir |
+| IA | Interfaz `AIAnalysisProvider`; `OpenAIProvider` desde la primera versión | Desacoplado; OpenAI se conecta sin reescribir |
 | Lenguaje | TypeScript en todo (web, API, worker, infra) | Un solo lenguaje para aprender |
 | Monorepo | npm workspaces | Sin herramientas extra |
 | Frontend | Next.js en **AWS Amplify Hosting** | Soporta Next.js con SSR de forma administrada, HTTPS y dominio propio |
@@ -71,7 +75,7 @@ en AWS Secrets Manager y solo la leerá el worker (nunca el frontend ni GitHub).
 5. S3 + upload — URLs firmadas, validación, progreso.
 6. Cola de trabajos — SQS, estados, reintentos, idempotencia.
 7. Worker FFmpeg — recortes, 9:16, thumbnails, subtítulos, subida a S3.
-8. Análisis — interfaz `AIAnalysisProvider`, señales locales reales (picos de audio, cambios de escena) y score configurable.
+8. Análisis — interfaz `AIAnalysisProvider` + `OpenAIProvider` (transcripción, subtítulos, momentos), señales locales (picos de audio, cambios de escena) y score configurable.
 9. Dashboard — todo conectado a la API real.
 10. Producción — dominio, HTTPS, backups, límites, monitoreo.
-11. Preparar IA, pagos y email (sin implementarlos).
+11. Preparar pagos y email (sin implementarlos).

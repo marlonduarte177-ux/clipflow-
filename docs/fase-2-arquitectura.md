@@ -27,7 +27,7 @@ flowchart LR
     SQS --> W[Worker FFmpeg<br/>ECS Fargate<br/>escala 0 → N]
     W --> S3
     W -->|estado y progreso| RDS
-    W -. futuro .-> AI[AIAnalysisProvider<br/>Mock → OpenAI]
+    W -->|HTTPS| AI[AIAnalysisProvider<br/>OpenAIProvider]
 
     API & W --> CW[CloudWatch<br/>logs y alarmas]
     API & W --> SM[Secrets Manager]
@@ -45,7 +45,7 @@ flowchart LR
 | Base de datos | **RDS PostgreSQL 16** | Datos de usuarios, proyectos, jobs, clips, créditos | Requisito. Sin acceso desde internet |
 | Archivos | **S3** (un bucket privado) | Videos, clips, thumbnails, subtítulos, exports | Barato, ilimitado, URLs firmadas que caducan |
 | Autenticación | **Cognito User Pool** | Registro, login, verificación de email, recuperar contraseña | AWS guarda y protege las contraseñas; Google se agrega después como proveedor |
-| Secretos | **Secrets Manager** | Contraseña de la BD (y después la clave de OpenAI) | Nunca en GitHub ni en el frontend |
+| Secretos | **Secrets Manager** | Contraseña de la BD y clave de OpenAI | Nunca en GitHub ni en el frontend |
 | Logs | **CloudWatch** | Logs de API y worker, métricas, alarmas por email | Todo en un sitio, sin instalar nada |
 | Imágenes Docker | **ECR** | Guarda las imágenes de API y worker | Registro privado de AWS |
 | Dominio (después) | **Route 53 + ACM** | `clipflow.com`, `api.clipflow.com` | Certificados HTTPS gratis; opcional para desarrollar |
@@ -142,6 +142,37 @@ Más adelante se puede cambiar a WebSocket sin cambiar el worker.
   pasa por la misma cola.
 - Exportar genera el archivo final en `exports/` y lo registra en la tabla `exports`.
 
+## 3.5 Análisis con OpenAI (desde la primera versión)
+
+```mermaid
+flowchart LR
+    V[Video original] -->|FFmpeg| AU[Audio comprimido<br/>mono, baja tasa]
+    AU -->|trozos de menos de 25 MB| T[OpenAI<br/>transcripción con tiempos]
+    T --> SUB[Subtítulos .srt / .vtt]
+    T --> AN[OpenAI<br/>análisis del texto → momentos candidatos]
+    V -->|FFmpeg| SIG[Señales locales<br/>volumen, cambios de escena]
+    AN & SIG --> SC[Score configurable]
+    SC --> CL[Clips que superan el umbral]
+```
+
+- El worker **no envía el video completo** a OpenAI: solo el audio comprimido, en trozos,
+  porque OpenAI limita el tamaño por petición. Es más barato y más rápido.
+- La transcripción trae marcas de tiempo, así que los subtítulos son reales y quedan sincronizados.
+- OpenAI sugiere momentos a partir del texto. Esa sugerencia es **una señal más** del score
+  (`speech_signal`), junto con las señales de audio y video calculadas con FFmpeg. Así, un video
+  sin voz (gameplay) también puede generar clips.
+- Todo pasa por la interfaz `AIAnalysisProvider`: `transcribe()`, `analyze()` y
+  `generateClipSuggestions()`. Cambiar de modelo o de proveedor no toca el resto del sistema.
+- Los modelos se configuran por variable de entorno (se eligen al implementar, según precios
+  vigentes).
+- **Costos:** cada job guarda los minutos de audio enviados, los tokens usados y el costo estimado
+  en `usage`, para calcular la rentabilidad por video.
+- **Errores:** si OpenAI falla o no responde, se reintenta con espera creciente. Si sigue fallando,
+  el job queda `failed` con el mensaje "El servicio de análisis no está disponible, reintenta
+  más tarde", y se puede reintentar sin volver a subir el video.
+- `MockAIProvider` se usa solo en tests automáticos. Nunca se muestran resultados simulados
+  como si fueran reales.
+
 ## 4. Organización de S3
 
 Un solo bucket privado con prefijos separados. Cada prefijo tiene sus propias reglas de vida:
@@ -181,7 +212,7 @@ flowchart TB
 - **La base de datos no tiene salida a internet.** Solo aceptan conexión los contenedores de
   API y worker (security groups).
 - **Sin NAT Gateway al inicio** (ahorra ~33 USD/mes). Los contenedores salen a internet
-  (para llegar a SQS, Cognito y después OpenAI) con IP pública, pero **ninguna conexión desde
+  (para llegar a SQS, Cognito y OpenAI) con IP pública, pero **ninguna conexión desde
   internet puede entrar**: el worker no acepta nada y la API solo acepta tráfico de API Gateway.
 - En producción con más presupuesto se pueden pasar a subredes privadas con NAT. El código no cambia.
 
@@ -248,6 +279,7 @@ Precios públicos aproximados; pueden cambiar. Verifica en https://calculator.aw
 | CloudWatch | logs 30 días + alarmas | ~1–3 |
 | ECR | imágenes | ~0.2 |
 | Cognito | gratis hasta 10.000 usuarios activos/mes (verificar el plan) | 0 |
+| OpenAI (variable, se paga a OpenAI) | transcripción + análisis de texto | centavos por minuto de video; ver https://openai.com/api/pricing |
 | **Fijo por entorno** | | **≈ 30–35** |
 | Worker (variable) | 2 vCPU / 4 GB ARM | ~0.08 por **hora de procesamiento** |
 | S3 (variable) | 0.023 por GB guardado | 100 GB ≈ 2.3 |
