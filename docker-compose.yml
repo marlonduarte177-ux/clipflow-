@@ -1,0 +1,23 @@
+# Servicios locales para desarrollo. Solo para tu computadora; en AWS se usa RDS.
+# Uso: docker compose up -d
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: clipflow-postgres
+    environment:
+      # Credenciales SOLO locales (no se usan en AWS).
+      POSTGRES_USER: clipflow
+      POSTGRES_PASSWORD: clipflow_local
+      POSTGRES_DB: clipflow
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - clipflow-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clipflow -d clipflow"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  clipflow-pgdata:
