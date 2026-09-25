@@ -5,6 +5,13 @@ import { z } from "zod";
  * Si falta algo obligatorio, la API no arranca y dice exactamente qué falta.
  */
 const EnvSchema = z.object({
+  AWS_REGION: z.string().default("us-east-1"),
+  DATABASE_URL: z.string().startsWith("postgres", "debe ser una URL postgres://"),
+  /** "true" en AWS (RDS exige TLS). */
+  DATABASE_SSL: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
   APP_ENV: z.enum(["development", "staging", "production"]).default("development"),
   API_PORT: z.coerce.number().int().positive().default(4000),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),

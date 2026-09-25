@@ -18,6 +18,23 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # PostgreSQL real para los tests de base de datos y permisos.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: clipflow
+          POSTGRES_PASSWORD: clipflow_ci
+          POSTGRES_DB: clipflow_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U clipflow -d clipflow_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://clipflow:clipflow_ci@localhost:5432/clipflow_test
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -29,6 +46,15 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+      - name: Las migraciones coinciden con el esquema
+        # Falla si alguien cambió schema.ts sin generar la migración.
+        run: |
+          npm run db:generate -w @clipflow/shared -- --name=ci_check
+          if [ -n "$(git status --porcelain shared/drizzle)" ]; then
+            echo "::error::schema.ts cambió pero falta la migración. Ejecuta: npm run db:generate"
+            git status --porcelain shared/drizzle
+            exit 1
+          fi
       - name: Build del frontend
         run: npm run build -w @clipflow/frontend
         env:

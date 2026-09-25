@@ -1,17 +1,21 @@
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import type { MeResponse } from "@clipflow/shared";
+import type { Database } from "@clipflow/shared/db";
 import type { ApiConfig } from "./config.js";
-import { requireAuth, type TokenVerifier } from "./auth.js";
+import { requireAuth, type EmailLookup, type TokenVerifier } from "./auth.js";
+import { projectRoutes } from "./projects.js";
 
 export interface AppDeps {
   config: Pick<ApiConfig, "APP_ENV" | "LOG_LEVEL" | "CORS_ALLOWED_ORIGINS">;
   verifyToken: TokenVerifier;
+  lookupEmail: EmailLookup;
+  db: Database;
   /** false en tests para no llenar la salida de logs. */
   logger?: boolean;
 }
 
-export async function buildApp({ config, verifyToken, logger = true }: AppDeps): Promise<FastifyInstance> {
+export async function buildApp({ config, verifyToken, lookupEmail, db, logger = true }: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
     logger: logger
       ? {
@@ -52,10 +56,14 @@ export async function buildApp({ config, verifyToken, logger = true }: AppDeps):
   // Público: lo usan AWS (health check) y el monitoreo.
   app.get("/health", async () => ({ status: "ok", env: config.APP_ENV }));
 
-  // Protegido: devuelve quién es el usuario según su token.
-  app.get("/me", { preHandler: requireAuth(verifyToken) }, async (request): Promise<MeResponse> => {
-    return { userId: request.user!.userId };
+  const auth = requireAuth({ verifyToken, lookupEmail, db });
+
+  // Protegido: devuelve el usuario de ClipFlow asociado al token.
+  app.get("/me", { preHandler: auth }, async (request): Promise<MeResponse> => {
+    return { userId: request.user!.id, email: request.user!.email };
   });
+
+  await app.register(projectRoutes({ db, auth }));
 
   return app;
 }

@@ -1,82 +1,57 @@
-import { afterEach, describe, expect, it } from "vitest";
-import type { FastifyInstance } from "fastify";
-import { buildApp } from "./app.js";
-import type { TokenVerifier } from "./auth.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadApiConfig } from "./config.js";
+import { bearer, closeTestApp, createTestApp, type TestContext } from "./test-helpers.js";
 
-// Token con forma de JWT (tres partes). La verificación real se sustituye en tests.
-const VALID = "aaa.bbb.ccc";
-const verifyToken: TokenVerifier = async (token) => {
-  if (token === VALID) return { userId: "user-123" };
-  throw Object.assign(new Error("invalid"), { name: "JwtInvalidSignatureError" });
-};
-
-let app: FastifyInstance | undefined;
-afterEach(async () => {
-  await app?.close();
-  app = undefined;
+let ctx: TestContext | undefined;
+beforeEach(async () => {
+  ctx = await createTestApp();
 });
-
-async function makeApp() {
-  app = await buildApp({
-    config: { APP_ENV: "development", LOG_LEVEL: "error", CORS_ALLOWED_ORIGINS: ["http://localhost:3000"] },
-    verifyToken,
-    logger: false,
-  });
-  return app;
-}
+afterEach(async () => {
+  await closeTestApp(ctx);
+  ctx = undefined;
+});
+const app = () => ctx!.app;
 
 describe("API", () => {
   it("GET /health responde sin autenticación", async () => {
-    const res = await (await makeApp()).inject({ method: "GET", url: "/health" });
+    const res = await app().inject({ method: "GET", url: "/health" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ status: "ok", env: "development" });
   });
 
   it("GET /me sin token devuelve 401", async () => {
-    const res = await (await makeApp()).inject({ method: "GET", url: "/me" });
+    const res = await app().inject({ method: "GET", url: "/me" });
     expect(res.statusCode).toBe(401);
     expect(res.json().error.code).toBe("unauthorized");
   });
 
   it("GET /me con cabecera mal formada devuelve 401", async () => {
-    const res = await (await makeApp()).inject({
-      method: "GET",
-      url: "/me",
-      headers: { authorization: "Basic abc" },
-    });
+    const res = await app().inject({ method: "GET", url: "/me", headers: { authorization: "Basic abc" } });
     expect(res.statusCode).toBe(401);
   });
 
   it("GET /me con token inválido devuelve 401", async () => {
-    const res = await (await makeApp()).inject({
-      method: "GET",
-      url: "/me",
-      headers: { authorization: "Bearer xxx.yyy.zzz" },
-    });
+    const res = await app().inject({ method: "GET", url: "/me", headers: bearer("invalid") });
     expect(res.statusCode).toBe(401);
     expect(res.json().error.message).toMatch(/expiró/);
   });
 
-  it("GET /me con token válido devuelve el usuario del token", async () => {
-    const res = await (await makeApp()).inject({
-      method: "GET",
-      url: "/me",
-      headers: { authorization: `Bearer ${VALID}` },
-    });
-    expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ userId: "user-123" });
+  it("GET /me crea el usuario la primera vez y luego lo reutiliza", async () => {
+    const first = await app().inject({ method: "GET", url: "/me", headers: bearer("sub-1") });
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toMatchObject({ email: "sub-1@example.com" });
+    const second = await app().inject({ method: "GET", url: "/me", headers: bearer("sub-1") });
+    expect(second.json().userId).toBe(first.json().userId);
   });
 
   it("CORS solo permite los orígenes configurados", async () => {
-    const a = await makeApp();
-    const allowed = await a.inject({
+    const allowed = await app().inject({
       method: "OPTIONS",
       url: "/me",
       headers: { origin: "http://localhost:3000", "access-control-request-method": "GET" },
     });
     expect(allowed.headers["access-control-allow-origin"]).toBe("http://localhost:3000");
-    const denied = await a.inject({
+    const denied = await app().inject({
       method: "OPTIONS",
       url: "/me",
       headers: { origin: "https://malicioso.example", "access-control-request-method": "GET" },
@@ -85,24 +60,27 @@ describe("API", () => {
   });
 
   it("rutas desconocidas devuelven 404 con formato de error", async () => {
-    const res = await (await makeApp()).inject({ method: "GET", url: "/nope" });
+    const res = await app().inject({ method: "GET", url: "/nope" });
     expect(res.statusCode).toBe(404);
     expect(res.json().error.code).toBe("not_found");
   });
 });
 
 describe("loadApiConfig", () => {
-  it("falla con un mensaje claro si falta Cognito", () => {
+  it("falla con un mensaje claro si falta Cognito o la base de datos", () => {
     expect(() => loadApiConfig({})).toThrow(/COGNITO_USER_POOL_ID/);
+    expect(() => loadApiConfig({})).toThrow(/DATABASE_URL/);
   });
 
   it("lee y separa los orígenes CORS", () => {
     const config = loadApiConfig({
+      DATABASE_URL: "postgres://u:p@localhost:5432/db",
       COGNITO_USER_POOL_ID: "us-east-1_AbC123",
       COGNITO_CLIENT_ID: "client",
       CORS_ALLOWED_ORIGINS: "http://a.test, https://b.test",
     });
     expect(config.CORS_ALLOWED_ORIGINS).toEqual(["http://a.test", "https://b.test"]);
     expect(config.API_PORT).toBe(4000);
+    expect(config.DATABASE_SSL).toBe(false);
   });
 });
