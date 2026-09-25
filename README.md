@@ -9,6 +9,7 @@ En construcción por fases. Ver `docs/`:
 
 - [Fase 1 — Auditoría](docs/fase-1-auditoria.md)
 - [Fase 2 — Arquitectura](docs/fase-2-arquitectura.md)
+- [Fase 3 — Autenticación](docs/fase-3-autenticacion.md) · [Pasos manuales AWS + GitHub](docs/fase-3-pasos-aws-github.md)
 
 ## Estructura
 
