@@ -1,0 +1,47 @@
+{
+  "name": "@clipflow/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "C\u00f3digo com\u00fan: tipos, validaciones y configuraci\u00f3n central.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./db": {
+      "types": "./dist/db/index.d.ts",
+      "default": "./dist/db/index.js"
+    },
+    "./db/testing": {
+      "types": "./dist/db/testing.d.ts",
+      "default": "./dist/db/testing.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx --env-file-if-exists=../.env src/db/migrate-cli.ts"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.3",
+    "pg": "^8.23.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.11",
+    "typescript": "^5.9",
+    "vitest": "^5.0.1",
+    "tsx": "^4.23.15"
+  },
+  "files": [
+    "dist",
+    "drizzle"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "clipflow",
+  "private": true,
+  "description": "ClipFlow: convierte videos largos en clips cortos. Monorepo (npm workspaces).",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "shared",
+    "backend",
+    "frontend",
+    "infrastructure"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev -w frontend",
+    "dev:api": "npm run dev -w backend",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "db:migrate": "npm run db:migrate -w @clipflow/shared",
+    "db:generate": "npm run db:generate -w @clipflow/shared"
+  }
+}
