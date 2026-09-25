@@ -44,3 +44,6 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 .idea/
+
+# --- Salidas de despliegue ---
+cdk-outputs.json

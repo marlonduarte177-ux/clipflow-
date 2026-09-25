@@ -1,0 +1,41 @@
+# Comprueba cada cambio: tipos, lint, tests, build del frontend y síntesis de la infraestructura.
+# No usa credenciales de AWS.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w @clipflow/shared
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - name: Build del frontend
+        run: npm run build -w @clipflow/frontend
+        env:
+          # Valores de ejemplo solo para compilar (no son reales).
+          NEXT_PUBLIC_COGNITO_USER_POOL_ID: us-east-1_EXAMPLE00
+          NEXT_PUBLIC_COGNITO_CLIENT_ID: example-client-id
+          NEXT_PUBLIC_API_URL: http://localhost:4000
+      - name: Sintetizar infraestructura (staging)
+        run: npx cdk synth -c stage=staging --quiet
+        working-directory: infrastructure
