@@ -1,0 +1,49 @@
+# --- Secretos y variables de entorno (NUNCA subir) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+credentials
+.aws/
+
+# --- Dependencias ---
+node_modules/
+
+# --- Builds ---
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# --- AWS CDK ---
+cdk.out/
+cdk.context.json.bak
+
+# --- Tests / cobertura ---
+coverage/
+
+# --- Archivos de video y temporales locales ---
+tmp/
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.avi
+
+# --- Logs ---
+*.log
+npm-debug.log*
+
+# --- Sistema / editores ---
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# --- Salidas de despliegue ---
+cdk-outputs.json

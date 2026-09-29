@@ -1,0 +1,67 @@
+# Comprueba cada cambio: tipos, lint, tests, build del frontend y síntesis de la infraestructura.
+# No usa credenciales de AWS.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # PostgreSQL real para los tests de base de datos y permisos.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: clipflow
+          POSTGRES_PASSWORD: clipflow_ci
+          POSTGRES_DB: clipflow_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U clipflow -d clipflow_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://clipflow:clipflow_ci@localhost:5432/clipflow_test
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w @clipflow/shared
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - name: Las migraciones coinciden con el esquema
+        # Falla si alguien cambió schema.ts sin generar la migración.
+        run: |
+          npm run db:generate -w @clipflow/shared -- --name=ci_check
+          if [ -n "$(git status --porcelain shared/drizzle)" ]; then
+            echo "::error::schema.ts cambió pero falta la migración. Ejecuta: npm run db:generate"
+            git status --porcelain shared/drizzle
+            exit 1
+          fi
+      - name: Build del frontend
+        run: npm run build -w @clipflow/frontend
+        env:
+          # Valores de ejemplo solo para compilar (no son reales).
+          NEXT_PUBLIC_COGNITO_USER_POOL_ID: us-east-1_EXAMPLE00
+          NEXT_PUBLIC_COGNITO_CLIENT_ID: example-client-id
+          NEXT_PUBLIC_API_URL: http://localhost:4000
+      - name: Sintetizar infraestructura (staging)
+        run: npx cdk synth -c stage=staging --quiet
+        working-directory: infrastructure

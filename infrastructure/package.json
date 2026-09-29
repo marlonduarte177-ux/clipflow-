@@ -1,0 +1,24 @@
+{
+  "name": "@clipflow/infrastructure",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Infraestructura de ClipFlow como código (AWS CDK).",
+  "type": "module",
+  "scripts": {
+    "cdk": "cdk",
+    "synth": "cdk synth",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.270.0",
+    "constructs": "^10.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "aws-cdk": "^2.1143.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9",
+    "vitest": "^5.0.1"
+  }
+}

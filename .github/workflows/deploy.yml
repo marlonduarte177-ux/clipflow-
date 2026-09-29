@@ -1,0 +1,55 @@
+# Despliega la infraestructura en AWS con CDK.
+# Se ejecuta a mano: GitHub > Actions > Deploy > Run workflow.
+# Entra a AWS con OIDC (credenciales temporales), sin claves guardadas.
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Entorno a desplegar
+        type: choice
+        options: [staging, production]
+        default: staging
+
+permissions:
+  id-token: write # necesario para OIDC
+  contents: read
+
+concurrency:
+  group: deploy-${{ inputs.stage }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # El environment de GitHub limita qué ramas/personas pueden desplegar
+    # y es lo que el rol de AWS exige para dejar entrar.
+    environment: ${{ inputs.stage }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Credenciales temporales de AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: cdk deploy
+        working-directory: infrastructure
+        run: npx cdk deploy --all -c stage=${{ inputs.stage }} --require-approval never --outputs-file cdk-outputs.json
+      - name: Resumen
+        working-directory: infrastructure
+        run: |
+          {
+            echo "## Despliegue ${{ inputs.stage }} completado"
+            echo ""
+            echo "Valores públicos (no son secretos):"
+            echo '```json'
+            cat cdk-outputs.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
