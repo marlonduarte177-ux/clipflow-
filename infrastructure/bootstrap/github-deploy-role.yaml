@@ -13,6 +13,18 @@ Parameters:
     Type: String
     Default: clipflow-
     Description: Nombre del repositorio (sin el usuario).
+  GitHubOwnerId:
+    Type: String
+    Default: "255794142"
+    AllowedPattern: "^[0-9]+$"
+    Description: >-
+      ID numerico (publico) del usuario u organizacion. GitHub lo incluye en la
+      identidad OIDC. Se ve en el paso de diagnostico del workflow Deploy.
+  GitHubRepoId:
+    Type: String
+    Default: "1386216571"
+    AllowedPattern: "^[0-9]+$"
+    Description: ID numerico (publico) del repositorio. Se ve en el mismo diagnostico.
   CreateOIDCProvider:
     Type: String
     Default: "true"
@@ -56,12 +68,16 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-              StringLike:
                 # Solo jobs de ESTE repositorio que usen un "environment" de
                 # GitHub (staging / production) pueden asumir el rol.
+                # GitHub usa dos formatos de "sub": el clasico (owner/repo) y el
+                # que incluye los IDs inmutables (owner@id/repo@id). Se aceptan
+                # ambos, siempre con valores exactos (sin comodines).
                 token.actions.githubusercontent.com:sub:
                   - !Sub repo:${GitHubOwner}/${GitHubRepo}:environment:staging
                   - !Sub repo:${GitHubOwner}/${GitHubRepo}:environment:production
+                  - !Sub repo:${GitHubOwner}@${GitHubOwnerId}/${GitHubRepo}@${GitHubRepoId}:environment:staging
+                  - !Sub repo:${GitHubOwner}@${GitHubOwnerId}/${GitHubRepo}@${GitHubRepoId}:environment:production
       Policies:
         - PolicyName: assume-cdk-roles-only
           PolicyDocument:
