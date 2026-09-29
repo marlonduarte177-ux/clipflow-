@@ -64,3 +64,30 @@ CDK necesita crear una vez sus propios recursos de apoyo en tu cuenta ("bootstra
 
 Evita usar el usuario **root** para el trabajo diario. Más adelante crearemos un usuario
 administrador con **IAM Identity Center** y te daré los pasos.
+
+## Problema conocido: "Not authorized to perform sts:AssumeRoleWithWebIdentity"
+
+**Causa (encontrada el 29/09/2026):** GitHub presentó a AWS la identidad en un formato nuevo
+que incluye los IDs numéricos (públicos) de la cuenta y del repositorio:
+
+```
+repo:marlonduarte177-ux@255794142/clipflow-@1386216571:environment:staging
+```
+
+La primera versión de la plantilla solo aceptaba el formato clásico
+(`repo:marlonduarte177-ux/clipflow-:environment:staging`), así que AWS rechazaba a GitHub.
+
+**Arreglo:** la plantilla ahora acepta los dos formatos, siempre con valores exactos.
+Para aplicarlo, actualiza el stack que ya existe (no lo borres):
+
+1. Descarga de nuevo `infrastructure/bootstrap/github-deploy-role.yaml` (**Download raw file**).
+2. AWS → **CloudFormation** → **Stacks** → `clipflow-github-deploy` → **Update** (en el celular puede
+   estar en el menú **⋮** o **Stack actions**).
+3. Elige **Replace existing template** → **Upload a template file** → el archivo → **Next**.
+4. Parámetros: deja los valores. Los nuevos `GitHubOwnerId = 255794142` y
+   `GitHubRepoId = 1386216571` ya vienen puestos → **Next** → **Next**.
+5. Marca **"I acknowledge… IAM resources…"** → **Submit** y espera **UPDATE_COMPLETE**.
+6. GitHub → **Actions** → **Deploy** → **Run workflow** → `staging`.
+
+El paso "Identidad OIDC que GitHub presenta a AWS" del workflow Deploy muestra siempre ese `sub`,
+para diagnosticar rápido si vuelve a pasar.

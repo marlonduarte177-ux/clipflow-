@@ -1,0 +1,23 @@
+# Build del frontend en AWS Amplify Hosting (monorepo con npm workspaces).
+# Amplify usa este archivo automáticamente. La app vive en frontend/.
+version: 1
+applications:
+  - appRoot: frontend
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            - nvm install 22 && nvm use 22
+            # Las dependencias se instalan desde la raíz (un solo package-lock.json).
+            - (cd .. && npm ci)
+        build:
+          commands:
+            # Solo las variables NEXT_PUBLIC_* (no secretas) llegan al navegador.
+            - npm run build
+      artifacts:
+        baseDirectory: .next
+        files:
+          - "**/*"
+      cache:
+        paths:
+          - .next/cache/**/*
