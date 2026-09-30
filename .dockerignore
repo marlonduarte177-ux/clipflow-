@@ -1,0 +1,16 @@
+# Lo que NO entra en las imágenes Docker (contexto = raíz del repo).
+**/node_modules
+**/dist
+**/.next
+**/cdk.out
+**/coverage
+**/*.test.ts
+**/test-helpers.ts
+.git
+.github
+.env
+.env.*
+frontend
+infrastructure
+docs
+*.md

@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import type { DbHandle } from "./client.js";
 import { createTestDb } from "./testing.js";
+import { runMigrations } from "./migrate.js";
 import { clips, creditLedger, exports, processingJobs, projects, subtitles, videos } from "./schema.js";
 import { upsertUser } from "./users.js";
 import {
@@ -50,6 +51,10 @@ async function makeUserWithVideo(sub: string) {
 }
 
 describe("migraciones", () => {
+  it("se pueden ejecutar varias veces y en paralelo sin errores", async () => {
+    await Promise.all([runMigrations(h!.db), runMigrations(h!.db), runMigrations(h!.db)]);
+  });
+
   it("crean todas las tablas requeridas", async () => {
     const result = await h!.db.execute<{ table_name: string }>(
       sql`select table_name from information_schema.tables where table_schema = 'public' order by table_name`,

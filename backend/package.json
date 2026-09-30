@@ -13,6 +13,8 @@
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.1140.0",
+    "@aws-sdk/client-s3": "^3.1143.0",
+    "@aws-sdk/s3-request-presigner": "^3.1143.0",
     "@clipflow/shared": "*",
     "@fastify/cors": "^11.3.0",
     "aws-jwt-verify": "^5.2.1",

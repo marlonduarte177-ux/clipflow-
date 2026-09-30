@@ -11,15 +11,16 @@ En construcción por fases. Ver `docs/`:
 - [Fase 2 — Arquitectura](docs/fase-2-arquitectura.md)
 - [Fase 3 — Autenticación](docs/fase-3-autenticacion.md) · [Pasos manuales AWS + GitHub](docs/fase-3-pasos-aws-github.md)
 - [Fase 4 — Base de datos](docs/fase-4-base-de-datos.md)
+- [Fase 5 — Subida de videos e infraestructura base](docs/fase-5-subida-videos.md)
 
 ## Estructura
 
 | Carpeta | Qué contiene |
 |---|---|
-| `frontend/` | Web (Next.js): landing, registro, login, recuperación, panel |
-| `backend/` | API (Fastify): valida tokens de Cognito, usuarios y proyectos |
+| `frontend/` | Web (Next.js): landing, cuentas, proyectos, subida de videos |
+| `backend/` | API (Fastify) + `Dockerfile`: usuarios, proyectos, subida de videos a S3 |
 | `shared/` | Configuración central, tipos, validaciones, esquema de base de datos y migraciones (`shared/drizzle/`) |
-| `infrastructure/` | AWS CDK: Cognito (más servicios en las próximas fases) |
+| `infrastructure/` | AWS CDK: Cognito, red, S3, RDS, API (Fargate + API Gateway) |
 | `docs/` | Documentación por fase |
 
 ## Comandos

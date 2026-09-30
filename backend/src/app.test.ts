@@ -67,14 +67,15 @@ describe("API", () => {
 });
 
 describe("loadApiConfig", () => {
-  it("falla con un mensaje claro si falta Cognito o la base de datos", () => {
+  it("falla con un mensaje claro si falta Cognito o S3", () => {
     expect(() => loadApiConfig({})).toThrow(/COGNITO_USER_POOL_ID/);
-    expect(() => loadApiConfig({})).toThrow(/DATABASE_URL/);
+    expect(() => loadApiConfig({})).toThrow(/S3_BUCKET/);
   });
 
   it("lee y separa los orígenes CORS", () => {
     const config = loadApiConfig({
       DATABASE_URL: "postgres://u:p@localhost:5432/db",
+      S3_BUCKET: "clipflow-staging-media",
       COGNITO_USER_POOL_ID: "us-east-1_AbC123",
       COGNITO_CLIENT_ID: "client",
       CORS_ALLOWED_ORIGINS: "http://a.test, https://b.test",
