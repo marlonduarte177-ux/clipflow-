@@ -1,6 +1,10 @@
 # ClipFlow — Fase 8: Análisis con IA (OpenAI)
 
-Estado: **código terminado y probado. Pendiente: desplegar y pegar la clave de OpenAI.**
+Estado: **desplegada y verificada en AWS (staging) con OpenAI real** el 30/09/2026.
+
+**Prueba real:** un video de **23 min** se procesó con IA sin errores (transcripción, momentos por
+contenido, frases completas, subtítulos y títulos). **Costo real de OpenAI: 0.14 USD**, igual a la
+estimación (23 min × 0.006 USD de transcripción + menos de 0.01 USD de análisis).
 
 ## Qué hace
 
@@ -55,8 +59,27 @@ Precios usados para estimar (configurables; revisar en https://openai.com/api/pr
 | whisper-1 | 0.006 USD / minuto de audio |
 | gpt-4o-mini | 0.15 USD / 1M tokens de entrada, 0.60 USD / 1M de salida |
 
-**Ejemplo:** un video de 23 min cuesta ~0.14 USD de transcripción + menos de 0.01 USD de análisis ≈
-**0.15 USD**.
+**Ejemplo real:** un video de 23 min costó **0.14 USD** en OpenAI.
+
+### Costo total por video (para fijar precios)
+
+| Concepto | Por minuto de video | Video de 23 min |
+|---|---|---|
+| OpenAI (transcripción + análisis + títulos) | ~0.0062 USD | 0.14 USD (real) |
+| Worker Fargate (2 vCPU / 4 GB, ~0.10 USD por hora de proceso) | ~0.0005–0.001 USD | ~0.01–0.02 USD (estimado) |
+| S3 (guardar original + clips) y transferencia | < 0.001 USD | ~0.00 USD |
+| **Total variable** | **~0.007–0.008 USD** | **~0.16 USD** |
+
+A esto se suma el costo fijo de la infraestructura: unos 30 USD al mes por entorno.
+El costo exacto de cada video queda en la tabla `usage` (`estimated_cost_usd`).
+
+**Referencias para decidir el precio (sin pagos implementados todavía):**
+- Con un precio de 0.03 USD por minuto procesado, el margen es de ~75 % sobre el costo variable.
+  Un video de 23 min se cobraría ~0.69 USD.
+- Para cubrir los ~30 USD fijos al mes a ese precio se necesitan ~1,300 minutos procesados al mes
+  (≈ 57 videos de 23 min).
+- Opción para bajar costos: `gpt-4o-mini-transcribe` cuesta la mitad (0.003 USD/min), pero **no**
+  devuelve tiempos por frase, así que se perderían los subtítulos y los cortes exactos.
 
 Límite de seguridad: `OPENAI_MAX_AUDIO_MINUTES = 180` por video.
 
