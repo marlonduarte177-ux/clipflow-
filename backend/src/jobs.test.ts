@@ -43,6 +43,10 @@ describe("trabajos de procesamiento", () => {
     const first = (await complete()).json();
     expect(first.job).toMatchObject({ status: "queued", progress: 0, params: { clipDurationSeconds: 30 } });
     expect(ctx!.queue.sent).toEqual([first.job.id]);
+    // Se pidió encender procesadores al empezar la subida y al encolar (sin esperar a las métricas).
+    await new Promise((r) => setTimeout(r, 50));
+    expect(ctx!.launcher.requests.length).toBeGreaterThanOrEqual(2);
+    expect(ctx!.launcher.requests.at(-1)).toBe(1); // 1 trabajo en cola → 1 procesador
 
     await complete(); // repetir no duplica
     expect(ctx!.queue.sent).toHaveLength(1);

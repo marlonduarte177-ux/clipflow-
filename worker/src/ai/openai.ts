@@ -243,35 +243,42 @@ export class OpenAIProvider implements AIAnalysisProvider {
   }
 
   async transcribe(chunks: AudioChunk[]) {
-    const segments: TranscriptSegment[] = [];
-    let language: string | null = null;
-    let audioSeconds = 0;
-    for (const chunk of chunks) {
-      const raw = await this.request("/audio/transcriptions", async () => {
-        const form = new FormData();
-        form.append("file", await openAsBlob(chunk.path, { type: "audio/mpeg" }), path.basename(chunk.path));
-        form.append("model", this.options.transcribeModel);
-        form.append("response_format", "verbose_json");
-        form.append("timestamp_granularities[]", "segment");
-        return { method: "POST", headers: this.headers(), body: form };
-      });
-      const parsed = TranscriptionResponse.safeParse(raw);
-      if (!parsed.success) throw new AIProviderError("Transcripción con formato inesperado", true);
-      language ??= parsed.data.language ?? null;
-      for (const s of parsed.data.segments) {
-        if (s.text.trim() === "" || !(s.end > s.start)) continue;
-        if (isLikelyHallucination(s)) continue;
-        segments.push({
-          startSeconds: chunk.offsetSeconds + s.start,
-          endSeconds: chunk.offsetSeconds + Math.min(s.end, chunk.durationSeconds),
-          text: s.text.trim(),
+    // Hasta 3 trozos a la vez (un video de 1 h son 6 trozos): mucho más rápido que de a uno.
+    const results: { segments: TranscriptSegment[]; language: string | null }[] = new Array(chunks.length);
+    let next = 0;
+    const worker = async () => {
+      while (next < chunks.length) {
+        const index = next++;
+        const chunk = chunks[index]!;
+        const raw = await this.request("/audio/transcriptions", async () => {
+          const form = new FormData();
+          form.append("file", await openAsBlob(chunk.path, { type: "audio/mpeg" }), path.basename(chunk.path));
+          form.append("model", this.options.transcribeModel);
+          form.append("response_format", "verbose_json");
+          form.append("timestamp_granularities[]", "segment");
+          return { method: "POST", headers: this.headers(), body: form };
         });
+        const parsed = TranscriptionResponse.safeParse(raw);
+        if (!parsed.success) throw new AIProviderError("Transcripción con formato inesperado", true);
+        const segments: TranscriptSegment[] = [];
+        for (const s of parsed.data.segments) {
+          if (s.text.trim() === "" || !(s.end > s.start)) continue;
+          if (isLikelyHallucination(s)) continue;
+          segments.push({
+            startSeconds: chunk.offsetSeconds + s.start,
+            endSeconds: chunk.offsetSeconds + Math.min(s.end, chunk.durationSeconds),
+            text: s.text.trim(),
+          });
+        }
+        results[index] = { segments, language: parsed.data.language ?? null };
       }
-      audioSeconds += chunk.durationSeconds;
-    }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, chunks.length) }, worker));
+
+    const audioSeconds = chunks.reduce((sum, c) => sum + c.durationSeconds, 0);
     return {
-      segments,
-      language,
+      segments: results.flatMap((r) => r.segments),
+      language: results.find((r) => r.language)?.language ?? null,
       usage: {
         audioSeconds,
         estimatedCostUsd: (audioSeconds / 60) * this.options.prices.transcribePerMinuteUsd,

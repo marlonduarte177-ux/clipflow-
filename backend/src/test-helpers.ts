@@ -4,6 +4,7 @@ import { createTestDb } from "@clipflow/shared/db/testing";
 import { DEFAULT_PRODUCT_CONFIG, type ProductConfig } from "@clipflow/shared";
 import { buildApp } from "./app.js";
 import type { TokenVerifier } from "./auth.js";
+import type { WorkerLauncher } from "./launcher.js";
 import type { JobQueue } from "./queue.js";
 import type { VideoStorage } from "./storage.js";
 
@@ -59,7 +60,11 @@ export class FakeStorage implements VideoStorage {
 /** Cola falsa: guarda los ids enviados; `failNext` simula una caída de SQS. */
 export class FakeQueue implements JobQueue {
   sent: string[] = [];
+  warmups = 0;
   failNext = false;
+  async warmUp() {
+    this.warmups++;
+  }
   async send(jobId: string) {
     if (this.failNext) {
       this.failNext = false;
@@ -69,17 +74,28 @@ export class FakeQueue implements JobQueue {
   }
 }
 
+/** Lanzador falso: cuenta cuántas veces se pidió encender procesadores. */
+export class FakeLauncher implements WorkerLauncher {
+  requests: number[] = [];
+  async ensureRunning(wanted = 1) {
+    this.requests.push(wanted);
+    return { running: 0, started: wanted };
+  }
+}
+
 export interface TestContext {
   app: FastifyInstance;
   database: DbHandle;
   storage: FakeStorage;
   queue: FakeQueue;
+  launcher: FakeLauncher;
 }
 
 export async function createTestApp(product: ProductConfig = DEFAULT_PRODUCT_CONFIG): Promise<TestContext> {
   const database = await createTestDb();
   const storage = new FakeStorage();
   const queue = new FakeQueue();
+  const launcher = new FakeLauncher();
   const app = await buildApp({
     config: {
       APP_ENV: "development",
@@ -90,12 +106,13 @@ export async function createTestApp(product: ProductConfig = DEFAULT_PRODUCT_CON
     db: database.db,
     storage,
     queue,
+    launcher,
     product,
     verifyToken,
     lookupEmail: async (token) => `${token.split(".")[1]}@example.com`,
     logger: false,
   });
-  return { app, database, storage, queue };
+  return { app, database, storage, queue, launcher };
 }
 
 export async function closeTestApp(ctx: TestContext | undefined) {

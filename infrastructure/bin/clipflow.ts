@@ -40,6 +40,12 @@ new ApiStack(app, `${prefix}-api`, {
   userPool: auth.userPool,
   userPoolClient: auth.userPoolClient,
   queue: worker.queue,
+  worker: {
+    cluster: worker.cluster,
+    taskDefinition: worker.taskDefinition,
+    taskFamily: worker.taskFamily,
+    securityGroup: worker.securityGroup,
+  },
   webOrigins: config.webOrigins,
 });
 

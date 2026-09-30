@@ -34,6 +34,10 @@ export interface WorkerStackProps extends StackProps {
  */
 export class WorkerStack extends Stack {
   readonly queue: sqs.Queue;
+  readonly cluster: ecs.Cluster;
+  readonly taskDefinition: ecs.FargateTaskDefinition;
+  readonly securityGroup: ec2.SecurityGroup;
+  readonly taskFamily: string;
 
   constructor(scope: Construct, id: string, props: WorkerStackProps) {
     super(scope, id, props);
@@ -74,6 +78,8 @@ export class WorkerStack extends Stack {
     });
 
     const cluster = new ecs.Cluster(this, "WorkerCluster", { clusterName: `${prefix}-workers`, vpc: props.vpc });
+    this.cluster = cluster;
+    this.taskFamily = `${prefix}-worker`;
     const logGroup = new logs.LogGroup(this, "WorkerLogs", {
       logGroupName: `/clipflow/${props.stage}/worker`,
       retention: logs.RetentionDays.ONE_MONTH,
@@ -81,8 +87,9 @@ export class WorkerStack extends Stack {
     });
 
     const taskDefinition = new ecs.FargateTaskDefinition(this, "WorkerTask", {
-      cpu: 2048,
-      memoryLimitMiB: 4096,
+      family: this.taskFamily,
+      cpu: 4096, // 4 vCPU: análisis, IA y 2 clips a la vez
+      memoryLimitMiB: 8192,
       ephemeralStorageGiB: 50, // espacio para el video original y los clips
       runtimePlatform: {
         cpuArchitecture: ecs.CpuArchitecture.X86_64,
@@ -104,6 +111,8 @@ export class WorkerStack extends Stack {
         DB_NAME: DATABASE_NAME,
         DATABASE_SSL: "true",
         SQS_VISIBILITY_SECONDS: "300",
+        // Fargate x86 us-east-1: 4 vCPU × 0.04048 + 8 GB × 0.004445 ≈ 0.1975 USD/h.
+        WORKER_COST_PER_HOUR_USD: "0.1975",
         AI_PROVIDER: "openai",
         OPENAI_TRANSCRIBE_MODEL: "whisper-1",
         OPENAI_ANALYSIS_MODEL: "gpt-4o-mini",
@@ -138,6 +147,8 @@ export class WorkerStack extends Stack {
       vpc: props.vpc,
       description: "Worker de video - no acepta conexiones entrantes",
     });
+    this.taskDefinition = taskDefinition;
+    this.securityGroup = workerSecurityGroup;
     new ec2.CfnSecurityGroupIngress(this, "DbFromWorker", {
       groupId: props.databaseSecurityGroup.securityGroupId,
       sourceSecurityGroupId: workerSecurityGroup.securityGroupId,
@@ -170,20 +181,52 @@ export class WorkerStack extends Stack {
         inflight: this.queue.metricApproximateNumberOfMessagesNotVisible({ period: Duration.minutes(1), statistic: "Maximum" }),
       },
     });
-    service
-      .autoScaleTaskCount({ minCapacity: 0, maxCapacity: 3 })
-      .scaleOnMetric("QueueBacklog", {
-        metric: backlog,
-        adjustmentType: appscaling.AdjustmentType.EXACT_CAPACITY,
-        scalingSteps: [
-          { upper: 0, change: 0 },
-          { lower: 1, change: 1 },
-          { lower: 4, change: 2 },
-          { lower: 8, change: 3 },
-        ],
-        cooldown: Duration.minutes(1),
-        evaluationPeriods: 1,
-      });
+    const scalingTarget = new appscaling.ScalableTarget(this, "WorkerScaling", {
+      serviceNamespace: appscaling.ServiceNamespace.ECS,
+      scalableDimension: "ecs:service:DesiredCount",
+      resourceId: `service/${cluster.clusterName}/${service.serviceName}`,
+      minCapacity: 0,
+      maxCapacity: 3,
+    });
+    scalingTarget.node.addDependency(service);
+
+    // Encender rápido: con 1 pendiente (un trabajo o el aviso que envía la API al empezar una
+    // subida) se arranca en ~1 min. 1–3 pendientes → 1 worker; 4–7 → 2; 8+ → 3.
+    const scaleOut = new appscaling.StepScalingAction(this, "ScaleOutAction", {
+      scalingTarget,
+      adjustmentType: appscaling.AdjustmentType.EXACT_CAPACITY,
+      cooldown: Duration.minutes(1),
+    });
+    scaleOut.addAdjustment({ lowerBound: 0, upperBound: 3, adjustment: 1 });
+    scaleOut.addAdjustment({ lowerBound: 3, upperBound: 7, adjustment: 2 });
+    scaleOut.addAdjustment({ lowerBound: 7, adjustment: 3 });
+    new cloudwatch.Alarm(this, "BacklogAlarm", {
+      alarmName: `${prefix}-worker-backlog`,
+      alarmDescription: "Hay trabajos de video pendientes: encender workers.",
+      metric: backlog,
+      threshold: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      evaluationPeriods: 1,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    }).addAlarmAction({ bind: () => ({ alarmActionArn: scaleOut.scalingPolicyArn }) });
+
+    // Apagar sin prisa: solo tras 10 min seguidos sin nada que hacer, para que el siguiente video
+    // empiece al instante (cuesta ~0.03 USD cada vez que queda encendido esperando).
+    const scaleIn = new appscaling.StepScalingAction(this, "ScaleInAction", {
+      scalingTarget,
+      adjustmentType: appscaling.AdjustmentType.EXACT_CAPACITY,
+      cooldown: Duration.minutes(5),
+    });
+    scaleIn.addAdjustment({ upperBound: 0, adjustment: 0 });
+    new cloudwatch.Alarm(this, "IdleAlarm", {
+      alarmName: `${prefix}-worker-idle`,
+      alarmDescription: "El worker lleva 10 min sin trabajos: se apaga.",
+      metric: backlog,
+      threshold: 0,
+      comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_OR_EQUAL_TO_THRESHOLD,
+      evaluationPeriods: 10,
+      treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+    }).addAlarmAction({ bind: () => ({ alarmActionArn: scaleIn.scalingPolicyArn }) });
 
     new CfnOutput(this, "QueueUrl", { value: this.queue.queueUrl });
     new CfnOutput(this, "OpenAiSecretName", { value: openAiKey.secretName });

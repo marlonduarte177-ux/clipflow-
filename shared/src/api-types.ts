@@ -131,6 +131,14 @@ export interface JobQueueMessage {
   jobId: string;
 }
 
+/**
+ * Aviso de "enciende el procesador": se envía cuando empieza una subida para que el worker
+ * arranque mientras el video sube. No es un trabajo.
+ */
+export interface WarmupQueueMessage {
+  warmup: true;
+}
+
 export interface ApiErrorResponse {
   error: {
     code: string;

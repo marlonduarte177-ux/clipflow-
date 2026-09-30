@@ -1,9 +1,10 @@
 import type { FastifyInstance, FastifyReply, preHandlerHookHandler } from "fastify";
-import { and, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import type { JobDto, JobListResponse } from "@clipflow/shared";
 import { requestCancel, resetJobForRetry, schema, type Database, type Job } from "@clipflow/shared/db";
 import { sendError } from "./http.js";
+import type { WorkerLauncher } from "./launcher.js";
 import type { JobQueue } from "./queue.js";
 
 const { processingJobs } = schema;
@@ -47,8 +48,20 @@ export async function enqueue(queue: JobQueue, job: Job, log: FastifyInstance["l
   }
 }
 
-export function jobRoutes(deps: { db: Database; auth: preHandlerHookHandler; queue: JobQueue }) {
-  const { db, queue } = deps;
+/**
+ * Enciende procesadores según los trabajos en cola (1 por cada trabajo, hasta el máximo).
+ * No bloquea la respuesta: si falla, el escalado por métricas de la cola hace de respaldo.
+ */
+export function wakeWorkers(db: Database, launcher: WorkerLauncher, log: FastifyInstance["log"]): void {
+  void (async () => {
+    const [row] = await db.select({ n: count() }).from(processingJobs).where(eq(processingJobs.status, "queued"));
+    const result = await launcher.ensureRunning(Math.max(1, row?.n ?? 0));
+    if (result.started > 0) log.info(result, "procesadores encendidos");
+  })().catch((err: Error) => log.warn({ reason: err.name }, "no se pudo encender un procesador"));
+}
+
+export function jobRoutes(deps: { db: Database; auth: preHandlerHookHandler; queue: JobQueue; launcher: WorkerLauncher }) {
+  const { db, queue, launcher } = deps;
   const notFound = (reply: FastifyReply) => sendError(reply, 404, "not_found", "Trabajo no encontrado.");
 
   async function findOwnJob(id: string, userId: string) {
@@ -114,6 +127,7 @@ export function jobRoutes(deps: { db: Database; auth: preHandlerHookHandler; que
       if (!(await enqueue(queue, job, request.log))) {
         return sendError(reply, 503, "queue_unavailable", "No se pudo enviar a procesar. Inténtalo en unos minutos.");
       }
+      wakeWorkers(db, launcher, request.log);
       return toJobDto(job);
     });
   };
