@@ -58,7 +58,10 @@ export interface AIAnalysisProvider {
   /** Lee la transcripción y marca los mejores momentos por su contenido. */
   analyze(segments: TranscriptSegment[], durationSeconds: number): Promise<{ highlights: ContentHighlight[]; usage: AIUsage }>;
   /** Analiza fotogramas (opcional: solo proveedores con visión). */
-  analyzeFrames?(sheets: FrameSheet[]): Promise<{ frames: FrameScore[]; usage: AIUsage }>;
+  analyzeFrames?(
+    sheets: FrameSheet[],
+    options?: { deadline?: number },
+  ): Promise<{ frames: FrameScore[]; usage: AIUsage; skippedSheets?: number }>;
   /** Propone títulos para los momentos elegidos. */
   generateClipSuggestions(
     segments: TranscriptSegment[],

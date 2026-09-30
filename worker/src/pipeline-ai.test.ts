@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import type { AIAnalysisProvider, AudioChunk, FrameSheet, TranscriptSegment } from "@clipflow/shared";
 import { claimJob, schema, type DbHandle } from "@clipflow/shared/db";
 import { createTestDb } from "@clipflow/shared/db/testing";
+import { AIProviderError } from "./ai/openai.js";
 import { processAnalyzeJob } from "./pipeline.js";
 import { makeDeps, makeSampleVideo, seedVideoJob } from "./test-helpers.js";
 
@@ -43,7 +44,14 @@ class FakeAI implements AIAnalysisProvider {
     private readonly segments: TranscriptSegment[] = SEGMENTS,
   ) {}
   async transcribe(chunks: AudioChunk[]) {
-    if (this.fail) throw new Error("OpenAI caído");
+    if (this.fail) {
+      throw new AIProviderError(
+        "Tu cuenta de OpenAI no tiene saldo o llegó a su límite de gasto (revisa Billing y Limits en platform.openai.com)",
+        false,
+        429,
+        "insufficient_quota",
+      );
+    }
     this.receivedChunks = chunks;
     return { segments: this.segments, language: "spanish", usage: { audioSeconds: 40, estimatedCostUsd: 0.004 } };
   }
@@ -64,13 +72,20 @@ class FakeAI implements AIAnalysisProvider {
 class FakeVisionAI implements AIAnalysisProvider {
   readonly name = "fake-vision";
   sheets: FrameSheet[] = [];
+  /** Orden de las llamadas: las imágenes no deben competir con el análisis de texto. */
+  calls: string[] = [];
   async transcribe() {
+    this.calls.push("transcribe:start");
+    await new Promise((r) => setTimeout(r, 300));
+    this.calls.push("transcribe:end");
     return { segments: [], language: null, usage: { audioSeconds: 40, estimatedCostUsd: 0.004 } };
   }
   async analyze() {
     return { highlights: [], usage: {} };
   }
-  async analyzeFrames(sheets: FrameSheet[]) {
+  async analyzeFrames(sheets: FrameSheet[], options?: { deadline?: number }) {
+    this.calls.push("frames");
+    expect(options?.deadline).toBeGreaterThan(Date.now());
     this.sheets = sheets;
     const frames = sheets.flatMap((s) =>
       s.frameTimes.map((t) => ({ timeSeconds: t, score: t > 4 && t < 11 ? 0.95 : 0.05, label: t > 4 && t < 11 ? "Eliminación doble" : "Corriendo" })),
@@ -96,6 +111,9 @@ describe("análisis de imágenes con IA (experimental)", () => {
     expect(result).toMatchObject({ vision: "used", ai: "no_speech" });
     expect(result.visionFrames).toBe(13); // 40 s / 3 s
     expect(ai.sheets).toHaveLength(2); // 9 + 4 fotogramas: 2 imágenes
+    // Las imágenes se envían recién cuando terminó la transcripción/análisis de texto.
+    expect(ai.calls).toEqual(["transcribe:start", "transcribe:end", "frames"]);
+    expect(result.visionReason).toBeUndefined();
 
     const clipRows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
     const best = [...clipRows].sort((a, b) => b.score! - a.score!)[0]!;
@@ -167,7 +185,10 @@ describe("procesamiento con IA", () => {
     const deps = { ...makeDeps(db, root, path.join(root, "work")), ai: new FakeAI(true) };
     const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
     expect(result.ai).toBe("unavailable");
-    expect(result.aiReason).toMatch(/solo por audio y escenas/);
+    // El motivo real llega a la web (sin detalles internos).
+    expect(result.aiReason).toBe(
+      "falló la transcripción: Tu cuenta de OpenAI no tiene saldo o llegó a su límite de gasto (revisa Billing y Limits en platform.openai.com)",
+    );
     expect(result.clipCount).toBeGreaterThan(0);
     const subs = await db.select().from(schema.subtitles).where(eq(schema.subtitles.videoId, job.videoId));
     expect(subs).toEqual([]);

@@ -34,6 +34,7 @@ import {
   type FfmpegTools,
 } from "./ffmpeg.js";
 import type { WorkerStorage } from "./storage.js";
+import { AIProviderError } from "./ai/openai.js";
 
 const { clips, subtitles, usage, videos } = schema;
 
@@ -77,7 +78,13 @@ export interface PipelineDeps {
   /** Encuadre que sigue caras (a quien habla, o al grupo). */
   faceTracking?: boolean;
   /** Análisis de imágenes con IA (experimental, tiene costo por imagen). */
-  vision?: { enabled: boolean; intervalSeconds: number; maxFrames: number };
+  vision?: {
+    enabled: boolean;
+    intervalSeconds: number;
+    maxFrames: number;
+    /** Segundos máximos para empezar a enviar hojas (por defecto 180). */
+    budgetSeconds?: number;
+  };
   log: { info: (obj: object, msg: string) => void; warn: (obj: object, msg: string) => void };
 }
 
@@ -172,13 +179,17 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       parts[part] = Math.min(1, Math.max(0, fraction));
       return progress("analyzing", parts.signals * 0.5 + parts.ai * 0.25 + parts.vision * 0.25).catch(() => undefined);
     };
+    //    La IA de imágenes prepara sus hojas en paralelo, pero no envía nada a OpenAI hasta que
+    //    termina el análisis de texto: comparten el límite por minuto de la cuenta y el análisis de
+    //    texto (el que elige los momentos) tiene prioridad.
+    const aiPromise = runAI(deps, info, input, dir, controller.signal, async (f) => void (await report("ai")(f)));
     const [raw, ai, vision] = await Promise.all([
       analyzeSignals(deps.tools, input, info, dir, {
         signal: controller.signal,
         onProgress: (sec) => void report("signals")(sec / info.durationSeconds),
       }),
-      runAI(deps, info, input, dir, controller.signal, async (f) => void (await report("ai")(f))),
-      runVision(deps, info, input, dir, contentBox, controller.signal, async (f) => void (await report("vision")(f))),
+      aiPromise,
+      runVision(deps, info, input, dir, contentBox, controller.signal, async (f) => void (await report("vision")(f)), aiPromise),
     ]);
     check();
     const signals: SignalSeries = {
@@ -404,6 +415,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       ...(ai.reason ? { aiReason: ai.reason } : {}),
       language: ai.language,
       vision: vision.status,
+      ...(vision.reason ? { visionReason: vision.reason } : {}),
       visionFrames: vision.frames.length,
       costs: {
         transcriptionUsd: usd(ai.transcribeCostUsd),
@@ -456,12 +468,14 @@ async function runAI(
   const empty = { segments: [], language: null, usage: {}, transcribeCostUsd: 0 };
   if (!deps.ai) return { ...empty, status: "disabled", reason: deps.aiDisabledReason ?? "IA no configurada" };
   if (!info.hasAudio) return { ...empty, status: "no_audio", reason: "El video no tiene audio" };
+  let step = "la preparación del audio";
   try {
     const chunks = await extractAudioChunks(deps.tools, input, dir, {
       maxSeconds: Math.min(info.durationSeconds, deps.aiMaxAudioMinutes * 60),
       signal,
     });
     await onProgress(0.2);
+    step = "la transcripción";
     const transcript = await deps.ai.transcribe(chunks);
     await onProgress(0.7);
 
@@ -479,6 +493,7 @@ async function runAI(
         transcribeCostUsd: transcript.usage.estimatedCostUsd ?? 0,
       };
     }
+    step = "el análisis de momentos";
     const analysis = await deps.ai.analyze(transcript.segments, info.durationSeconds);
     const usage: AIUsage = { ...transcript.usage };
     const transcribeCostUsd = transcript.usage.estimatedCostUsd ?? 0;
@@ -493,13 +508,17 @@ async function runAI(
     };
   } catch (err) {
     if (signal.aborted) throw err;
-    deps.log.warn({ error: (err as Error).message }, "IA no disponible; se continúa solo con FFmpeg");
-    return { ...empty, status: "unavailable", reason: "El análisis con IA falló; los clips se eligieron solo por audio y escenas." };
+    const e = err as AIProviderError;
+    deps.log.warn({ step, error: e.message, status: e.status, code: e.code }, "IA no disponible; se continúa solo con FFmpeg");
+    // Solo se muestran mensajes propios (los de OpenAIProvider no incluyen contenido del usuario).
+    const detail = err instanceof AIProviderError ? e.message : "error inesperado";
+    return { ...empty, status: "unavailable", reason: `falló ${step}: ${detail}` };
   }
 }
 
 interface VisionOutcome {
   status: "used" | "disabled" | "unavailable";
+  reason?: string;
   frames: FrameScore[];
   intervalSeconds: number;
   usage: AIUsage;
@@ -514,6 +533,8 @@ async function runVision(
   box: import("./ffmpeg.js").ContentBox | null,
   signal: AbortSignal,
   onProgress: (fraction: number) => Promise<void>,
+  /** Se espera a que termine (el análisis de texto) antes de enviar imágenes a OpenAI. */
+  after?: Promise<unknown>,
 ): Promise<VisionOutcome> {
   const config = deps.vision;
   const off: VisionOutcome = { status: "disabled", frames: [], intervalSeconds: 0, usage: {} };
@@ -528,12 +549,26 @@ async function runVision(
       onProgress: (s) => void onProgress((s / info.durationSeconds) * 0.3).catch(() => undefined),
     });
     await onProgress(0.3);
-    const result = await deps.ai.analyzeFrames(sheets);
-    return { status: "used", frames: result.frames, intervalSeconds, usage: result.usage };
+    await after?.catch(() => undefined);
+    // Tiempo máximo para empezar hojas nuevas: en videos largos el límite por minuto de la cuenta
+    // puede hacerlo muy lento; lo que no alcance se omite y el video no espera de más.
+    const deadline = Date.now() + (config.budgetSeconds ?? 180) * 1000;
+    const result = await deps.ai.analyzeFrames(sheets, { deadline });
+    const skipped = result.skippedSheets ?? 0;
+    return {
+      status: "used",
+      frames: result.frames,
+      intervalSeconds,
+      usage: result.usage,
+      ...(skipped > 0
+        ? { reason: `incompleto: se analizaron ${sheets.length - skipped} de ${sheets.length} grupos de imágenes (límite de tiempo)` }
+        : {}),
+    };
   } catch (err) {
     if (signal.aborted) throw err;
-    deps.log.warn({ error: (err as Error).message }, "análisis de imágenes no disponible");
-    return { ...off, status: "unavailable" };
+    const e = err as AIProviderError;
+    deps.log.warn({ error: e.message, status: e.status, code: e.code }, "análisis de imágenes no disponible");
+    return { ...off, status: "unavailable", reason: err instanceof AIProviderError ? e.message : "error inesperado" };
   }
 }
 

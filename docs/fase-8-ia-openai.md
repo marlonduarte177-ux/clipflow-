@@ -75,6 +75,43 @@ eligen por acción, volumen y movimiento. La transcripción se paga igual (0.006
 - **Si la IA falla o no hay clave, el video se procesa igual** con FFmpeg. La web lo dice claramente:
   "Sin análisis de IA: …".
 
+### Errores de OpenAI y límite por minuto
+
+**Detectado en una prueba real (30/09/2026):** en un video de 30 min la web decía "El análisis con IA
+falló", sin el motivo, y los clips se eligieron solo por audio y escenas.
+
+- **Causa probable:** el análisis de imágenes (experimental) mandaba 3 hojas a la vez.
+  - En gpt-4o-mini cada hoja en `detail: high` cuenta como ~37 mil tokens: 2,833 + 5,667 por cada
+    bloque de 512 px, y son 6 bloques.
+  - 30 min son ~67 hojas: ~2.5 millones de tokens (~0.37 USD).
+  - Eso llena el límite de tokens por minuto de la cuenta (en el nivel 1 de OpenAI, 200 mil por
+    minuto para gpt-4o-mini).
+  - Justo a la vez salía el análisis de texto, que elige los momentos. OpenAI lo rechazaba con 429 y,
+    tras 4 intentos en ~30 s, el análisis se daba por perdido.
+- **Otra posibilidad con el mismo síntoma:** que la cuenta se quedara sin saldo o llegara a su límite
+  de gasto.
+
+Cambios:
+- **El motivo real se ve en la web**, por ejemplo:
+  - "falló la transcripción: Tu cuenta de OpenAI no tiene saldo o llegó a su límite de gasto";
+  - "falló el análisis de momentos: OpenAI limitó las solicitudes por minuto de tu cuenta".
+  - Solo se usan mensajes propios y el código de error de OpenAI, nunca el texto de su respuesta.
+- **Sin saldo (`insufficient_quota`) no se reintenta:** no se va a arreglar solo.
+- **Límite por minuto (429):**
+  - hasta 8 intentos;
+  - cada espera es lo que indica OpenAI (`retry-after-ms`, `retry-after`,
+    `x-ratelimit-reset-tokens`/`-requests`), con un máximo de 60 s por espera.
+  - Los errores de red y 5xx siguen con 4 intentos.
+- **Prioridad al análisis de texto:** las hojas de imágenes se preparan en paralelo, pero no se envían
+  a OpenAI hasta que termina la transcripción y el análisis de momentos.
+- **Las imágenes van de a 2, con tiempo máximo:** tienen 3 min (`budgetSeconds`) para empezar hojas.
+  Lo que no alcance se omite y el resultado dice "parcial: se analizaron N de M grupos". Así un video
+  largo no espera de más.
+
+**Dónde ver el detalle en AWS:** CloudWatch → Log groups → `/clipflow/staging/worker` → buscar "IA no disponible"
+o "análisis de imágenes no disponible". El registro incluye el paso, el código HTTP y el código de
+error de OpenAI.
+
 ### Costos
 
 Cada trabajo registra en `usage`:

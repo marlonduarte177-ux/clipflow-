@@ -85,6 +85,8 @@ export interface JobResult {
   language?: string | null;
   /** Análisis de imágenes con IA (experimental). */
   vision?: "used" | "disabled" | "unavailable";
+  /** Por qué no se pudo usar el análisis de imágenes, o si quedó incompleto. */
+  visionReason?: string;
   visionFrames?: number;
   /** Costo estimado de ESTE procesamiento, en USD. */
   costs?: {

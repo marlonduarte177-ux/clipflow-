@@ -262,6 +262,23 @@ export function VideoView({ videoId }: { videoId: string }) {
 }
 
 function AiStatus({ result }: { result: NonNullable<JobDto["result"]> }) {
+  // Análisis de imágenes (experimental): solo se menciona si falló o quedó incompleto.
+  const vision =
+    result.vision === "unavailable" || result.visionReason ? (
+      <p className="text-xs text-muted">
+        Análisis de imágenes {result.vision === "unavailable" ? "no disponible" : "parcial"}
+        {result.visionReason ? `: ${result.visionReason}` : ""}.
+      </p>
+    ) : null;
+  return (
+    <div className="space-y-1">
+      <TextAiStatus result={result} />
+      {vision}
+    </div>
+  );
+}
+
+function TextAiStatus({ result }: { result: NonNullable<JobDto["result"]> }) {
   if (result.ai === "used") {
     return (
       <p className="text-xs text-accent">
