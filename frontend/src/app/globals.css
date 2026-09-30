@@ -1,7 +1,9 @@
 @import "tailwindcss";
 
 /* Identidad de ClipFlow: oscuro, minimalista, acento lima. */
+/* La página ya es oscura: los navegadores no deben aplicar su propio "modo oscuro/claro". */
 :root {
+  color-scheme: dark;
   --background: #0b0d12;
   --surface: #12151c;
   --line: #232835;
