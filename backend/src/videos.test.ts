@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { DEFAULT_PRODUCT_CONFIG } from "@clipflow/shared";
+import { schema } from "@clipflow/shared/db";
 import { bearer, closeTestApp, createTestApp, type TestContext } from "./test-helpers.js";
 
 const MiB = 1024 * 1024;
@@ -191,5 +193,45 @@ describe("aislamiento: un usuario no puede tocar videos de otro", () => {
   it("exige sesión", async () => {
     expect((await app().inject({ method: "GET", url: "/videos" })).statusCode).toBe(401);
     expect((await app().inject({ method: "POST", url: "/videos", payload: {} })).statusCode).toBe(401);
+  });
+});
+
+describe("peticiones sin cuerpo y procesamiento manual", () => {
+  it("cancelar funciona aunque llegue con un Content-Type de formulario o JSON vacío", async () => {
+    for (const contentType of ["application/x-www-form-urlencoded", "application/json", "text/plain;charset=UTF-8"]) {
+      const { video } = (await startUpload("alice")).json();
+      const res = await app().inject({
+        method: "POST",
+        url: `/videos/${video.id}/abort`,
+        headers: { ...bearer("alice"), "content-type": contentType },
+      });
+      expect(res.statusCode).toBe(204);
+    }
+  });
+
+  it("rechaza cuerpos que no son JSON", async () => {
+    const res = await app().inject({
+      method: "POST",
+      url: "/projects",
+      headers: { ...bearer("alice"), "content-type": "application/x-www-form-urlencoded" },
+      payload: "name=hola",
+    });
+    expect(res.statusCode).toBe(415);
+  });
+
+  it("un video subido sin trabajo se puede procesar una vez, con una duración permitida", async () => {
+    const { video } = (await startUpload("alice")).json();
+    await ctx!.database.db.update(schema.videos).set({ status: "uploaded", s3UploadId: null }).where(eq(schema.videos.id, video.id));
+
+    const bad = await app().inject({ method: "POST", url: `/videos/${video.id}/process`, headers: bearer("alice"), payload: { clipDurationSeconds: 17 } });
+    expect(bad.statusCode).toBe(400);
+    const ok = await app().inject({ method: "POST", url: `/videos/${video.id}/process`, headers: bearer("alice"), payload: { clipDurationSeconds: 60 } });
+    expect(ok.statusCode).toBe(201);
+    expect(ok.json()).toMatchObject({ status: "queued", params: { clipDurationSeconds: 60 } });
+    expect(ctx!.queue.sent).toEqual([ok.json().id]);
+    const again = await app().inject({ method: "POST", url: `/videos/${video.id}/process`, headers: bearer("alice") });
+    expect(again.statusCode).toBe(409);
+    const other = await app().inject({ method: "POST", url: `/videos/${video.id}/process`, headers: bearer("bob") });
+    expect(other.statusCode).toBe(404);
   });
 });

@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   CompleteUploadSchema,
   CreateVideoSchema,
+  ProcessVideoSchema,
   UploadPartsRequestSchema,
   planUploadParts,
   resolveVideoMimeType,
@@ -270,6 +271,35 @@ export function videoRoutes(deps: VideoRouteDeps) {
       });
       if (created) await enqueue(queue, job, request.log);
       return { ...toVideoDto(updated!), job: toJobDto(job) };
+    });
+
+    // Iniciar el procesamiento de un video ya subido que no tiene trabajo
+    // (p. ej. videos subidos antes de existir el procesador), eligiendo la duración de los clips.
+    app.post("/videos/:id/process", async (request, reply) => {
+      const params = IdParams.safeParse(request.params);
+      if (!params.success) return notFound(reply);
+      const input = ProcessVideoSchema.safeParse(request.body ?? {});
+      if (!input.success) return sendValidationError(reply, input.error);
+      const userId = request.user!.id;
+      const row = await findOwnVideo(params.data.id, userId);
+      if (!row) return notFound(reply);
+      if (row.status !== "uploaded" && row.status !== "ready") {
+        return sendError(reply, 409, "not_processable", "Este video no se puede procesar.");
+      }
+      const duration = input.data.clipDurationSeconds ?? product.defaultClipDurationSeconds;
+      if (!product.clipDurationsSeconds.includes(duration)) {
+        return sendError(reply, 400, "invalid_duration", `Duraciones permitidas: ${product.clipDurationsSeconds.join(", ")} s.`);
+      }
+      const { job, created } = await createJob(db, {
+        userId,
+        videoId: row.id,
+        type: "analyze_video",
+        idempotencyKey: `analyze:${row.id}`,
+        params: { clipDurationSeconds: duration },
+      });
+      if (!created) return sendError(reply, 409, "already_processing", "Este video ya tiene un procesamiento. Usa Reintentar si falló.");
+      await enqueue(queue, job, request.log);
+      return reply.code(201).send(toJobDto(job));
     });
 
     app.post("/videos/:id/abort", async (request, reply) => {
