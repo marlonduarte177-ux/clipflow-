@@ -121,6 +121,8 @@ export class WorkerStack extends Stack {
         AI_VISION_ENABLED: props.stage === "production" ? "false" : "true",
         AI_VISION_INTERVAL_SECONDS: "3",
         AI_VISION_MAX_FRAMES: "600",
+        // Encuadre que sigue a quien habla (detector local YuNet, sin costo por imagen).
+        FACE_TRACKING_ENABLED: "true",
       },
       secrets: {
         // ECS lee el secreto al arrancar cada worker (como el worker escala a 0,

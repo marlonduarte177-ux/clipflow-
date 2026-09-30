@@ -39,7 +39,10 @@ const stop = (signal: string) => {
 process.on("SIGTERM", () => stop("SIGTERM"));
 process.on("SIGINT", () => stop("SIGINT"));
 
-log.info({ workerId, ai: ai ? ai.name : "desactivada", vision: config.AI_VISION_ENABLED }, "worker iniciado");
+log.info(
+  { workerId, ai: ai ? ai.name : "desactivada", vision: config.AI_VISION_ENABLED, faces: config.FACE_TRACKING_ENABLED },
+  "worker iniciado",
+);
 try {
   await runConsumer({
     sqs: new SQSClient({ region: config.AWS_REGION }),
@@ -58,6 +61,7 @@ try {
       ai,
       aiDisabledReason,
       aiMaxAudioMinutes: config.OPENAI_MAX_AUDIO_MINUTES,
+      faceTracking: config.FACE_TRACKING_ENABLED,
       vision: {
         enabled: config.AI_VISION_ENABLED,
         intervalSeconds: config.AI_VISION_INTERVAL_SECONDS,

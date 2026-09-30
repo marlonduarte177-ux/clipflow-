@@ -24,6 +24,7 @@ import {
   analyzeSignals,
   buildFrameSheets,
   chooseVerticalCrop,
+  cropAt,
   detectContentBox,
   extractAudioChunks,
   FfmpegError,
@@ -73,6 +74,8 @@ export interface PipelineDeps {
   aiMaxAudioMinutes: number;
   /** Clips que se generan a la vez (por defecto 2). */
   renderConcurrency?: number;
+  /** Encuadre que sigue caras (a quien habla, o al grupo). */
+  faceTracking?: boolean;
   /** Análisis de imágenes con IA (experimental, tiene costo por imagen). */
   vision?: { enabled: boolean; intervalSeconds: number; maxFrames: number };
   log: { info: (obj: object, msg: string) => void; warn: (obj: object, msg: string) => void };
@@ -247,8 +250,17 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       const clipFile = path.join(dir, `clip-${index}.mp4`);
       const thumbFile = path.join(dir, `thumb-${index}.jpg`);
       const segment = { startSeconds: moment.startSeconds, durationSeconds: duration };
-      // Encuadre por clip: sin franjas negras y centrado donde está la acción.
-      const crop = await chooseVerticalCrop(deps.tools, input, info, contentBox, segment, controller.signal);
+      // Encuadre por clip: sin franjas negras; sigue a quien habla (o al grupo) y, sin caras,
+      // se centra donde está la acción. La voz de la transcripción dice cuándo cuenta la boca.
+      const start = moment.startSeconds;
+      const speaking = ai.segments.length
+        ? (t: number) => ai.segments.some((s) => s.startSeconds <= start + t && start + t < s.endSeconds)
+        : undefined;
+      const crop = await chooseVerticalCrop(deps.tools, input, info, contentBox, segment, controller.signal, {
+        faces: deps.faceTracking ?? false,
+        speaking,
+        onWarning: (message, err) => deps.log.warn({ jobId: job.id, clip: index, error: (err as Error).message }, message),
+      });
       await renderVerticalClip(deps.tools, input, clipFile, segment, {
         signal: controller.signal,
         crop,
@@ -257,7 +269,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
           void reportClips();
         },
       });
-      await renderThumbnail(deps.tools, input, thumbFile, moment.startSeconds + duration / 2, controller.signal, crop);
+      await renderThumbnail(deps.tools, input, thumbFile, moment.startSeconds + duration / 2, controller.signal, cropAt(crop, duration / 2));
       check();
       const key = `clips/${job.userId}/${job.id}/${index}.mp4`;
       const thumbKey = `thumbnails/${job.userId}/${job.id}/${index}.jpg`;
