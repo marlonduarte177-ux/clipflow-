@@ -124,7 +124,7 @@ describe("encuadre vertical", () => {
     return [...out.matchAll(/crop=(\d+):(\d+)/g)].pop()?.slice(1).map(Number);
   }
 
-  it("quita las franjas negras y la marca de agua: el clip ocupa toda la pantalla", async () => {
+  it("video vertical con franjas: se acerca un poco sin recortar a 9:16 y la marca de agua desaparece", async () => {
     const db = h!.db;
     const letterboxed = path.join(root, "letterbox.mp4");
     makeLetterboxedVideo(letterboxed);
@@ -134,7 +134,12 @@ describe("encuadre vertical", () => {
     const [clip] = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
     const file = path.join(root, clip!.s3Key!);
     expect(probeSize(file)).toBe("1080,1920");
-    expect(visibleArea(file)).toEqual([1080, 1920]);
+    // Imagen de 720x405 dentro de 720x1280: sin acercar ocuparía 1080x607; con el zoom de 1.25,
+    // ~1080x750. La marca de agua de la franja inferior ya no aparece (el área no llega hasta abajo).
+    const [width, height] = visibleArea(file)!;
+    expect(width).toBe(1080);
+    expect(height).toBeGreaterThan(700);
+    expect(height).toBeLessThan(800);
   });
 });
 

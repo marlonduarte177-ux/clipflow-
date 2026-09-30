@@ -99,17 +99,29 @@ export async function probe(tools: FfmpegTools, file: string): Promise<ProbeResu
   const out = await run(tools.ffprobePath, ["-v", "error", "-print_format", "json", "-show_format", "-show_streams", file]);
   const data = JSON.parse(out) as {
     format?: { duration?: string; format_name?: string };
-    streams?: { codec_type?: string; codec_name?: string; width?: number; height?: number; duration?: string }[];
+    streams?: {
+      codec_type?: string;
+      codec_name?: string;
+      width?: number;
+      height?: number;
+      duration?: string;
+      tags?: { rotate?: string };
+      side_data_list?: { rotation?: number }[];
+    }[];
   };
   const video = data.streams?.find((s) => s.codec_type === "video" && s.width && s.height);
   const duration = Number(data.format?.duration ?? video?.duration);
   if (!video || !Number.isFinite(duration) || duration <= 0) {
     throw new FfmpegError("El archivo no contiene un video válido", "");
   }
+  // Videos de celular grabados en vertical suelen guardarse "acostados" con una marca de giro.
+  // FFmpeg los gira al leerlos, así que las medidas reales son las del video ya girado.
+  const rotation = Number(video.side_data_list?.find((d) => d.rotation !== undefined)?.rotation ?? video.tags?.rotate ?? 0);
+  const turned = Math.abs(Math.round(rotation)) % 180 === 90;
   return {
     durationSeconds: duration,
-    width: video.width!,
-    height: video.height!,
+    width: turned ? video.height! : video.width!,
+    height: turned ? video.width! : video.height!,
     hasAudio: data.streams?.some((s) => s.codec_type === "audio") ?? false,
     videoCodec: video.codec_name ?? "desconocido",
     raw: { format: data.format, streams: data.streams },
@@ -306,15 +318,26 @@ export interface VerticalCrop {
   height: number;
   x: number;
   y: number;
+  /** true: se muestra completo (sin recortar nada) y lo que falte se rellena de negro. */
+  fit?: boolean;
+  /** Filas con imagen real dentro del recorte; lo de arriba y abajo se pinta de negro (quita marcas de agua). */
+  content?: { y: number; height: number };
 }
 
 const even = (n: number) => Math.max(2, Math.floor(n / 2) * 2);
 
 /**
- * Encuadre vertical 9:16 de un clip:
- * 1. parte de la zona con imagen real (sin franjas negras);
- * 2. si la imagen es más ancha que 9:16, busca la franja vertical con más acción
- *    (movimiento entre fotogramas + detalle), con una leve preferencia por el centro.
+ * Cuánto se acerca un video vertical que trae una imagen horizontal con franjas negras.
+ * 1.25 = la imagen se ve un 25 % más grande y se pierde un 10 % por cada lado.
+ */
+export const VERTICAL_BAND_ZOOM = 1.25;
+
+/**
+ * Encuadre vertical 9:16 de un clip. Solo se recorta cuando hace falta:
+ * - Video horizontal: se quitan las franjas negras y se elige la franja 9:16 con más acción
+ *   (movimiento + detalle), con una leve preferencia por el centro.
+ * - Video vertical: NO se recorta. Si trae franjas laterales se quitan; si trae una imagen
+ *   horizontal con franjas arriba/abajo, solo se acerca un poco (VERTICAL_BAND_ZOOM).
  * Devuelve el recorte exacto sobre el cuadro original.
  */
 export async function chooseVerticalCrop(
@@ -325,14 +348,45 @@ export async function chooseVerticalCrop(
   segment: { startSeconds: number; durationSeconds: number },
   signal?: AbortSignal,
 ): Promise<VerticalCrop> {
-  const area = box ?? { x: 0, y: 0, width: info.width, height: info.height };
+  const frame = { x: 0, y: 0, width: info.width, height: info.height };
+
+  if (info.height > info.width) {
+    // Vertical sin franjas, o con una imagen también vertical dentro: se muestra entera.
+    if (!box || box.height >= box.width) return { ...(box ?? frame), fit: true };
+    // Imagen horizontal dentro de un video vertical: acercar un poco, sin cortar de más.
+    const zoom = Math.min(VERTICAL_BAND_ZOOM, info.height / box.height);
+    if (zoom <= 1.02) return { ...frame, fit: true };
+    const width = even(Math.min(info.width, box.width / zoom));
+    const height = even(Math.min(info.height, (width * info.height) / info.width));
+    const centerY = box.y + box.height / 2;
+    const y = even(Math.min(info.height - height, Math.max(0, centerY - height / 2)));
+    const offset = await bestWindow(tools, input, box, width, segment, signal);
+    const top = Math.max(0, box.y - y);
+    const content = { y: top, height: Math.min(height, box.y + box.height - y) - top };
+    return { width, height, x: box.x + offset, y, fit: true, content };
+  }
+
+  const area = box ?? frame;
   const targetWidth = even((area.height * 9) / 16);
   if (targetWidth >= area.width) {
     // Imagen más alta que 9:16: se recorta arriba/abajo, al centro.
     const targetHeight = even((area.width * 16) / 9);
     return { width: even(area.width), height: targetHeight, x: area.x, y: area.y + even((area.height - targetHeight) / 2) };
   }
+  const offset = await bestWindow(tools, input, area, targetWidth, segment, signal);
+  return { width: targetWidth, height: even(area.height), x: area.x + offset, y: area.y };
+}
 
+/** Desplazamiento horizontal (dentro de `area`) de la ventana de `targetWidth` con más acción. */
+async function bestWindow(
+  tools: FfmpegTools,
+  input: string,
+  area: ContentBox,
+  targetWidth: number,
+  segment: { startSeconds: number; durationSeconds: number },
+  signal?: AbortSignal,
+): Promise<number> {
+  if (targetWidth >= area.width) return 0;
   const w = 160;
   const h = Math.max(2, Math.round((w * area.height) / area.width / 2) * 2);
   const frames: Buffer[] = [];
@@ -377,14 +431,21 @@ export async function chooseVerticalCrop(
       best = start;
     }
   }
-  const offset = Math.min(area.width - targetWidth, even((best / w) * area.width));
-  return { width: targetWidth, height: even(area.height), x: area.x + offset, y: area.y };
+  return Math.min(area.width - targetWidth, even((best / w) * area.width));
 }
 
-/** Filtros de FFmpeg: recorte elegido → 1080x1920. */
+/** Filtros de FFmpeg: recorte elegido → 1080x1920 (rellenando o mostrando completo). */
 export function verticalFilter(crop: VerticalCrop | null): string {
-  const cut = crop ? `crop=${crop.width}:${crop.height}:${crop.x}:${crop.y},` : "";
-  return `[0:v:0]${cut}scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[v]`;
+  let cut = crop ? `crop=${crop.width}:${crop.height}:${crop.x}:${crop.y},` : "";
+  if (crop?.content) {
+    const { y, height } = crop.content;
+    if (y > 0) cut += `drawbox=x=0:y=0:w=iw:h=${y}:color=black:t=fill,`;
+    if (y + height < crop.height) cut += `drawbox=x=0:y=${y + height}:w=iw:h=${crop.height - y - height}:color=black:t=fill,`;
+  }
+  const size = crop?.fit
+    ? "scale=1080:1920:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black"
+    : "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920";
+  return `[0:v:0]${cut}${size},setsar=1[v]`;
 }
 
 /** Recorta un segmento y lo convierte a vertical 9:16 (1080x1920), listo para redes. */
