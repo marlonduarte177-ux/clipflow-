@@ -36,6 +36,16 @@ export function ProjectsView() {
     };
   }, []);
 
+  async function onDiscard(video: VideoDto) {
+    if (!window.confirm(`¿Descartar la subida sin terminar de "${video.originalFilename}"?`)) return;
+    try {
+      await apiFetch(`/videos/${video.id}/abort`, { method: "POST" });
+      show(await fetchAll());
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   async function onCreate(event: FormEvent) {
     event.preventDefault();
     setCreating(true);
@@ -103,6 +113,11 @@ export function ProjectsView() {
                         {formatBytes(video.sizeBytes)} · {formatDuration(video.durationSeconds)}
                       </span>
                       <VideoStatusBadge status={video.status} />
+                      {video.status === "pending_upload" ? (
+                        <button onClick={() => onDiscard(video)} className="text-xs text-muted underline hover:text-foreground">
+                          Descartar
+                        </button>
+                      ) : null}
                     </li>
                   ))}
                 </ul>
