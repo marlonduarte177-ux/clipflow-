@@ -35,8 +35,9 @@ flowchart LR
 
 ### Análisis de imágenes (experimental)
 
-Activado en **staging** para medir su costo real; en producción está apagado por defecto
-(`AI_VISION_ENABLED`).
+**Apagado** en todos los ambientes (`AI_VISION_ENABLED=false`) desde el 30/09/2026. Se probó en
+staging: en videos largos cuesta bastante más que la transcripción (~0.37 USD por cada 30 min) y
+satura el límite por minuto de OpenAI. El código sigue disponible: con `"true"` se vuelve a activar.
 
 1. Toma **1 fotograma cada 3 s**, sin franjas negras. En videos largos se espacian más: máximo
    600 fotogramas por video.

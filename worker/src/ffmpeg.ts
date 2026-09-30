@@ -335,7 +335,16 @@ export interface VerticalCrop {
   content?: { y: number; height: number };
   /** Posición horizontal que cambia en el tiempo (sigue caras). `x` es la del medio del clip. */
   path?: PathPiece[];
+  /** "blur": el recorte se muestra entero y lo que falte del 9:16 se rellena con el mismo video difuminado. */
+  fill?: "blur";
 }
+
+/**
+ * Forma (ancho/alto) del recorte en videos horizontales. 9/16 sería pantalla completa (en un 16:9
+ * solo queda ~31 % del ancho: se acerca mucho); 1 = cuadrado (~56 % del ancho), y arriba y abajo
+ * se rellena con el mismo video difuminado.
+ */
+export const HORIZONTAL_WINDOW_ASPECT = 1;
 
 /** Opciones del encuadre de cada clip. */
 export interface CropOptions {
@@ -364,8 +373,8 @@ export const VERTICAL_BAND_ZOOM = 1.25;
 
 /**
  * Encuadre vertical 9:16 de un clip. Solo se recorta cuando hace falta:
- * - Video horizontal: se quitan las franjas negras y se elige la franja 9:16 con más acción
- *   (movimiento + detalle), con una leve preferencia por el centro.
+ * - Video horizontal: se quitan las franjas negras y se recorta un cuadrado (HORIZONTAL_WINDOW_ASPECT)
+ *   donde está la acción o quien habla; arriba y abajo, el mismo video difuminado.
  * - Video vertical: NO se recorta. Si trae franjas laterales se quitan; si trae una imagen
  *   horizontal con franjas arriba/abajo, solo se acerca un poco (VERTICAL_BAND_ZOOM).
  * Devuelve el recorte exacto sobre el cuadro original.
@@ -397,24 +406,24 @@ export async function chooseVerticalCrop(
     return { width, height, x: box.x + offset, y, fit: true, content };
   }
 
+  // Horizontal: se recorta un poco (no a pantalla completa), donde está la acción o quien habla.
   const area = box ?? frame;
-  const targetWidth = even((area.height * 9) / 16);
-  if (targetWidth >= area.width) {
-    // Imagen más alta que 9:16: se recorta arriba/abajo, al centro.
-    const targetHeight = even((area.width * 16) / 9);
-    return { width: even(area.width), height: targetHeight, x: area.x, y: area.y + even((area.height - targetHeight) / 2) };
+  const targetWidth = even(Math.min(area.width, area.height * HORIZONTAL_WINDOW_ASPECT));
+  if (targetWidth >= area.width - 2) {
+    // La imagen ya es tan angosta como el recorte: se muestra entera.
+    return { width: even(area.width), height: even(area.height), x: area.x, y: area.y, fill: "blur" };
   }
   const action = async () => area.x + (await bestWindow(tools, input, area, targetWidth, segment, signal));
   if (options.faces) {
     try {
       const followed = await followFaces(tools, input, area, targetWidth, segment, action, signal, options.speaking);
-      if (followed) return followed;
+      if (followed) return { ...followed, fill: "blur" };
     } catch (err) {
       if (signal?.aborted) throw err;
       options.onWarning?.("no se pudo seguir caras; se usa el encuadre por acción", err);
     }
   }
-  return { width: targetWidth, height: even(area.height), x: await action(), y: area.y };
+  return { width: targetWidth, height: even(area.height), x: await action(), y: area.y, fill: "blur" };
 }
 
 /**
@@ -518,6 +527,16 @@ export function verticalFilter(crop: VerticalCrop | null): string {
     const { y, height } = crop.content;
     if (y > 0) cut += `drawbox=x=0:y=0:w=iw:h=${y}:color=black:t=fill,`;
     if (y + height < crop.height) cut += `drawbox=x=0:y=${y + height}:w=iw:h=${crop.height - y - height}:color=black:t=fill,`;
+  }
+  if (crop?.fill === "blur") {
+    // Fondo: el mismo recorte, ampliado y muy difuminado (a baja resolución: rápido). Encima, el
+    // recorte entero.
+    return (
+      `[0:v:0]${cut}split=2[fgsrc][bgsrc];` +
+      "[bgsrc]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,boxblur=12:2,scale=1080:1920,eq=brightness=-0.06[bg];" +
+      "[fgsrc]scale=1080:1920:force_original_aspect_ratio=decrease:force_divisible_by=2[fg];" +
+      "[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[v]"
+    );
   }
   const size = crop?.fit
     ? "scale=1080:1920:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black"

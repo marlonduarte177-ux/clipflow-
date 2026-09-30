@@ -33,9 +33,9 @@ describe("encuadre inteligente", () => {
     actionVideo(file, "right");
     const info = await probe(tools, file);
     const crop = await chooseVerticalCrop(tools, file, info, null, { startSeconds: 0, durationSeconds: 6 });
-    expect(crop.width).toBe(404); // 720 * 9/16 redondeado a par
-    expect(crop.height).toBe(720);
-    expect(crop.x).toBeGreaterThan((1280 - 404) / 2);
+    // Recorte cuadrado (no a pantalla completa 9:16): se acerca menos.
+    expect(crop).toMatchObject({ width: 720, height: 720, fill: "blur" });
+    expect(crop.x).toBeGreaterThan((1280 - 720) / 2);
   });
 
   it("y a la izquierda si la acción está a la izquierda", async () => {
@@ -43,7 +43,7 @@ describe("encuadre inteligente", () => {
     actionVideo(file, "left");
     const info = await probe(tools, file);
     const crop = await chooseVerticalCrop(tools, file, info, null, { startSeconds: 0, durationSeconds: 6 });
-    expect(crop.x).toBeLessThan((1280 - 404) / 2);
+    expect(crop.x).toBeLessThan((1280 - 720) / 2);
   });
 
   it("un video vertical con una imagen horizontal y franjas: solo se acerca un poco, sin recortar a 9:16", async () => {
@@ -133,7 +133,7 @@ describe("encuadre que sigue caras", () => {
       "-loop", "1", "-t", "8", "-i", photo,
       "-filter_complex",
       "[1:v]crop=150:170:345:80,scale=260:295[f];[0:v]drawbox=x=0:y=0:w=iw:h=ih:color=0x806040:t=fill:enable='gte(t,4)'[bg];" +
-        "[bg][f]overlay=x='if(lt(t,4),120,900)':y=200[v]",
+        "[bg][f]overlay=x='if(lt(t,4),300,780)':y=200[v]",
       "-map", "[v]", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", file,
     ]);
     const info = await probe(tools, file);
@@ -141,14 +141,14 @@ describe("encuadre que sigue caras", () => {
     expect(crop.path).toBeDefined();
     const { positionAt } = await import("./faces/framing.js");
     const faceCenter = (left: number) => left + 130;
-    expect(Math.abs(positionAt(crop.path!, 2) + crop.width / 2 - faceCenter(120))).toBeLessThan(60);
-    expect(Math.abs(positionAt(crop.path!, 6) + crop.width / 2 - faceCenter(900))).toBeLessThan(60);
+    expect(Math.abs(positionAt(crop.path!, 2) + crop.width / 2 - faceCenter(300))).toBeLessThan(60);
+    expect(Math.abs(positionAt(crop.path!, 6) + crop.width / 2 - faceCenter(780))).toBeLessThan(60);
 
     // En el video final, la cara queda al centro antes y después del corte.
     const out = path.join(dir, "face-jump-vertical.mp4");
     await renderVerticalClip(tools, file, out, { startSeconds: 0, durationSeconds: 8 }, { crop });
     for (const t of [1.5, 3.5, 4.6, 7]) {
-      const faces = await detectFaces(outputFrame(out, t), 360, 640);
+      const faces = (await detectFaces(outputFrame(out, t), 360, 640)).sort((a, b) => b.width - a.width);
       expect(faces.length, `cara en t=${t}`).toBeGreaterThanOrEqual(1);
       expect(Math.abs(faces[0]!.x + faces[0]!.width / 2 - 180), `centrada en t=${t}`).toBeLessThan(45);
     }
@@ -160,6 +160,13 @@ describe("encuadre que sigue caras", () => {
     const info = await probe(tools, file);
     const crop = await chooseVerticalCrop(tools, file, info, null, { startSeconds: 0, durationSeconds: 6 }, undefined, { faces: true });
     expect(crop.path).toBeUndefined();
-    expect(crop.x).toBeGreaterThan((1280 - 404) / 2);
+    expect(crop.x).toBeGreaterThan((1280 - 720) / 2);
+
+    // En el clip final, arriba y abajo va el mismo video difuminado (no negro).
+    const out = path.join(dir, "no-faces-vertical.mp4");
+    await renderVerticalClip(tools, file, out, { startSeconds: 0, durationSeconds: 2 }, { crop });
+    const top = execFileSync("ffmpeg", ["-loglevel", "error", "-ss", "1", "-i", out, "-frames:v", "1", "-vf", "crop=1080:300:0:0,scale=36:10,format=gray", "-f", "rawvideo", "-"]);
+    const mean = top.reduce((a, b) => a + b, 0) / top.length;
+    expect(mean).toBeGreaterThan(20);
   });
 });
