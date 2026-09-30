@@ -32,6 +32,24 @@ export interface ContentHighlight {
   reason?: string;
 }
 
+/** Una hoja con varios fotogramas en cuadrícula (izquierda→derecha, arriba→abajo). */
+export interface FrameSheet {
+  path: string;
+  /** Segundo del video de cada fotograma, en el orden de la cuadrícula. */
+  frameTimes: number[];
+  columns: number;
+  rows: number;
+}
+
+/** Puntuación de un fotograma según lo que se ve. */
+export interface FrameScore {
+  timeSeconds: number;
+  /** 0–1: qué tan buen momento de clip se ve. */
+  score: number;
+  /** Etiqueta corta, p. ej. "Eliminación doble". */
+  label: string;
+}
+
 export interface AIAnalysisProvider {
   /** Nombre para logs y registros de consumo. */
   readonly name: string;
@@ -39,6 +57,8 @@ export interface AIAnalysisProvider {
   transcribe(chunks: AudioChunk[]): Promise<{ segments: TranscriptSegment[]; language: string | null; usage: AIUsage }>;
   /** Lee la transcripción y marca los mejores momentos por su contenido. */
   analyze(segments: TranscriptSegment[], durationSeconds: number): Promise<{ highlights: ContentHighlight[]; usage: AIUsage }>;
+  /** Analiza fotogramas (opcional: solo proveedores con visión). */
+  analyzeFrames?(sheets: FrameSheet[]): Promise<{ frames: FrameScore[]; usage: AIUsage }>;
   /** Propone títulos para los momentos elegidos. */
   generateClipSuggestions(
     segments: TranscriptSegment[],

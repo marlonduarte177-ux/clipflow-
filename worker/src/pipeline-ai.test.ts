@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import type { AIAnalysisProvider, AudioChunk, TranscriptSegment } from "@clipflow/shared";
+import type { AIAnalysisProvider, AudioChunk, FrameSheet, TranscriptSegment } from "@clipflow/shared";
 import { claimJob, schema, type DbHandle } from "@clipflow/shared/db";
 import { createTestDb } from "@clipflow/shared/db/testing";
 import { processAnalyzeJob } from "./pipeline.js";
@@ -59,6 +59,69 @@ class FakeAI implements AIAnalysisProvider {
     return { titles: moments.map((m) => `Título ${m.startSeconds}`), usage: { inputTokens: 100, outputTokens: 20, estimatedCostUsd: 0.00002 } };
   }
 }
+
+/** IA de prueba sin habla pero con visión: "ve" una eliminación en el segundo ~7. */
+class FakeVisionAI implements AIAnalysisProvider {
+  readonly name = "fake-vision";
+  sheets: FrameSheet[] = [];
+  async transcribe() {
+    return { segments: [], language: null, usage: { audioSeconds: 40, estimatedCostUsd: 0.004 } };
+  }
+  async analyze() {
+    return { highlights: [], usage: {} };
+  }
+  async analyzeFrames(sheets: FrameSheet[]) {
+    this.sheets = sheets;
+    const frames = sheets.flatMap((s) =>
+      s.frameTimes.map((t) => ({ timeSeconds: t, score: t > 4 && t < 11 ? 0.95 : 0.05, label: t > 4 && t < 11 ? "Eliminación doble" : "Corriendo" })),
+    );
+    return { frames, usage: { inputTokens: 2000, outputTokens: 150, estimatedCostUsd: 0.0004 } };
+  }
+  async generateClipSuggestions(_s: TranscriptSegment[], moments: unknown[]) {
+    return { titles: moments.map(() => null), usage: {} };
+  }
+}
+
+describe("análisis de imágenes con IA (experimental)", () => {
+  it("lo que se ve en pantalla decide el momento, da el título y su costo queda separado", async () => {
+    const db = h!.db;
+    const { job } = await seedVideoJob(db, root, { sample });
+    const ai = new FakeVisionAI();
+    const deps = {
+      ...makeDeps(db, root, path.join(root, "work")),
+      ai,
+      vision: { enabled: true, intervalSeconds: 3, maxFrames: 600 },
+    };
+    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    expect(result).toMatchObject({ vision: "used", ai: "no_speech" });
+    expect(result.visionFrames).toBe(13); // 40 s / 3 s
+    expect(ai.sheets).toHaveLength(2); // 9 + 4 fotogramas: 2 imágenes
+
+    const clipRows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
+    const best = [...clipRows].sort((a, b) => b.score! - a.score!)[0]!;
+    expect(best.startSeconds).toBeLessThanOrEqual(7);
+    expect(best.endSeconds).toBeGreaterThanOrEqual(8);
+    expect(best.title).toBe("Eliminación doble");
+    expect(best.scoreBreakdown).toHaveProperty("vision");
+
+    expect(result.costs).toMatchObject({ transcriptionUsd: 0.004, textUsd: 0, visionUsd: 0.0004 });
+    expect(result.costs!.totalUsd).toBeGreaterThan(0.0044);
+    const usage = await db.select().from(schema.usage).where(eq(schema.usage.jobId, job.id));
+    expect(usage.some((u) => (u.details as { kind?: string } | null)?.kind === "vision" && u.quantity === 2000)).toBe(true);
+  });
+
+  it("apagado por defecto: no se envían imágenes", async () => {
+    const db = h!.db;
+    const { job } = await seedVideoJob(db, root, { sample });
+    const ai = new FakeVisionAI();
+    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, {
+      ...makeDeps(db, root, path.join(root, "work")),
+      ai,
+    });
+    expect(result.vision).toBe("disabled");
+    expect(ai.sheets).toEqual([]);
+  });
+});
 
 describe("procesamiento con IA", () => {
   it("usa el contenido para elegir momentos, corta en frases, pone títulos y genera subtítulos", async () => {

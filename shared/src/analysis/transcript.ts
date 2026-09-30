@@ -1,4 +1,4 @@
-import type { ContentHighlight, TranscriptSegment } from "./ai-provider.js";
+import type { ContentHighlight, FrameScore, TranscriptSegment } from "./ai-provider.js";
 import type { Moment } from "./scoring.js";
 
 /**
@@ -79,3 +79,27 @@ export function toVtt(segments: TranscriptSegment[]): string {
 }
 
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
+
+/** Señal "vision" por segundo: cada fotograma puntuado cubre hasta el siguiente. */
+export function visionSignalFromFrames(frames: FrameScore[], durationSeconds: number, intervalSeconds: number): number[] {
+  const seconds = Math.max(1, Math.floor(durationSeconds));
+  const signal = new Array<number>(seconds).fill(0);
+  for (const f of frames) {
+    const score = Math.min(1, Math.max(0, f.score));
+    // Cada fotograma representa el tramo [t - intervalo/2, t + intervalo/2).
+    const from = Math.max(0, Math.round(f.timeSeconds - intervalSeconds / 2));
+    const to = Math.min(seconds, Math.round(f.timeSeconds + intervalSeconds / 2));
+    for (let i = from; i < to; i++) signal[i] = Math.max(signal[i]!, score);
+  }
+  return signal;
+}
+
+/** Etiqueta del fotograma mejor puntuado dentro de un tramo (sirve de título sin voz). */
+export function bestFrameLabel(frames: FrameScore[], startSeconds: number, endSeconds: number): string | null {
+  let best: FrameScore | null = null;
+  for (const f of frames) {
+    if (f.timeSeconds < startSeconds || f.timeSeconds > endSeconds || !f.label.trim()) continue;
+    if (!best || f.score > best.score) best = f;
+  }
+  return best && best.score >= 0.5 ? best.label.trim().slice(0, 80) : null;
+}

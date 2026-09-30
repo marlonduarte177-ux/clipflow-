@@ -520,3 +520,57 @@ export async function extractAudioChunks(
   }
   return chunks;
 }
+
+/**
+ * Hojas de fotogramas para el análisis de imágenes con IA: 1 fotograma cada `intervalSeconds`
+ * (sin franjas negras), agrupados en cuadrículas de columnas×filas. Una hoja = una imagen para
+ * la IA, así se paga una imagen por cada 9 fotogramas en lugar de 9.
+ */
+export async function buildFrameSheets(
+  tools: FfmpegTools,
+  input: string,
+  workDir: string,
+  info: ProbeResult,
+  options: {
+    intervalSeconds: number;
+    box: ContentBox | null;
+    columns?: number;
+    rows?: number;
+    tileWidth?: number;
+    tileHeight?: number;
+    signal?: AbortSignal;
+    onProgress?: (seconds: number) => void;
+  },
+): Promise<{ path: string; frameTimes: number[]; columns: number; rows: number }[]> {
+  const { readdir } = await import("node:fs/promises");
+  const columns = options.columns ?? 3;
+  const rows = options.rows ?? 3;
+  const tw = options.tileWidth ?? 512;
+  const th = options.tileHeight ?? 288;
+  const crop = options.box ? `crop=${options.box.width}:${options.box.height}:${options.box.x}:${options.box.y},` : "";
+  await run(
+    tools.ffmpegPath,
+    [
+      ...FFMPEG_BASE, "-progress", "pipe:1", "-nostats", "-i", input, "-an",
+      "-vf",
+      `${crop}fps=1/${options.intervalSeconds},scale=${tw}:${th}:force_original_aspect_ratio=decrease,` +
+        `pad=${tw}:${th}:(ow-iw)/2:(oh-ih)/2,tile=${columns}x${rows}`,
+      "-q:v", "4", "sheet-%04d.jpg",
+    ],
+    { cwd: workDir, signal: options.signal, onProgress: options.onProgress },
+  );
+  const files = (await readdir(workDir)).filter((f) => /^sheet-\d{4}\.jpg$/.test(f)).sort();
+  const perSheet = columns * rows;
+  // El filtro fps toma un fotograma a mitad de cada intervalo: 1.5 s, 4.5 s, 7.5 s… (con 3 s).
+  const totalFrames = Math.max(1, Math.floor(info.durationSeconds / options.intervalSeconds));
+  return files.map((file, k) => {
+    const first = k * perSheet;
+    const count = Math.max(0, Math.min(perSheet, totalFrames - first));
+    return {
+      path: path.join(workDir, file),
+      frameTimes: Array.from({ length: count }, (_, i) => (first + i + 0.5) * options.intervalSeconds),
+      columns,
+      rows,
+    };
+  }).filter((s) => s.frameTimes.length > 0);
+}

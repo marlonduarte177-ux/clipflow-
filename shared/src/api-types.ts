@@ -83,6 +83,17 @@ export interface JobResult {
   ai: "used" | "no_speech" | "disabled" | "unavailable" | "no_audio";
   aiReason?: string;
   language?: string | null;
+  /** Análisis de imágenes con IA (experimental). */
+  vision?: "used" | "disabled" | "unavailable";
+  visionFrames?: number;
+  /** Costo estimado de ESTE procesamiento, en USD. */
+  costs?: {
+    transcriptionUsd: number;
+    textUsd: number;
+    visionUsd: number;
+    computeUsd: number;
+    totalUsd: number;
+  };
 }
 
 export interface JobListResponse {

@@ -57,3 +57,22 @@ describe("subtítulos", () => {
     expect(toVtt(clip).startsWith("WEBVTT\n\n00:00:00.000 --> 00:00:05.600\n")).toBe(true);
   });
 });
+
+describe("visión", () => {
+  const frames = [
+    { timeSeconds: 3, score: 0.2, label: "Corriendo" },
+    { timeSeconds: 6, score: 0.9, label: "Eliminación doble" },
+    { timeSeconds: 9, score: 0.4, label: "Recargando" },
+  ];
+
+  it("convierte fotogramas puntuados en una señal por segundo", async () => {
+    const { visionSignalFromFrames } = await import("./transcript.js");
+    expect(visionSignalFromFrames(frames, 12, 3)).toEqual([0, 0, 0.2, 0.2, 0.2, 0.9, 0.9, 0.9, 0.4, 0.4, 0.4, 0]);
+  });
+
+  it("usa la etiqueta del mejor fotograma del tramo como título, si es un buen momento", async () => {
+    const { bestFrameLabel } = await import("./transcript.js");
+    expect(bestFrameLabel(frames, 0, 10)).toBe("Eliminación doble");
+    expect(bestFrameLabel(frames, 8, 10)).toBeNull(); // 0.4: no merece título
+  });
+});

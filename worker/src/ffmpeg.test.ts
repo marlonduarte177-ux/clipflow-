@@ -64,3 +64,21 @@ describe("encuadre inteligente", () => {
     expect(await detectContentBox(tools, file, await probe(tools, file))).toBeNull();
   });
 });
+
+describe("hojas de fotogramas para la IA", () => {
+  it("agrupa 1 fotograma cada 3 s en cuadrículas 3x3 con el tiempo real de cada uno", async () => {
+    const { buildFrameSheets } = await import("./ffmpeg.js");
+    const file = path.join(dir, "timed.mp4");
+    execFileSync("ffmpeg", [
+      "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25:duration=40",
+      "-c:v", "libx264", "-preset", "ultrafast", file,
+    ]);
+    const work = path.join(dir, "sheets");
+    execFileSync("mkdir", ["-p", work]);
+    const sheets = await buildFrameSheets(tools, file, work, await probe(tools, file), { intervalSeconds: 3, box: null });
+    expect(sheets.map((s) => s.frameTimes.length)).toEqual([9, 4]); // 13 fotogramas en 40 s
+    expect(sheets[1]!.frameTimes).toEqual([28.5, 31.5, 34.5, 37.5]);
+    const size = execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=width,height", "-of", "csv=p=0", sheets[0]!.path]);
+    expect(size.toString().trim()).toBe("1536,864");
+  });
+});

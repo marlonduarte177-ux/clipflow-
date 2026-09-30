@@ -33,6 +33,28 @@ flowchart LR
    permite descargar el `.srt`.
 5. **Títulos:** uno por clip, en el idioma del video.
 
+### Análisis de imágenes (experimental)
+
+Activado en **staging** para medir su costo real; en producción está apagado por defecto
+(`AI_VISION_ENABLED`).
+
+1. Toma **1 fotograma cada 3 s**, sin franjas negras. En videos largos se espacian más: máximo
+   600 fotogramas por video.
+2. Los junta en **hojas de 3x3** (1536x864). OpenAI cobra una imagen por cada 9 fotogramas.
+3. `gpt-4o-mini`, en detalle alto, puntúa cada fotograma de 0 a 1 (kills, avisos en pantalla, jugadas,
+   reacciones; menús y pantallas de carga ≈ 0) y le pone una etiqueta corta.
+4. Esa puntuación es la señal **`vision`** (peso 0.35). Si el clip no tiene título por voz, usa la
+   etiqueta del mejor fotograma, por ejemplo "Eliminación doble".
+5. El costo se calcula con los **tokens reales** que devuelve OpenAI y aparece en la web, en
+   "Costo de este procesamiento", separado en transcripción, texto, imágenes y procesador.
+
+Referencia para calcular el costo antes de probar (verificar con el valor real):
+- un video de 23 min tiene ~460 fotogramas → ~52 imágenes;
+- según la documentación de OpenAI, `gpt-4o-mini` cobra una imagen en detalle alto como 85 tokens +
+  170 por cada bloque de 512 px;
+- el resultado real depende de cómo OpenAI escale cada imagen. Por eso ClipFlow registra lo que
+  OpenAI reporta.
+
 ### Videos sin habla
 
 Si Whisper no encuentra voz real, porque descarta las frases alucinadas (ver `docs/fase-6-7-procesamiento.md`),
