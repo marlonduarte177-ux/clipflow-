@@ -181,14 +181,10 @@ export class WorkerStack extends Stack {
         inflight: this.queue.metricApproximateNumberOfMessagesNotVisible({ period: Duration.minutes(1), statistic: "Maximum" }),
       },
     });
-    const scalingTarget = new appscaling.ScalableTarget(this, "WorkerScaling", {
-      serviceNamespace: appscaling.ServiceNamespace.ECS,
-      scalableDimension: "ecs:service:DesiredCount",
-      resourceId: `service/${cluster.clusterName}/${service.serviceName}`,
-      minCapacity: 0,
-      maxCapacity: 3,
-    });
-    scalingTarget.node.addDependency(service);
+    // Se reutiliza el ScalableTarget que ya existe en AWS (mismo ID lógico): ECS solo admite uno
+    // por servicio, y crear otro nuevo falla con "already exists".
+    service.autoScaleTaskCount({ minCapacity: 0, maxCapacity: 3 });
+    const scalingTarget = service.node.findChild("TaskCount").node.findChild("Target") as appscaling.ScalableTarget;
 
     // Encender rápido: con 1 pendiente (un trabajo o el aviso que envía la API al empezar una
     // subida) se arranca en ~1 min. 1–3 pendientes → 1 worker; 4–7 → 2; 8+ → 3.
