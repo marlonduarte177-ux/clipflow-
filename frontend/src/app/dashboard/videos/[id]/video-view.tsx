@@ -110,7 +110,6 @@ export function VideoView({ videoId }: { videoId: string }) {
         </p>
         {video.rejectionReason ? <Alert kind="error">{video.rejectionReason}</Alert> : null}
         {job?.status === "completed" && job.result ? <AiStatus result={job.result} /> : null}
-        {job?.status === "completed" && job.result?.costs ? <CostBreakdown result={job.result} /> : null}
         {job ? (
           <JobProgress job={job} />
         ) : video.status === "uploaded" || video.status === "ready" ? (
@@ -260,34 +259,3 @@ function AiStatus({ result }: { result: NonNullable<JobDto["result"]> }) {
   );
 }
 
-const money = (n: number) => `$${n < 0.01 ? n.toFixed(4) : n.toFixed(3)}`;
-
-/** Costo estimado de este procesamiento (lo que ClipFlow pagó a OpenAI y a AWS). */
-function CostBreakdown({ result }: { result: NonNullable<JobDto["result"]> }) {
-  const c = result.costs!;
-  const rows = [
-    ["Transcripción (OpenAI)", c.transcriptionUsd],
-    ["Análisis de texto y títulos (OpenAI)", c.textUsd],
-    [`Imágenes (OpenAI)${result.visionFrames ? ` · ${result.visionFrames} fotogramas` : ""}`, c.visionUsd],
-    ["Procesador de video (AWS)", c.computeUsd],
-  ] as const;
-  return (
-    <details className="rounded-xl border border-line p-3 text-xs">
-      <summary className="cursor-pointer text-muted">
-        Costo de este procesamiento: <span className="text-foreground">{money(c.totalUsd)} USD</span>
-      </summary>
-      <table className="mt-2 w-full">
-        <tbody>
-          {rows.map(([label, value]) => (
-            <tr key={label}>
-              <td className="py-0.5 text-muted">{label}</td>
-              <td className="py-0.5 text-right">{money(value)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {result.vision === "disabled" ? <p className="mt-2 text-muted">Análisis de imágenes desactivado.</p> : null}
-      {result.vision === "unavailable" ? <p className="mt-2 text-muted">El análisis de imágenes falló; los clips se eligieron sin él.</p> : null}
-    </details>
-  );
-}

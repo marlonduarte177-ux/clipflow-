@@ -45,8 +45,9 @@ Activado en **staging** para medir su costo real; en producción está apagado p
    reacciones; menús y pantallas de carga ≈ 0) y le pone una etiqueta corta.
 4. Esa puntuación es la señal **`vision`** (peso 0.35). Si el clip no tiene título por voz, usa la
    etiqueta del mejor fotograma, por ejemplo "Eliminación doble".
-5. El costo se calcula con los **tokens reales** que devuelve OpenAI y aparece en la web, en
-   "Costo de este procesamiento", separado en transcripción, texto, imágenes y procesador.
+5. El costo se calcula con los **tokens reales** que devuelve OpenAI y se guarda por trabajo
+   (`processing_jobs.result.costs` y la tabla `usage`, con `details.kind = "vision"`). **No se muestra
+   en la web**: el costo de OpenAI se consulta en platform.openai.com → Usage.
 
 Referencia para calcular el costo antes de probar (verificar con el valor real):
 - un video de 23 min tiene ~460 fotogramas → ~52 imágenes;
