@@ -8,6 +8,7 @@ import {
   type ProjectListResponse,
 } from "@clipflow/shared";
 import { schema, type Database } from "@clipflow/shared/db";
+import { sendError, sendValidationError } from "./http.js";
 
 const { projects } = schema;
 type ProjectRow = typeof projects.$inferSelect;
@@ -24,11 +25,6 @@ function toDto(row: ProjectRow): ProjectDto {
   };
 }
 
-const notFound = { error: { code: "not_found", message: "Proyecto no encontrado." } };
-
-function validationError(error: z.ZodError) {
-  return { error: { code: "validation_error", message: error.issues[0]?.message ?? "Datos inválidos." } };
-}
 
 /**
  * Rutas de proyectos. REGLA: toda consulta filtra por `request.user.id`.
@@ -51,7 +47,7 @@ export function projectRoutes(deps: { db: Database; auth: preHandlerHookHandler 
 
     app.post("/projects", async (request, reply) => {
       const input = ProjectInputSchema.safeParse(request.body);
-      if (!input.success) return reply.code(400).send(validationError(input.error));
+      if (!input.success) return sendValidationError(reply, input.error);
       const [row] = await db
         .insert(projects)
         .values({ userId: request.user!.id, name: input.data.name, description: input.data.description ?? null })
@@ -61,19 +57,19 @@ export function projectRoutes(deps: { db: Database; auth: preHandlerHookHandler 
 
     app.get("/projects/:id", async (request, reply) => {
       const params = IdParams.safeParse(request.params);
-      if (!params.success) return reply.code(404).send(notFound);
+      if (!params.success) return sendError(reply, 404, "not_found", "Proyecto no encontrado.");
       const [row] = await db
         .select()
         .from(projects)
         .where(and(eq(projects.id, params.data.id), eq(projects.userId, request.user!.id)));
-      return row ? toDto(row) : reply.code(404).send(notFound);
+      return row ? toDto(row) : sendError(reply, 404, "not_found", "Proyecto no encontrado.");
     });
 
     app.patch("/projects/:id", async (request, reply) => {
       const params = IdParams.safeParse(request.params);
-      if (!params.success) return reply.code(404).send(notFound);
+      if (!params.success) return sendError(reply, 404, "not_found", "Proyecto no encontrado.");
       const input = ProjectUpdateSchema.safeParse(request.body);
-      if (!input.success) return reply.code(400).send(validationError(input.error));
+      if (!input.success) return sendValidationError(reply, input.error);
       const [row] = await db
         .update(projects)
         .set({
@@ -82,17 +78,17 @@ export function projectRoutes(deps: { db: Database; auth: preHandlerHookHandler 
         })
         .where(and(eq(projects.id, params.data.id), eq(projects.userId, request.user!.id)))
         .returning();
-      return row ? toDto(row) : reply.code(404).send(notFound);
+      return row ? toDto(row) : sendError(reply, 404, "not_found", "Proyecto no encontrado.");
     });
 
     app.delete("/projects/:id", async (request, reply) => {
       const params = IdParams.safeParse(request.params);
-      if (!params.success) return reply.code(404).send(notFound);
+      if (!params.success) return sendError(reply, 404, "not_found", "Proyecto no encontrado.");
       const deleted = await db
         .delete(projects)
         .where(and(eq(projects.id, params.data.id), eq(projects.userId, request.user!.id)))
         .returning({ id: projects.id });
-      return deleted.length > 0 ? reply.code(204).send() : reply.code(404).send(notFound);
+      return deleted.length > 0 ? reply.code(204).send() : sendError(reply, 404, "not_found", "Proyecto no encontrado.");
     });
   };
 }

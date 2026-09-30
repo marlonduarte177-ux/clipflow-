@@ -1,21 +1,25 @@
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
-import type { MeResponse } from "@clipflow/shared";
+import type { MeResponse, ProductConfig } from "@clipflow/shared";
 import type { Database } from "@clipflow/shared/db";
 import type { ApiConfig } from "./config.js";
 import { requireAuth, type EmailLookup, type TokenVerifier } from "./auth.js";
 import { projectRoutes } from "./projects.js";
+import type { VideoStorage } from "./storage.js";
+import { videoRoutes } from "./videos.js";
 
 export interface AppDeps {
-  config: Pick<ApiConfig, "APP_ENV" | "LOG_LEVEL" | "CORS_ALLOWED_ORIGINS">;
+  config: Pick<ApiConfig, "APP_ENV" | "LOG_LEVEL" | "CORS_ALLOWED_ORIGINS" | "S3_UPLOAD_URL_EXPIRES_SECONDS">;
   verifyToken: TokenVerifier;
   lookupEmail: EmailLookup;
   db: Database;
+  storage: VideoStorage;
+  product: ProductConfig;
   /** false en tests para no llenar la salida de logs. */
   logger?: boolean;
 }
 
-export async function buildApp({ config, verifyToken, lookupEmail, db, logger = true }: AppDeps): Promise<FastifyInstance> {
+export async function buildApp({ config, verifyToken, lookupEmail, db, storage, product, logger = true }: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
     logger: logger
       ? {
@@ -64,6 +68,9 @@ export async function buildApp({ config, verifyToken, lookupEmail, db, logger = 
   });
 
   await app.register(projectRoutes({ db, auth }));
+  await app.register(
+    videoRoutes({ db, auth, storage, product, uploadUrlExpiresSeconds: config.S3_UPLOAD_URL_EXPIRES_SECONDS }),
+  );
 
   return app;
 }

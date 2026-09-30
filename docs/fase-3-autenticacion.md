@@ -1,8 +1,23 @@
 # ClipFlow — Fase 3: Autenticación
 
-Estado: **código terminado y probado**. Falta desplegarlo en AWS: está bloqueado hasta que AWS
-termine de verificar la cuenta y se completen los pasos de
-[fase-3-pasos-aws-github.md](fase-3-pasos-aws-github.md).
+Estado: **desplegada y verificada en AWS (staging)** el 30/09/2026.
+
+| Pieza | Dónde |
+|---|---|
+| Cognito (staging) | User pool `us-east-1_dEGyR7wdp` (stack `clipflow-staging-auth`, creado por el workflow Deploy) |
+| Web (staging) | https://main.dqw8wqexijjzj.amplifyapp.com (AWS Amplify Hosting, rama `main`) |
+
+Prueba manual realizada: registro, código por email, login, recuperación de contraseña, logout y
+redirección de `/dashboard` a `/login` sin sesión. Todo funcionó.
+
+### Configuración de Amplify Hosting (hecha a mano una vez)
+
+- App conectada a GitHub, rama `main`, monorepo con carpeta `frontend` (build en `amplify.yml`).
+- Variables de entorno: `NEXT_PUBLIC_COGNITO_USER_POOL_ID`, `NEXT_PUBLIC_COGNITO_CLIENT_ID`,
+  `AMPLIFY_MONOREPO_APP_ROOT=frontend`.
+- Si GitHub no muestra el repositorio en Amplify: GitHub → Settings → Applications →
+  **AWS Amplify** → Configure → dar acceso a `clipflow-`.
+- Pendiente: pasar esta configuración a CDK.
 
 ## Qué se construyó
 
@@ -35,12 +50,3 @@ Prueba manual: `/dashboard` sin sesión responde con una redirección a `/login?
 
 Ninguno llegó a GitHub: los detectó la verificación de tipos antes del commit.
 
-## Qué falta para que funcione en AWS
-
-1. Que AWS termine de verificar la cuenta.
-2. Pasos A, B y C de [fase-3-pasos-aws-github.md](fase-3-pasos-aws-github.md).
-3. GitHub → Actions → **Deploy** → `staging`. Crea Cognito y muestra el `UserPoolId` y el `UserPoolClientId`.
-4. Publicar el frontend en Amplify Hosting con esos dos valores (se hará con pasos guiados).
-
-Hasta entonces, las páginas muestran "La autenticación todavía no está configurada" en vez de
-simular que funcionan.

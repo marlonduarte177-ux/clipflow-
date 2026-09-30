@@ -27,6 +27,8 @@ export interface ProductConfig {
     maxBytes: number;
     maxDurationSeconds: number;
     allowedMimeTypes: string[];
+    /** Subidas sin terminar que un usuario puede tener a la vez (evita abusos). */
+    maxPendingUploads: number;
   };
 }
 
@@ -39,6 +41,7 @@ export const DEFAULT_PRODUCT_CONFIG: ProductConfig = {
     maxBytes: 10 * 1024 ** 3,
     maxDurationSeconds: 3 * 60 * 60,
     allowedMimeTypes: ["video/mp4", "video/quicktime", "video/webm", "video/x-matroska"],
+    maxPendingUploads: 3,
   },
 };
 
@@ -106,6 +109,7 @@ export function loadProductConfig(env: Env = process.env): ProductConfig {
     maxBytes: get("UPLOAD_MAX_BYTES"),
     maxDuration: get("UPLOAD_MAX_DURATION_SECONDS"),
     mimes: get("UPLOAD_ALLOWED_MIME_TYPES"),
+    maxPending: get("UPLOAD_MAX_PENDING"),
   };
 
   return {
@@ -125,6 +129,9 @@ export function loadProductConfig(env: Env = process.env): ProductConfig {
       allowedMimeTypes: raw.mimes
         ? stringList("UPLOAD_ALLOWED_MIME_TYPES", raw.mimes)
         : d.upload.allowedMimeTypes,
+      maxPendingUploads: raw.maxPending
+        ? Math.floor(positiveNumber("UPLOAD_MAX_PENDING", raw.maxPending))
+        : d.upload.maxPendingUploads,
     },
   };
 }

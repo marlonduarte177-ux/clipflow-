@@ -10,6 +10,8 @@ applications:
             - nvm install 22 && nvm use 22
             # Las dependencias se instalan desde la raíz (un solo package-lock.json).
             - (cd .. && npm ci)
+            # Código compartido (tipos, validaciones, límites) que usa la web.
+            - (cd .. && npm run build -w @clipflow/shared)
         build:
           commands:
             # Solo las variables NEXT_PUBLIC_* (no secretas) llegan al navegador.

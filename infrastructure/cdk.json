@@ -1,10 +1,16 @@
 {
   "app": "npx tsx bin/clipflow.ts",
   "watch": {
-    "include": ["bin/**", "lib/**"]
+    "include": [
+      "bin/**",
+      "lib/**"
+    ]
   },
   "context": {
     "@aws-cdk/core:checkSecretUsage": true,
-    "@aws-cdk/core:target-partitions": ["aws"]
+    "@aws-cdk/core:target-partitions": [
+      "aws"
+    ],
+    "@aws-cdk/core:defaultCrossStackReferences": "strong"
   }
 }

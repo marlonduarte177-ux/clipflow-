@@ -6,7 +6,8 @@ import { z } from "zod";
  */
 const EnvSchema = z.object({
   AWS_REGION: z.string().default("us-east-1"),
-  DATABASE_URL: z.string().startsWith("postgres", "debe ser una URL postgres://"),
+  /** Local. En AWS se usan DB_HOST/DB_NAME/DB_USER/DB_PASSWORD (ver databaseUrlFromEnv). */
+  DATABASE_URL: z.string().startsWith("postgres", "debe ser una URL postgres://").optional(),
   /** "true" en AWS (RDS exige TLS). */
   DATABASE_SSL: z
     .enum(["true", "false"])
@@ -24,6 +25,8 @@ const EnvSchema = z.object({
         .map((origin) => origin.trim())
         .filter(Boolean),
     ),
+  S3_BUCKET: z.string().min(3, "falta el nombre del bucket"),
+  S3_UPLOAD_URL_EXPIRES_SECONDS: z.coerce.number().int().min(60).max(7 * 24 * 3600).default(3600),
   COGNITO_USER_POOL_ID: z.string().regex(/^[\w-]+_[0-9a-zA-Z]+$/, "formato esperado: us-east-1_XXXXXXX"),
   COGNITO_CLIENT_ID: z.string().min(1),
 });
