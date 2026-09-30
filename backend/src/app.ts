@@ -36,6 +36,24 @@ export async function buildApp({ config, verifyToken, lookupEmail, db, storage, 
     bodyLimit: 1024 * 1024,
   });
 
+  // Peticiones sin cuerpo (p. ej. POST /videos/:id/abort): algunos navegadores o proxies
+  // les ponen un Content-Type igualmente. Un cuerpo vacío se acepta con cualquier tipo;
+  // un cuerpo con contenido solo se acepta como JSON.
+  app.removeContentTypeParser("application/json");
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body, done) => {
+    const text = String(body);
+    if (text.trim() === "") return done(null, undefined);
+    try {
+      done(null, JSON.parse(text));
+    } catch {
+      done(Object.assign(new Error("El cuerpo no es JSON válido."), { statusCode: 400, code: "invalid_json" }), undefined);
+    }
+  });
+  app.addContentTypeParser("*", { parseAs: "string" }, (_req, body, done) => {
+    if (String(body).trim() === "") return done(null, undefined);
+    done(Object.assign(new Error("Envía los datos como JSON."), { statusCode: 415, code: "unsupported_media_type" }), undefined);
+  });
+
   await app.register(cors, {
     origin: config.CORS_ALLOWED_ORIGINS,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],

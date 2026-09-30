@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import type { ClipDto, ClipListResponse, JobDto, JobListResponse, VideoDto } from "@clipflow/shared";
+import { DEFAULT_PRODUCT_CONFIG, type ClipDto, type ClipListResponse, type JobDto, type JobListResponse, type VideoDto } from "@clipflow/shared";
 import { Alert } from "@/components/ui";
 import { isActive, JobProgress } from "@/components/job-progress";
 import { VideoStatusBadge } from "@/components/status-badge";
@@ -27,6 +27,7 @@ export function VideoView({ videoId }: { videoId: string }) {
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState("");
   const [showDiscarded, setShowDiscarded] = useState(false);
+  const [duration, setDuration] = useState(DEFAULT_PRODUCT_CONFIG.defaultClipDurationSeconds);
 
   const [reloadKey, setReloadKey] = useState(0);
   const processing = isActive(data?.job);
@@ -51,6 +52,16 @@ export function VideoView({ videoId }: { videoId: string }) {
     if (!data?.job) return;
     try {
       const job = await apiFetch<JobDto>(`/jobs/${data.job.id}/${action}`, { method: "POST" });
+      setData({ ...data, job });
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function startProcessing() {
+    if (!data) return;
+    try {
+      const job = await apiFetch<JobDto>(`/videos/${videoId}/process`, { method: "POST", body: { clipDurationSeconds: duration } });
       setData({ ...data, job });
     } catch (err) {
       setError((err as Error).message);
@@ -98,7 +109,29 @@ export function VideoView({ videoId }: { videoId: string }) {
           {job?.params.clipDurationSeconds ? ` · clips de ${job.params.clipDurationSeconds} s` : ""}
         </p>
         {video.rejectionReason ? <Alert kind="error">{video.rejectionReason}</Alert> : null}
-        {job ? <JobProgress job={job} /> : <p className="text-sm text-muted">Este video aún no tiene procesamiento.</p>}
+        {job ? (
+          <JobProgress job={job} />
+        ) : video.status === "uploaded" || video.status === "ready" ? (
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="text-sm">
+              <span className="mb-1 block text-muted">Duración de los clips</span>
+              <select
+                value={duration}
+                onChange={(e) => setDuration(Number(e.target.value))}
+                className="rounded-lg border border-line bg-background px-3 py-2"
+              >
+                {DEFAULT_PRODUCT_CONFIG.clipDurationsSeconds.map((d) => (
+                  <option key={d} value={d}>
+                    {d} s
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button onClick={startProcessing} className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-black">
+              Procesar video
+            </button>
+          </div>
+        ) : null}
         <div className="flex gap-3 text-sm">
           {processing ? (
             <button onClick={() => jobAction("cancel")} className="rounded-lg border border-line px-3 py-1.5">
