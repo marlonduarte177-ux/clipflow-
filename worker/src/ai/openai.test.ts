@@ -63,6 +63,22 @@ describe("OpenAIProvider.transcribe", () => {
     expect((calls[0]!.init.headers as Record<string, string>).Authorization).toBe("Bearer sk-test");
   });
 
+  it("descarta frases que Whisper marca como probable silencio o poco seguras (alucinaciones)", async () => {
+    const { impl } = fakeFetch([
+      json({
+        language: "spanish",
+        segments: [
+          { start: 0, end: 5, text: "Frase real", no_speech_prob: 0.05, avg_logprob: -0.3, compression_ratio: 1.3 },
+          { start: 5, end: 9, text: "Crímenes en serie", no_speech_prob: 0.92, avg_logprob: -0.4, compression_ratio: 1.2 },
+          { start: 9, end: 12, text: "texto dudoso", no_speech_prob: 0.1, avg_logprob: -1.6, compression_ratio: 1.2 },
+          { start: 12, end: 20, text: "gracias gracias gracias gracias", no_speech_prob: 0.2, avg_logprob: -0.5, compression_ratio: 3.1 },
+        ],
+      }),
+    ]);
+    const result = await provider(impl).transcribe([{ path: chunkA, offsetSeconds: 0, durationSeconds: 20 }]);
+    expect(result.segments.map((s) => s.text)).toEqual(["Frase real"]);
+  });
+
   it("reintenta errores temporales (429/5xx) y respeta Retry-After", async () => {
     const { impl, calls } = fakeFetch([
       json({ error: {} }, 429, { "retry-after": "1" }),

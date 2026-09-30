@@ -157,7 +157,11 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       onProgress: (s) => void progress("analyzing", (s / info.durationSeconds) * 0.5).catch(() => undefined),
     });
     check();
-    const signals: SignalSeries = { visual: raw.visual, ...(raw.audio ? { audio: raw.audio } : {}) };
+    const signals: SignalSeries = {
+      visual: raw.visual,
+      ...(raw.audio ? { audio: raw.audio } : {}),
+      ...(raw.action ? { action: raw.action } : {}),
+    };
     await progress("analyzing", 0.5, true);
 
     // 2b. IA (si está configurada): transcripción + momentos por contenido.
@@ -374,6 +378,21 @@ async function runAI(
     await onProgress(0.2);
     const transcript = await deps.ai.transcribe(chunks);
     await onProgress(0.7);
+
+    // Sin habla real (p. ej. gameplay o música): no se inventan títulos ni subtítulos,
+    // y los momentos se eligen por acción, sonido y movimiento.
+    const analyzedSeconds = chunks.reduce((sum, c) => sum + c.durationSeconds, 0);
+    const speechSeconds = transcript.segments.reduce((sum, s) => sum + (s.endSeconds - s.startSeconds), 0);
+    if (speechSeconds < Math.max(15, analyzedSeconds * 0.1)) {
+      return {
+        status: "no_speech",
+        reason: "No se detectó habla (p. ej. gameplay o música); los clips se eligieron por acción, sonido y movimiento",
+        segments: [],
+        language: null,
+        usage: { ...transcript.usage },
+        transcribeCostUsd: transcript.usage.estimatedCostUsd ?? 0,
+      };
+    }
     const analysis = await deps.ai.analyze(transcript.segments, info.durationSeconds);
     const usage: AIUsage = { ...transcript.usage };
     const transcribeCostUsd = transcript.usage.estimatedCostUsd ?? 0;

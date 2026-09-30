@@ -117,9 +117,11 @@ export async function probe(tools: FfmpegTools, file: string): Promise<ProbeResu
 }
 
 /**
- * Una sola pasada por el video para calcular dos señales por segundo:
- * - audio: volumen (RMS en dB) de cada segundo;
- * - visual: suma de "cambios de escena" en cada segundo.
+ * Una sola pasada por el video para calcular señales por segundo:
+ * - audio: volumen promedio (dB) de cada segundo;
+ * - action: picos de sonido cortos por segundo (disparos, golpes, explosiones, gritos),
+ *   medidos cada 0.1 s contra el volumen de los 5 s anteriores;
+ * - visual: movimiento y cambios de escena (suma de la puntuación de escena de FFmpeg).
  */
 export async function analyzeSignals(
   tools: FfmpegTools,
@@ -127,14 +129,15 @@ export async function analyzeSignals(
   info: ProbeResult,
   workDir: string,
   options: { signal?: AbortSignal; onProgress?: (seconds: number) => void } = {},
-): Promise<{ audio?: number[]; visual: number[] }> {
+): Promise<{ audio?: number[]; action?: number[]; visual: number[] }> {
   const filters = [
-    "[0:v:0]fps=4,scale=160:-2,select='gt(scene\\,0.3)',metadata=mode=print:file=scene.txt[v]",
+    "[0:v:0]fps=4,scale=160:-2,select='gte(scene\\,0)',metadata=mode=print:file=scene.txt[v]",
   ];
   const outputs = ["-map", "[v]", "-f", "null", "-"];
   if (info.hasAudio) {
     filters.push(
-      "[0:a:0]aresample=8000,asetnsamples=n=8000:p=0,astats=metadata=1:reset=1," +
+      // 800 muestras a 8 kHz = bloques de 0.1 s.
+      "[0:a:0]aresample=8000,asetnsamples=n=800:p=0,astats=metadata=1:reset=1," +
         "ametadata=mode=print:key=lavfi.astats.Overall.RMS_level:file=audio.txt[a]",
     );
     outputs.push("-map", "[a]", "-f", "null", "-");
@@ -152,16 +155,37 @@ export async function analyzeSignals(
     visual[i] = visual[i]! + value;
   }
 
-  let audio: number[] | undefined;
-  if (info.hasAudio) {
-    audio = new Array<number>(seconds).fill(-120);
-    const text = await readFile(path.join(workDir, "audio.txt"), "utf8");
-    for (const { time, value } of parseMetadataFile(text, "lavfi.astats.Overall.RMS_level")) {
-      const i = Math.floor(time);
-      if (i < seconds) audio[i] = value;
-    }
+  if (!info.hasAudio) return { visual };
+  const blocks = parseMetadataFile(await readFile(path.join(workDir, "audio.txt"), "utf8"), "lavfi.astats.Overall.RMS_level");
+  return { visual, ...audioSignals(blocks, seconds) };
+}
+
+/**
+ * A partir del volumen cada 0.1 s: volumen promedio por segundo y cantidad de picos
+ * (subidas bruscas de al menos 8 dB sobre la mediana de los 5 s anteriores).
+ */
+export function audioSignals(blocks: { time: number; value: number }[], seconds: number): { audio: number[]; action: number[] } {
+  const power = new Array<number>(seconds).fill(0);
+  const count = new Array<number>(seconds).fill(0);
+  const action = new Array<number>(seconds).fill(0);
+  const history: number[] = [];
+  let previousWasPeak = false;
+  for (const { time, value } of blocks) {
+    const i = Math.floor(time);
+    if (i >= seconds) continue;
+    power[i] = power[i]! + 10 ** (value / 10);
+    count[i] = count[i]! + 1;
+
+    const sorted = [...history].sort((a, b) => a - b);
+    const baseline = sorted.length ? sorted[Math.floor(sorted.length / 2)]! : value;
+    const isPeak = history.length >= 10 && value > -45 && value >= baseline + 8;
+    if (isPeak && !previousWasPeak) action[i] = action[i]! + 1;
+    previousWasPeak = isPeak;
+    history.push(value);
+    if (history.length > 50) history.shift();
   }
-  return { audio, visual };
+  const audio = power.map((p, i) => (count[i]! > 0 && p > 0 ? 10 * Math.log10(p / count[i]!) : -120));
+  return { audio, action };
 }
 
 /** Lee la salida de los filtros `metadata=print` / `ametadata=print`. */

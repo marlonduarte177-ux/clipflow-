@@ -36,7 +36,18 @@ export class AIProviderError extends Error {
 
 const TranscriptionResponse = z.object({
   language: z.string().nullish(),
-  segments: z.array(z.object({ start: z.number(), end: z.number(), text: z.string() })).default([]),
+  segments: z
+    .array(
+      z.object({
+        start: z.number(),
+        end: z.number(),
+        text: z.string(),
+        no_speech_prob: z.number().optional(),
+        avg_logprob: z.number().optional(),
+        compression_ratio: z.number().optional(),
+      }),
+    )
+    .default([]),
 });
 
 const ChatResponse = z.object({
@@ -87,6 +98,18 @@ const TITLES_SCHEMA = {
 };
 
 const fmt = (s: number) => s.toFixed(1);
+
+/**
+ * Whisper a veces "escucha" frases que no existen en audio sin habla (música, disparos, ruido).
+ * Se descartan las frases que el propio modelo marca como probable silencio, poco seguras
+ * o repetitivas (umbrales recomendados por Whisper).
+ */
+export function isLikelyHallucination(s: { no_speech_prob?: number; avg_logprob?: number; compression_ratio?: number }): boolean {
+  if ((s.no_speech_prob ?? 0) > 0.6) return true;
+  if ((s.avg_logprob ?? 0) < -1.0) return true;
+  if ((s.compression_ratio ?? 0) > 2.4) return true;
+  return false;
+}
 
 /**
  * Proveedor de IA con la API de OpenAI.
@@ -201,6 +224,7 @@ export class OpenAIProvider implements AIAnalysisProvider {
       language ??= parsed.data.language ?? null;
       for (const s of parsed.data.segments) {
         if (s.text.trim() === "" || !(s.end > s.start)) continue;
+        if (isLikelyHallucination(s)) continue;
         segments.push({
           startSeconds: chunk.offsetSeconds + s.start,
           endSeconds: chunk.offsetSeconds + Math.min(s.end, chunk.durationSeconds),

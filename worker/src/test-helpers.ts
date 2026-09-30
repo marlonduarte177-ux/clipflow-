@@ -37,6 +37,21 @@ export function makeLetterboxedVideo(file: string) {
   ]);
 }
 
+/**
+ * "Gameplay" de 60 s: movimiento constante, sonido de fondo parejo y ráfagas de
+ * disparos (golpes de 40 ms) solo entre los segundos 35 y 45.
+ */
+export function makeGameplayVideo(file: string) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  execFileSync("ffmpeg", [
+    "-hide_banner", "-loglevel", "error", "-y",
+    "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25:duration=60",
+    "-f", "lavfi", "-i",
+    "aevalsrc='0.08*sin(2*PI*220*t)+if(between(t\\,35\\,45)*lt(mod(t\\,0.4)\\,0.04)\\,0.9*(random(0)*2-1)\\,0)':s=44100:d=60",
+    "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", file,
+  ]);
+}
+
 export async function seedVideoJob(
   db: Database,
   root: string,

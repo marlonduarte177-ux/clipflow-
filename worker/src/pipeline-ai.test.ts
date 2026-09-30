@@ -37,13 +37,18 @@ const SEGMENTS: TranscriptSegment[] = Array.from({ length: 8 }, (_, i) => ({
 class FakeAI implements AIAnalysisProvider {
   readonly name = "fake";
   receivedChunks: AudioChunk[] = [];
-  constructor(private readonly fail = false) {}
+  analyzeCalls = 0;
+  constructor(
+    private readonly fail = false,
+    private readonly segments: TranscriptSegment[] = SEGMENTS,
+  ) {}
   async transcribe(chunks: AudioChunk[]) {
     if (this.fail) throw new Error("OpenAI caído");
     this.receivedChunks = chunks;
-    return { segments: SEGMENTS, language: "spanish", usage: { audioSeconds: 40, estimatedCostUsd: 0.004 } };
+    return { segments: this.segments, language: "spanish", usage: { audioSeconds: 40, estimatedCostUsd: 0.004 } };
   }
   async analyze() {
+    this.analyzeCalls++;
     // El contenido importante está en una parte SILENCIOSA (2–12 s): sin IA no se elegiría.
     return {
       highlights: [{ startSeconds: 2, endSeconds: 12, strength: 1, reason: "gancho" }],
@@ -103,6 +108,24 @@ describe("procesamiento con IA", () => {
     expect(result.clipCount).toBeGreaterThan(0);
     const subs = await db.select().from(schema.subtitles).where(eq(schema.subtitles.videoId, job.videoId));
     expect(subs).toEqual([]);
+  });
+
+  it("sin habla real (gameplay) no inventa títulos ni subtítulos y lo indica", async () => {
+    const db = h!.db;
+    const { job } = await seedVideoJob(db, root, { sample });
+    const almostSilent = new FakeAI(false, [{ startSeconds: 3, endSeconds: 5, text: "Crímenes en serie" }]);
+    const deps = { ...makeDeps(db, root, path.join(root, "work")), ai: almostSilent };
+    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    expect(result.ai).toBe("no_speech");
+    expect(result.clipCount).toBeGreaterThan(0);
+    expect(almostSilent.analyzeCalls).toBe(0);
+    const clipRows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
+    expect(clipRows.every((c) => c.title === null)).toBe(true);
+    const subs = await db.select().from(schema.subtitles).where(eq(schema.subtitles.videoId, job.videoId));
+    expect(subs).toEqual([]);
+    // El costo de la transcripción sí se registra.
+    const usage = await db.select().from(schema.usage).where(eq(schema.usage.jobId, job.id));
+    expect(usage.find((u) => u.metric === "ai_audio_seconds")).toBeDefined();
   });
 
   it("sin clave de IA indica que está desactivada", async () => {

@@ -33,6 +33,12 @@ flowchart LR
    permite descargar el `.srt`.
 5. **Títulos:** uno por clip, en el idioma del video.
 
+### Videos sin habla
+
+Si Whisper no encuentra voz real, porque descarta las frases alucinadas (ver `docs/fase-6-7-procesamiento.md`),
+el resultado es `no_speech`: sin análisis de contenido, sin títulos y sin subtítulos. Los clips se
+eligen por acción, volumen y movimiento. La transcripción se paga igual (0.006 USD/min).
+
 ### Seguridad y robustez
 
 - La clave vive en **Secrets Manager** (`clipflow-staging/openai-api-key`) y ECS la entrega **solo al

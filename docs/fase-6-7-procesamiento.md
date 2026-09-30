@@ -78,6 +78,31 @@ Se crean clips solo para las ventanas con score ≥ `MIN_CLIP_SCORE` (0.6), sin 
 La interfaz `AIAnalysisProvider` (`shared/src/analysis/ai-provider.ts`) ya está definida: en la
 Fase 8, OpenAI aportará la señal `speech`, los subtítulos y los títulos.
 
+### Videos sin voz (gameplay, música)
+
+Detectado en una prueba real (30/09/2026) con un gameplay de Free Fire sin voz: salió 1 solo clip con un
+título inventado ("Crímenes en serie…").
+
+**Causa:**
+- Whisper "alucina" frases en audio sin habla. Esa transcripción falsa pesaba como contenido importante.
+- Los disparos, de milisegundos, se diluían en el volumen promedio.
+
+**Cambios:**
+- **Señal `action` (nueva, peso 0.3):** el volumen se mide cada 0.1 s y cuenta como pico toda subida
+  brusca de al menos 8 dB sobre la mediana de los 5 s anteriores, por ejemplo disparos, golpes,
+  explosiones o gritos.
+- **Señal `visual`:** ahora mide el movimiento continuo (suma de la puntuación de escena de cada
+  fotograma), no solo los cortes bruscos.
+- **Filtro de alucinaciones:** se descartan las frases que Whisper marca como probable silencio
+  (`no_speech_prob > 0.6`), poco seguras (`avg_logprob < -1`) o repetitivas (`compression_ratio > 2.4`).
+- **Modo "sin habla":** si queda menos del 10 % del audio (o menos de 15 s) con voz real, no se
+  generan títulos ni subtítulos y el resultado se marca `no_speech`. La web lo explica.
+
+Tests:
+- un "gameplay" de 60 s con ráfagas de disparos entre los segundos 35 y 45 → el mejor clip cae ahí;
+- frases alucinadas descartadas;
+- modo sin habla: sin títulos, sin subtítulos, con el costo registrado.
+
 ### Encuadre vertical 9:16 (automático)
 
 Cada clip sale en 1080x1920, a pantalla completa:

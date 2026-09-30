@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { claimJob, failJob, schema, type DbHandle } from "@clipflow/shared/db";
 import { createTestDb } from "@clipflow/shared/db/testing";
 import { JobError, processAnalyzeJob } from "./pipeline.js";
-import { makeDeps, makeLetterboxedVideo, makeSampleVideo, seedVideoJob } from "./test-helpers.js";
+import { makeDeps, makeGameplayVideo, makeLetterboxedVideo, makeSampleVideo, seedVideoJob } from "./test-helpers.js";
 
 let h: DbHandle | undefined;
 let root: string;
@@ -135,5 +135,21 @@ describe("encuadre vertical", () => {
     const file = path.join(root, clip!.s3Key!);
     expect(probeSize(file)).toBe("1080,1920");
     expect(visibleArea(file)).toEqual([1080, 1920]);
+  });
+});
+
+describe("gameplay sin voz", () => {
+  it("los disparos (picos de sonido cortos) definen el mejor momento", async () => {
+    const db = h!.db;
+    const gameplay = path.join(root, "gameplay.mp4");
+    makeGameplayVideo(gameplay);
+    const { job } = await seedVideoJob(db, root, { sample: gameplay, params: { clipDurationSeconds: 15 } });
+    await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, makeDeps(db, root, path.join(root, "work")));
+    const rows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
+    const best = [...rows].sort((a, b) => b.score! - a.score!)[0]!;
+    // El clip con mejor score cae dentro de la balacera (35–45 s).
+    expect(best.startSeconds).toBeGreaterThanOrEqual(28);
+    expect(best.endSeconds).toBeLessThanOrEqual(52);
+    expect(best.scoreBreakdown).toHaveProperty("action");
   });
 });

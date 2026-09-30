@@ -244,9 +244,17 @@ function AiStatus({ result }: { result: NonNullable<JobDto["result"]> }) {
       </p>
     );
   }
+  if (result.ai === "no_speech") {
+    return (
+      <p className="text-xs text-muted">
+        No se detectó habla (gameplay o música): los clips se eligieron por acción (disparos, golpes, picos de sonido),
+        volumen y movimiento. Sin títulos ni subtítulos.
+      </p>
+    );
+  }
   return (
     <p className="text-xs text-muted">
-      Sin análisis de IA{result.aiReason ? `: ${result.aiReason}` : ""}. Los clips se eligieron por audio y cambios de escena.
+      Sin análisis de IA{result.aiReason ? `: ${result.aiReason}` : ""}. Los clips se eligieron por acción, volumen y movimiento.
     </p>
   );
 }
