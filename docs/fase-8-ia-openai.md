@@ -77,7 +77,7 @@ El costo exacto de cada video queda en la tabla `usage` (`estimated_cost_usd`).
 - Con un precio de 0.03 USD por minuto procesado, el margen es de ~75 % sobre el costo variable.
   Un video de 23 min se cobraría ~0.69 USD.
 - Para cubrir los ~30 USD fijos al mes a ese precio se necesitan ~1,300 minutos procesados al mes
-  (≈ 57 videos de 23 min).
+  (≈ 58 videos de 23 min).
 - Opción para bajar costos: `gpt-4o-mini-transcribe` cuesta la mitad (0.003 USD/min), pero **no**
   devuelve tiempos por frase, así que se perderían los subtítulos y los cortes exactos.
 
