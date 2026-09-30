@@ -117,8 +117,9 @@ export class WorkerStack extends Stack {
         OPENAI_TRANSCRIBE_MODEL: "whisper-1",
         OPENAI_ANALYSIS_MODEL: "gpt-4o-mini",
         OPENAI_MAX_AUDIO_MINUTES: "180",
-        // Análisis de imágenes con IA: activado en staging para medir su costo real.
-        AI_VISION_ENABLED: props.stage === "production" ? "false" : "true",
+        // Análisis de imágenes con IA: apagado (probado en staging: caro en videos largos y satura el
+        // límite por minuto de OpenAI). El código sigue disponible: "true" lo vuelve a activar.
+        AI_VISION_ENABLED: "false",
         AI_VISION_INTERVAL_SECONDS: "3",
         AI_VISION_MAX_FRAMES: "600",
         // Encuadre que sigue a quien habla (detector local YuNet, sin costo por imagen).

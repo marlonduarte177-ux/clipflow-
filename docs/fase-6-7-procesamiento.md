@@ -107,13 +107,15 @@ Tests:
 
 Cada clip sale en 1080x1920. **Solo se recorta cuando hace falta:**
 
-1. **Video horizontal:** se recorta a 9:16.
+1. **Video horizontal:** se recorta un poco, no a pantalla completa.
    - Primero se quitan las franjas negras "quemadas". El worker toma 8 fotogramas y marca como imagen
      real las filas y columnas donde al menos un 35 % de los píxeles no son negros.
-   - Luego, en cada clip, se elige la franja vertical con más movimiento y detalle, con una leve
-     preferencia por el centro, en lugar de cortar siempre al centro.
-   - **Si hay personas, el recorte las sigue** (ver "Encuadre que sigue caras" abajo). Sin caras,
-     se usa la franja con más acción.
+   - Luego se recorta un **cuadrado** (`HORIZONTAL_WINDOW_ASPECT` = 1): en un 16:9 se ve el ~56 % del
+     ancho. Un recorte 9:16 a pantalla completa dejaría solo el ~31 % y se ve demasiado cerca.
+   - El cuadrado se coloca donde está la acción (movimiento y detalle, con una leve preferencia por
+     el centro) o, **si hay personas, siguiéndolas** (ver "Encuadre que sigue caras" abajo).
+   - Arriba y abajo se rellena con el **mismo video difuminado** (no franjas negras). El difuminado
+     se hace a baja resolución, así que es rápido.
 2. **Video vertical:** NO se recorta a 9:16.
    - **Sin franjas:** se muestra completo. Si su proporción no es exactamente 9:16, lo que falte se
      rellena de negro en vez de cortar.
@@ -127,6 +129,8 @@ Cada clip sale en 1080x1920. **Solo se recorta cuando hace falta:**
    trataban como horizontales y se recortaban de más.
 
 Historial de pruebas reales (30/09/2026):
+- Los recortes 9:16 a pantalla completa de videos horizontales "acercaban demasiado". Ahora se
+  recorta un cuadrado con fondo difuminado.
 - Primero, el clip de un video de TikTok salía con la imagen pequeña entre franjas negras y con la
   marca de agua. Se quitaron las franjas.
 - Después, los videos que ya venían verticales se recortaban demasiado: la imagen horizontal del
@@ -166,7 +170,7 @@ habla en lugar de quedarse fijo.
   - Se promedia en ventanas de 1.5 s y solo cuenta mientras la transcripción dice que hay voz.
   - Tras cambiar de persona se queda al menos 2 s, para no rebotar en diálogos rápidos.
 - **A quién encuadrar:**
-  - si el grupo cabe en el 9:16, al grupo;
+  - si el grupo cabe en el recorte, al grupo;
   - si no, a quien habla;
   - si no se sabe, a la cara más grande (entre parecidas, la más central).
   - En escenas sin caras dentro del clip, se usa el encuadre por acción.
