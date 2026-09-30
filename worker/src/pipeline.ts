@@ -19,6 +19,8 @@ import {
 import { reportProgress, schema, type Database, type Job, type JobStage } from "@clipflow/shared/db";
 import {
   analyzeSignals,
+  chooseVerticalCrop,
+  detectContentBox,
   extractAudioChunks,
   FfmpegError,
   probe,
@@ -144,6 +146,9 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       .update(videos)
       .set({ status: "ready", durationSeconds: info.durationSeconds, width: info.width, height: info.height, probe: info.raw })
       .where(eq(videos.id, video.id));
+    // Franjas negras "quemadas" en el video (p. ej. horizontal subido como vertical): se quitan.
+    const contentBox = await detectContentBox(deps.tools, input, info, controller.signal);
+    if (contentBox) deps.log.info({ jobId: job.id, contentBox }, "franjas negras detectadas");
     await progress("preparing", 1, true);
 
     // 2. Analizar: señales reales por segundo (volumen y cambios de escena).
@@ -204,11 +209,15 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       const duration = moment.endSeconds - moment.startSeconds;
       const clipFile = path.join(dir, `clip-${index}.mp4`);
       const thumbFile = path.join(dir, `thumb-${index}.jpg`);
-      await renderVerticalClip(deps.tools, input, clipFile, { startSeconds: moment.startSeconds, durationSeconds: duration }, {
+      const segment = { startSeconds: moment.startSeconds, durationSeconds: duration };
+      // Encuadre por clip: sin franjas negras y centrado donde está la acción.
+      const crop = await chooseVerticalCrop(deps.tools, input, info, contentBox, segment, controller.signal);
+      await renderVerticalClip(deps.tools, input, clipFile, segment, {
         signal: controller.signal,
+        crop,
         onProgress: (s) => void progress("rendering_clips", (index + s / duration) / finalMoments.length).catch(() => undefined),
       });
-      await renderThumbnail(deps.tools, input, thumbFile, moment.startSeconds + duration / 2, controller.signal);
+      await renderThumbnail(deps.tools, input, thumbFile, moment.startSeconds + duration / 2, controller.signal, crop);
       check();
       const key = `clips/${job.userId}/${job.id}/${index}.mp4`;
       const thumbKey = `thumbnails/${job.userId}/${job.id}/${index}.jpg`;

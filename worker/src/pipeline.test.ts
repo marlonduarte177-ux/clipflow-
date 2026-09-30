@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { claimJob, failJob, schema, type DbHandle } from "@clipflow/shared/db";
 import { createTestDb } from "@clipflow/shared/db/testing";
 import { JobError, processAnalyzeJob } from "./pipeline.js";
-import { makeDeps, makeSampleVideo, seedVideoJob } from "./test-helpers.js";
+import { makeDeps, makeLetterboxedVideo, makeSampleVideo, seedVideoJob } from "./test-helpers.js";
 
 let h: DbHandle | undefined;
 let root: string;
@@ -114,5 +114,26 @@ describe("procesamiento de un video real con FFmpeg", () => {
     expect(result.clipCount).toBe(0);
     const [j] = await db.select().from(schema.processingJobs).where(eq(schema.processingJobs.id, job.id));
     expect(j!.status).toBe("processing"); // el consumidor lo marca "completed" (0 clips es un resultado válido)
+  });
+});
+
+describe("encuadre vertical", () => {
+  /** Zona con imagen (no negra) del clip, según cropdetect. */
+  function visibleArea(file: string) {
+    const out = execFileSync("sh", ["-c", `ffmpeg -hide_banner -i "${file}" -vf cropdetect=limit=24:round=2 -frames:v 20 -f null - 2>&1`]).toString();
+    return [...out.matchAll(/crop=(\d+):(\d+)/g)].pop()?.slice(1).map(Number);
+  }
+
+  it("quita las franjas negras y la marca de agua: el clip ocupa toda la pantalla", async () => {
+    const db = h!.db;
+    const letterboxed = path.join(root, "letterbox.mp4");
+    makeLetterboxedVideo(letterboxed);
+    const { job } = await seedVideoJob(db, root, { sample: letterboxed });
+    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, makeDeps(db, root, path.join(root, "work")));
+    expect(result.clipCount).toBeGreaterThan(0);
+    const [clip] = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
+    const file = path.join(root, clip!.s3Key!);
+    expect(probeSize(file)).toBe("1080,1920");
+    expect(visibleArea(file)).toEqual([1080, 1920]);
   });
 });

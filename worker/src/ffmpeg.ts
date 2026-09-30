@@ -63,6 +63,28 @@ function run(command: string, args: string[], options: RunOptions = {}): Promise
 
 const FFMPEG_BASE = ["-hide_banner", "-nostdin", "-y", "-loglevel", "error"];
 
+/** Ejecuta FFmpeg y devuelve la salida binaria (p. ej. píxeles en crudo). */
+function runRaw(command: string, args: string[], signal?: AbortSignal): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const chunks: Buffer[] = [];
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr = (stderr + chunk.toString()).slice(-4000);
+    });
+    const onAbort = () => child.kill("SIGKILL");
+    signal?.addEventListener("abort", onAbort, { once: true });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      signal?.removeEventListener("abort", onAbort);
+      if (signal?.aborted) return reject(new DOMException("Cancelado", "AbortError"));
+      if (code === 0) resolve(Buffer.concat(chunks));
+      else reject(new FfmpegError(`${path.basename(command)} terminó con código ${code}`, stderr));
+    });
+  });
+}
+
 export interface ProbeResult {
   durationSeconds: number;
   width: number;
@@ -161,13 +183,193 @@ export function parseMetadataFile(text: string, key: string): { time: number; va
   return result;
 }
 
+/** Zona del cuadro con imagen real (sin franjas negras). */
+export interface ContentBox {
+  width: number;
+  height: number;
+  x: number;
+  y: number;
+}
+
+/**
+ * Detecta franjas negras "quemadas" en el video (p. ej. un video horizontal subido a TikTok
+ * en formato vertical). Toma varios fotogramas en baja resolución y marca como "imagen real"
+ * las filas/columnas donde al menos un 35 % de los píxeles no son negros en algún fotograma.
+ * Así una marca de agua pequeña dentro de la franja no cuenta como imagen.
+ * Devuelve null si no hay franjas que quitar.
+ */
+export async function detectContentBox(
+  tools: FfmpegTools,
+  input: string,
+  info: ProbeResult,
+  signal?: AbortSignal,
+): Promise<ContentBox | null> {
+  const w = 160;
+  const h = Math.max(2, Math.round((w * info.height) / info.width / 2) * 2);
+  const samples = 8;
+  const images: Buffer[] = [];
+  for (let i = 0; i < samples; i++) {
+    const at = (info.durationSeconds * (i + 0.5)) / samples;
+    const pixels = await runRaw(
+      tools.ffmpegPath,
+      ["-hide_banner", "-nostdin", "-loglevel", "error", "-ss", at.toFixed(3), "-i", input,
+        "-frames:v", "1", "-vf", `scale=${w}:${h},format=gray`, "-f", "rawvideo", "-"],
+      signal,
+    );
+    if (pixels.length >= w * h) images.push(pixels);
+  }
+  if (images.length === 0) return null;
+
+  const span = (values: Float64Array) => {
+    let first = -1;
+    let last = -1;
+    values.forEach((v, i) => {
+      if (v >= 0.35) {
+        if (first < 0) first = i;
+        last = i;
+      }
+    });
+    if (first < 0) return null;
+    // Un píxel hacia adentro en los bordes con franja: evita líneas negras por el redondeo.
+    if (first > 0) first++;
+    if (last < values.length - 1) last--;
+    return last > first ? { first, last } : null;
+  };
+  // Primero las filas (franjas arriba/abajo)…
+  const rowMax = new Float64Array(h);
+  for (const px of images) {
+    for (let y = 0; y < h; y++) {
+      let bright = 0;
+      for (let x = 0; x < w; x++) if (px[y * w + x]! > 32) bright++;
+      rowMax[y] = Math.max(rowMax[y]!, bright / w);
+    }
+  }
+  const rows = span(rowMax);
+  if (!rows) return null;
+  // …luego las columnas, mirando solo dentro de las filas con imagen (franjas laterales).
+  const colMax = new Float64Array(w);
+  const rowCount = rows.last + 1 - rows.first;
+  for (const px of images) {
+    for (let x = 0; x < w; x++) {
+      let bright = 0;
+      for (let y = rows.first; y <= rows.last; y++) if (px[y * w + x]! > 32) bright++;
+      colMax[x] = Math.max(colMax[x]!, bright / rowCount);
+    }
+  }
+  const cols = span(colMax);
+  if (!cols) return null;
+
+  const even = (n: number) => Math.max(0, Math.floor(n / 2) * 2);
+  const sy = info.height / h;
+  const sx = info.width / w;
+  const box = {
+    x: even(cols.first * sx),
+    y: even(rows.first * sy),
+    width: even((cols.last + 1 - cols.first) * sx),
+    height: even((rows.last + 1 - rows.first) * sy),
+  };
+  box.width = Math.min(box.width, info.width - box.x);
+  box.height = Math.min(box.height, info.height - box.y);
+  // Solo vale la pena si quita al menos un 5 % y deja una imagen razonable.
+  const removesSomething = box.width < info.width * 0.95 || box.height < info.height * 0.95;
+  const sensible = box.width >= info.width * 0.2 && box.height >= info.height * 0.2;
+  return removesSomething && sensible ? box : null;
+}
+
+/** Recorte final del cuadro original que se lleva a 1080x1920. */
+export interface VerticalCrop {
+  width: number;
+  height: number;
+  x: number;
+  y: number;
+}
+
+const even = (n: number) => Math.max(2, Math.floor(n / 2) * 2);
+
+/**
+ * Encuadre vertical 9:16 de un clip:
+ * 1. parte de la zona con imagen real (sin franjas negras);
+ * 2. si la imagen es más ancha que 9:16, busca la franja vertical con más acción
+ *    (movimiento entre fotogramas + detalle), con una leve preferencia por el centro.
+ * Devuelve el recorte exacto sobre el cuadro original.
+ */
+export async function chooseVerticalCrop(
+  tools: FfmpegTools,
+  input: string,
+  info: ProbeResult,
+  box: ContentBox | null,
+  segment: { startSeconds: number; durationSeconds: number },
+  signal?: AbortSignal,
+): Promise<VerticalCrop> {
+  const area = box ?? { x: 0, y: 0, width: info.width, height: info.height };
+  const targetWidth = even((area.height * 9) / 16);
+  if (targetWidth >= area.width) {
+    // Imagen más alta que 9:16: se recorta arriba/abajo, al centro.
+    const targetHeight = even((area.width * 16) / 9);
+    return { width: even(area.width), height: targetHeight, x: area.x, y: area.y + even((area.height - targetHeight) / 2) };
+  }
+
+  const w = 160;
+  const h = Math.max(2, Math.round((w * area.height) / area.width / 2) * 2);
+  const frames: Buffer[] = [];
+  const samples = 8;
+  for (let i = 0; i < samples; i++) {
+    const at = segment.startSeconds + (segment.durationSeconds * (i + 0.5)) / samples;
+    const px = await runRaw(
+      tools.ffmpegPath,
+      ["-hide_banner", "-nostdin", "-loglevel", "error", "-ss", at.toFixed(3), "-i", input, "-frames:v", "1",
+        "-vf", `crop=${area.width}:${area.height}:${area.x}:${area.y},scale=${w}:${h},format=gray`,
+        "-f", "rawvideo", "-"],
+      signal,
+    );
+    if (px.length >= w * h) frames.push(px);
+  }
+
+  // Interés por columna: detalle (bordes horizontales) + movimiento entre fotogramas seguidos.
+  const interest = new Float64Array(w);
+  frames.forEach((px, f) => {
+    const prev = frames[f - 1];
+    for (let y = 0; y < h; y++) {
+      for (let x = 1; x < w; x++) {
+        const i = y * w + x;
+        interest[x] = interest[x]! + Math.abs(px[i]! - px[i - 1]!) + (prev ? 2 * Math.abs(px[i]! - prev[i]!) : 0);
+      }
+    }
+  });
+  const windowCols = Math.max(1, Math.round((targetWidth / area.width) * w));
+  const maxStart = w - windowCols;
+  const prefix = new Float64Array(w + 1);
+  for (let x = 0; x < w; x++) prefix[x + 1] = prefix[x]! + interest[x]!;
+  const center = maxStart / 2;
+  let best = Math.round(center);
+  let bestScore = -Infinity;
+  for (let start = 0; start <= maxStart; start++) {
+    const sum = prefix[start + windowCols]! - prefix[start]!;
+    // Hasta un 15 % de preferencia por el centro: evita saltos por detalles sin importancia.
+    const centerBias = maxStart > 0 ? 1 - 0.15 * (Math.abs(start - center) / center) : 1;
+    const score = sum * centerBias;
+    if (score > bestScore) {
+      bestScore = score;
+      best = start;
+    }
+  }
+  const offset = Math.min(area.width - targetWidth, even((best / w) * area.width));
+  return { width: targetWidth, height: even(area.height), x: area.x + offset, y: area.y };
+}
+
+/** Filtros de FFmpeg: recorte elegido → 1080x1920. */
+export function verticalFilter(crop: VerticalCrop | null): string {
+  const cut = crop ? `crop=${crop.width}:${crop.height}:${crop.x}:${crop.y},` : "";
+  return `[0:v:0]${cut}scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[v]`;
+}
+
 /** Recorta un segmento y lo convierte a vertical 9:16 (1080x1920), listo para redes. */
 export async function renderVerticalClip(
   tools: FfmpegTools,
   input: string,
   output: string,
   segment: { startSeconds: number; durationSeconds: number },
-  options: { signal?: AbortSignal; onProgress?: (seconds: number) => void } = {},
+  options: { signal?: AbortSignal; onProgress?: (seconds: number) => void; crop?: VerticalCrop | null } = {},
 ): Promise<void> {
   await run(
     tools.ffmpegPath,
@@ -182,12 +384,12 @@ export async function renderVerticalClip(
       input,
       "-t",
       segment.durationSeconds.toFixed(3),
+      "-filter_complex",
+      verticalFilter(options.crop ?? null),
       "-map",
-      "0:v:0",
+      "[v]",
       "-map",
       "0:a:0?",
-      "-vf",
-      "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1",
       "-c:v",
       "libx264",
       "-preset",
@@ -206,7 +408,7 @@ export async function renderVerticalClip(
       "+faststart",
       output,
     ],
-    options,
+    { signal: options.signal, onProgress: options.onProgress },
   );
 }
 
@@ -217,6 +419,7 @@ export async function renderThumbnail(
   output: string,
   atSeconds: number,
   signal?: AbortSignal,
+  crop: VerticalCrop | null = null,
 ): Promise<void> {
   await run(
     tools.ffmpegPath,
@@ -226,10 +429,12 @@ export async function renderThumbnail(
       atSeconds.toFixed(3),
       "-i",
       input,
+      "-filter_complex",
+      `${verticalFilter(crop)};[v]scale=540:960[t]`,
+      "-map",
+      "[t]",
       "-frames:v",
       "1",
-      "-vf",
-      "scale=540:960:force_original_aspect_ratio=increase,crop=540:960",
       "-q:v",
       "4",
       output,
