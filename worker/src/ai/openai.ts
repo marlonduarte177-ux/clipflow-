@@ -23,6 +23,8 @@ export interface OpenAIProviderOptions {
   baseUrl?: string;
   fetch?: typeof fetch;
   maxAttempts?: number;
+  /** Intentos ante el límite de velocidad (429) de OpenAI. */
+  maxRateLimitAttempts?: number;
   /** Espera entre reintentos (se puede acortar en tests). */
   sleep?: (ms: number) => Promise<void>;
 }
@@ -33,10 +35,64 @@ export class AIProviderError extends Error {
     message: string,
     readonly retryable: boolean,
     readonly status?: number,
+    /** Código de error de OpenAI (p. ej. "insufficient_quota", "rate_limit_exceeded"). */
+    readonly code?: string,
   ) {
     super(message);
     this.name = "AIProviderError";
   }
+}
+
+/** Mensaje claro (apto para mostrar al usuario) según el error de OpenAI. */
+function describeError(status: number, code: string | undefined): string {
+  if (status === 401) return "La clave de OpenAI no es válida";
+  if (status === 429 && code === "insufficient_quota") {
+    return "Tu cuenta de OpenAI no tiene saldo o llegó a su límite de gasto (revisa Billing y Limits en platform.openai.com)";
+  }
+  if (status === 429) return "OpenAI limitó las solicitudes por minuto de tu cuenta (límite de velocidad)";
+  if (status >= 500) return `OpenAI tuvo un error temporal (${status})`;
+  return code ? `OpenAI rechazó la solicitud (${status}, ${code})` : `OpenAI respondió ${status}`;
+}
+
+/** Solo el código de error del cuerpo (nunca el texto: puede incluir contenido del usuario). */
+async function errorCode(res: Response): Promise<string | undefined> {
+  try {
+    const body = (await res.json()) as { error?: { code?: unknown; type?: unknown } };
+    const code = body?.error?.code ?? body?.error?.type;
+    return typeof code === "string" && /^[a-z0-9_.-]{1,60}$/i.test(code) ? code : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Duración de las cabeceras de OpenAI ("1s", "6m0s", "250ms", "1.5s") en ms. */
+export function parseResetDuration(value: string | null): number | undefined {
+  if (!value) return undefined;
+  let total = 0;
+  let matched = false;
+  for (const [, n, unit] of value.matchAll(/([\d.]+)(ms|h|m|s)/g)) {
+    matched = true;
+    total += Number(n) * (unit === "ms" ? 1 : unit === "s" ? 1000 : unit === "m" ? 60_000 : 3_600_000);
+  }
+  return matched && Number.isFinite(total) ? total : undefined;
+}
+
+/**
+ * Cuánto esperar antes de reintentar: lo que diga OpenAI (retry-after-ms, retry-after, o cuándo
+ * se recupera el límite de tokens/solicitudes); si no dice nada, 2^intento segundos. Máximo 60 s.
+ */
+function retryDelayMs(headers: Headers, attempt: number): number {
+  const ms = Number(headers.get("retry-after-ms"));
+  const seconds = Number(headers.get("retry-after"));
+  const hinted =
+    (Number.isFinite(ms) && ms > 0 ? ms : undefined) ??
+    (Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : undefined) ??
+    Math.max(
+      parseResetDuration(headers.get("x-ratelimit-reset-tokens")) ?? 0,
+      parseResetDuration(headers.get("x-ratelimit-reset-requests")) ?? 0,
+    );
+  const base = hinted && hinted > 0 ? hinted + 250 : 1000 * 2 ** attempt;
+  return Math.min(60_000, base);
 }
 
 const TranscriptionResponse = z.object({
@@ -153,19 +209,26 @@ export class OpenAIProvider implements AIAnalysisProvider {
   private readonly fetchImpl: typeof fetch;
   private readonly baseUrl: string;
   private readonly maxAttempts: number;
+  private readonly maxRateLimitAttempts: number;
   private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(private readonly options: OpenAIProviderOptions) {
     this.fetchImpl = options.fetch ?? fetch;
     this.baseUrl = options.baseUrl ?? "https://api.openai.com/v1";
     this.maxAttempts = options.maxAttempts ?? 4;
+    // El límite por minuto se recupera solo: vale la pena esperar más (hasta ~6 min en total).
+    this.maxRateLimitAttempts = options.maxRateLimitAttempts ?? 8;
     this.sleep = options.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   }
 
-  /** Petición con reintentos para errores temporales (429, 5xx, red). */
+  /**
+   * Petición con reintentos para errores temporales: red y 5xx (hasta `maxAttempts`), y límite de
+   * velocidad 429 (hasta `maxRateLimitAttempts`, esperando lo que indique OpenAI). No se reintenta
+   * una clave inválida ni una cuenta sin saldo.
+   */
   private async request(pathname: string, init: () => Promise<RequestInit>): Promise<unknown> {
     let lastError: AIProviderError | undefined;
-    for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
+    for (let attempt = 1; ; attempt++) {
       let res: Response;
       try {
         res = await this.fetchImpl(`${this.baseUrl}${pathname}`, {
@@ -174,22 +237,19 @@ export class OpenAIProvider implements AIAnalysisProvider {
         });
       } catch {
         lastError = new AIProviderError("No se pudo conectar con OpenAI", true);
+        if (attempt >= this.maxAttempts) throw lastError;
         await this.sleep(1000 * 2 ** attempt);
         continue;
       }
       if (res.ok) return res.json();
-      // No se registra el cuerpo completo: puede incluir contenido del usuario.
-      const retryable = res.status === 429 || res.status >= 500;
-      lastError = new AIProviderError(
-        res.status === 401 ? "La clave de OpenAI no es válida" : `OpenAI respondió ${res.status}`,
-        retryable,
-        res.status,
-      );
-      if (!retryable) throw lastError;
-      const retryAfter = Number(res.headers.get("retry-after"));
-      await this.sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1000 * 2 ** attempt);
+      const code = await errorCode(res);
+      const rateLimited = res.status === 429 && code !== "insufficient_quota";
+      const retryable = rateLimited || res.status >= 500;
+      lastError = new AIProviderError(describeError(res.status, code), retryable, res.status, code);
+      const limit = rateLimited ? this.maxRateLimitAttempts : this.maxAttempts;
+      if (!retryable || attempt >= limit) throw lastError;
+      await this.sleep(retryDelayMs(res.headers, attempt));
     }
-    throw lastError ?? new AIProviderError("OpenAI no respondió", true);
   }
 
   private headers(json = false): Record<string, string> {
@@ -314,7 +374,11 @@ export class OpenAIProvider implements AIAnalysisProvider {
    * Imágenes: cada hoja es una cuadrícula de fotogramas. La IA puntúa cada uno (0–1) según
    * qué tan buen momento de clip se ve y le pone una etiqueta corta. Una llamada por hoja.
    */
-  async analyzeFrames(sheets: FrameSheet[]) {
+  /**
+   * @param options.deadline hora límite (ms) para empezar hojas nuevas: las que falten se omiten y
+   *   se devuelve lo analizado (en videos largos la cuenta puede limitar las imágenes por minuto).
+   */
+  async analyzeFrames(sheets: FrameSheet[], options: { deadline?: number } = {}) {
     const system =
       "Eres editor de clips cortos para redes sociales. Recibes una imagen con varios fotogramas de un video " +
       "en cuadrícula, numerados desde 0 de izquierda a derecha y de arriba a abajo (las celdas negras vacías se ignoran). " +
@@ -326,8 +390,14 @@ export class OpenAIProvider implements AIAnalysisProvider {
     const frames: FrameScore[] = [];
     const usage: AIUsage = { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 };
     let next = 0;
+    let skippedSheets = 0;
     const worker = async () => {
       while (next < sheets.length) {
+        if (options.deadline !== undefined && Date.now() >= options.deadline) {
+          skippedSheets += sheets.length - next;
+          next = sheets.length;
+          break;
+        }
         const sheet = sheets[next++]!;
         const image = (await readFile(sheet.path)).toString("base64");
         const { json, usage: u } = await this.chat(
@@ -355,9 +425,10 @@ export class OpenAIProvider implements AIAnalysisProvider {
         }
       }
     };
-    await Promise.all(Array.from({ length: Math.min(3, sheets.length) }, worker));
+    // De a 2: cada hoja pesa ~37 mil tokens en gpt-4o-mini y el límite por minuto es de la cuenta.
+    await Promise.all(Array.from({ length: Math.min(2, sheets.length) }, worker));
     frames.sort((a, b) => a.timeSeconds - b.timeSeconds);
-    return { frames, usage };
+    return { frames, usage, skippedSheets };
   }
 
   async generateClipSuggestions(segments: TranscriptSegment[], moments: { startSeconds: number; endSeconds: number }[]) {
