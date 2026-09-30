@@ -40,6 +40,8 @@ describe("loadProductConfig", () => {
         SCORE_WEIGHT_VISUAL: "0",
         SCORE_WEIGHT_OCR: "0",
         SCORE_WEIGHT_REACTION: "0",
+        SCORE_WEIGHT_ACTION: "0",
+        SCORE_WEIGHT_VISION: "0",
       }),
     ).toThrow(/mayor que 0/);
   });

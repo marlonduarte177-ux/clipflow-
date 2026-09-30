@@ -25,6 +25,16 @@ const EnvSchema = z.object({
   OPENAI_TRANSCRIBE_MODEL: z.string().default("whisper-1"),
   OPENAI_ANALYSIS_MODEL: z.string().default("gpt-4o-mini"),
   OPENAI_MAX_AUDIO_MINUTES: z.coerce.number().positive().default(180),
+  /** Análisis de imágenes con IA (experimental: cuesta por imagen). */
+  AI_VISION_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+  AI_VISION_INTERVAL_SECONDS: z.coerce.number().min(1).default(3),
+  /** Tope de fotogramas por video (control de costos). */
+  AI_VISION_MAX_FRAMES: z.coerce.number().int().positive().default(600),
+  /** Modelo con visión; vacío = el mismo del análisis (usa sus precios). */
+  OPENAI_VISION_MODEL: z.string().optional(),
   /** Precios para estimar costos (USD). Verificar en https://openai.com/api/pricing */
   OPENAI_TRANSCRIBE_COST_PER_MINUTE_USD: z.coerce.number().nonnegative().default(0.006),
   OPENAI_INPUT_COST_PER_1M_TOKENS_USD: z.coerce.number().nonnegative().default(0.15),

@@ -76,10 +76,24 @@ export interface JobDto {
 
 export interface JobResult {
   clipCount: number;
-  /** "used": hubo análisis de IA; "disabled": no hay clave configurada; "unavailable": la IA falló. */
-  ai: "used" | "disabled" | "unavailable" | "no_audio";
+  /**
+   * "used": hubo análisis de IA; "no_speech": se transcribió pero no hay habla (p. ej. gameplay);
+   * "disabled": no hay clave; "unavailable": la IA falló; "no_audio": el video no tiene audio.
+   */
+  ai: "used" | "no_speech" | "disabled" | "unavailable" | "no_audio";
   aiReason?: string;
   language?: string | null;
+  /** Análisis de imágenes con IA (experimental). */
+  vision?: "used" | "disabled" | "unavailable";
+  visionFrames?: number;
+  /** Costo estimado de ESTE procesamiento, en USD. */
+  costs?: {
+    transcriptionUsd: number;
+    textUsd: number;
+    visionUsd: number;
+    computeUsd: number;
+    totalUsd: number;
+  };
 }
 
 export interface JobListResponse {

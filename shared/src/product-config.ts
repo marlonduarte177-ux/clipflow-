@@ -12,6 +12,10 @@ export interface ScoreWeights {
   visual: number;
   ocr: number;
   reaction: number;
+  /** Picos de sonido cortos (disparos, golpes, explosiones, gritos): clave en gameplay. */
+  action: number;
+  /** Lo que la IA ve en las imágenes (kills, avisos en pantalla, jugadas, reacciones). */
+  vision: number;
 }
 
 export interface ProductConfig {
@@ -37,7 +41,7 @@ export interface ProductConfig {
 export const DEFAULT_PRODUCT_CONFIG: ProductConfig = {
   clipDurationsSeconds: [15, 30, 45, 60, 90],
   defaultClipDurationSeconds: 30,
-  scoreWeights: { audio: 0.25, speech: 0.35, visual: 0.2, ocr: 0.05, reaction: 0.15 },
+  scoreWeights: { audio: 0.2, speech: 0.35, visual: 0.15, action: 0.3, vision: 0.35, ocr: 0.05, reaction: 0.1 },
   minClipScore: 0.6,
   maxClipsPerVideo: 15,
   upload: {
@@ -100,6 +104,8 @@ export function loadProductConfig(env: Env = process.env): ProductConfig {
     visual: weight("visual"),
     ocr: weight("ocr"),
     reaction: weight("reaction"),
+    action: weight("action"),
+    vision: weight("vision"),
   };
   if (Object.values(scoreWeights).every((w) => w === 0)) {
     throw new Error("Al menos un peso del score debe ser mayor que 0");

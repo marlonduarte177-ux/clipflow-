@@ -1,6 +1,10 @@
 # ClipFlow — Fase 8: Análisis con IA (OpenAI)
 
-Estado: **código terminado y probado. Pendiente: desplegar y pegar la clave de OpenAI.**
+Estado: **desplegada y verificada en AWS (staging) con OpenAI real** el 30/09/2026.
+
+**Prueba real:** un video de **23 min** se procesó con IA sin errores (transcripción, momentos por
+contenido, frases completas, subtítulos y títulos). **Costo real de OpenAI: 0.14 USD**, igual a la
+estimación (23 min × 0.006 USD de transcripción + menos de 0.01 USD de análisis).
 
 ## Qué hace
 
@@ -29,6 +33,35 @@ flowchart LR
    permite descargar el `.srt`.
 5. **Títulos:** uno por clip, en el idioma del video.
 
+### Análisis de imágenes (experimental)
+
+Activado en **staging** para medir su costo real; en producción está apagado por defecto
+(`AI_VISION_ENABLED`).
+
+1. Toma **1 fotograma cada 3 s**, sin franjas negras. En videos largos se espacian más: máximo
+   600 fotogramas por video.
+2. Los junta en **hojas de 3x3** (1536x864). OpenAI cobra una imagen por cada 9 fotogramas.
+3. `gpt-4o-mini`, en detalle alto, puntúa cada fotograma de 0 a 1 (kills, avisos en pantalla, jugadas,
+   reacciones; menús y pantallas de carga ≈ 0) y le pone una etiqueta corta.
+4. Esa puntuación es la señal **`vision`** (peso 0.35). Si el clip no tiene título por voz, usa la
+   etiqueta del mejor fotograma, por ejemplo "Eliminación doble".
+5. El costo se calcula con los **tokens reales** que devuelve OpenAI y se guarda por trabajo
+   (`processing_jobs.result.costs` y la tabla `usage`, con `details.kind = "vision"`). **No se muestra
+   en la web**: el costo de OpenAI se consulta en platform.openai.com → Usage.
+
+Referencia para calcular el costo antes de probar (verificar con el valor real):
+- un video de 23 min tiene ~460 fotogramas → ~52 imágenes;
+- según la documentación de OpenAI, `gpt-4o-mini` cobra una imagen en detalle alto como 85 tokens +
+  170 por cada bloque de 512 px;
+- el resultado real depende de cómo OpenAI escale cada imagen. Por eso ClipFlow registra lo que
+  OpenAI reporta.
+
+### Videos sin habla
+
+Si Whisper no encuentra voz real, porque descarta las frases alucinadas (ver `docs/fase-6-7-procesamiento.md`),
+el resultado es `no_speech`: sin análisis de contenido, sin títulos y sin subtítulos. Los clips se
+eligen por acción, volumen y movimiento. La transcripción se paga igual (0.006 USD/min).
+
 ### Seguridad y robustez
 
 - La clave vive en **Secrets Manager** (`clipflow-staging/openai-api-key`) y ECS la entrega **solo al
@@ -55,8 +88,27 @@ Precios usados para estimar (configurables; revisar en https://openai.com/api/pr
 | whisper-1 | 0.006 USD / minuto de audio |
 | gpt-4o-mini | 0.15 USD / 1M tokens de entrada, 0.60 USD / 1M de salida |
 
-**Ejemplo:** un video de 23 min cuesta ~0.14 USD de transcripción + menos de 0.01 USD de análisis ≈
-**0.15 USD**.
+**Ejemplo real:** un video de 23 min costó **0.14 USD** en OpenAI.
+
+### Costo total por video (para fijar precios)
+
+| Concepto | Por minuto de video | Video de 23 min |
+|---|---|---|
+| OpenAI (transcripción + análisis + títulos) | ~0.0062 USD | 0.14 USD (real) |
+| Worker Fargate (2 vCPU / 4 GB, ~0.10 USD por hora de proceso) | ~0.0005–0.001 USD | ~0.01–0.02 USD (estimado) |
+| S3 (guardar original + clips) y transferencia | < 0.001 USD | ~0.00 USD |
+| **Total variable** | **~0.007–0.008 USD** | **~0.16 USD** |
+
+A esto se suma el costo fijo de la infraestructura: unos 30 USD al mes por entorno.
+El costo exacto de cada video queda en la tabla `usage` (`estimated_cost_usd`).
+
+**Referencias para decidir el precio (sin pagos implementados todavía):**
+- Con un precio de 0.03 USD por minuto procesado, el margen es de ~75 % sobre el costo variable.
+  Un video de 23 min se cobraría ~0.69 USD.
+- Para cubrir los ~30 USD fijos al mes a ese precio se necesitan ~1,300 minutos procesados al mes
+  (≈ 58 videos de 23 min).
+- Opción para bajar costos: `gpt-4o-mini-transcribe` cuesta la mitad (0.003 USD/min), pero **no**
+  devuelve tiempos por frase, así que se perderían los subtítulos y los cortes exactos.
 
 Límite de seguridad: `OPENAI_MAX_AUDIO_MINUTES = 180` por video.
 

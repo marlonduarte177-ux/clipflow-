@@ -108,6 +108,10 @@ export class WorkerStack extends Stack {
         OPENAI_TRANSCRIBE_MODEL: "whisper-1",
         OPENAI_ANALYSIS_MODEL: "gpt-4o-mini",
         OPENAI_MAX_AUDIO_MINUTES: "180",
+        // Análisis de imágenes con IA: activado en staging para medir su costo real.
+        AI_VISION_ENABLED: props.stage === "production" ? "false" : "true",
+        AI_VISION_INTERVAL_SECONDS: "3",
+        AI_VISION_MAX_FRAMES: "600",
       },
       secrets: {
         // ECS lee el secreto al arrancar cada worker (como el worker escala a 0,

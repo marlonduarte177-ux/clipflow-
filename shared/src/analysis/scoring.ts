@@ -35,7 +35,7 @@ export interface SelectMomentsInput {
 /**
  * Variación mínima para que una señal cuente como "algo pasó". Evita que el ruido
  * (p. ej. ±0.01 dB de la compresión de audio) se amplifique hasta parecer un momento.
- * Unidades: audio en dB; visual en puntuación de cambio de escena de FFmpeg.
+ * Unidades: audio en dB; visual en movimiento/cambio de escena de FFmpeg; action en picos por segundo.
  */
 export const SIGNAL_MIN_RANGE: Record<SignalName, number> = {
   audio: 3,
@@ -43,6 +43,8 @@ export const SIGNAL_MIN_RANGE: Record<SignalName, number> = {
   speech: 0,
   ocr: 0,
   reaction: 0,
+  action: 1, // al menos un pico de diferencia entre segundos
+  vision: 0,
 };
 
 /** Normaliza a 0–1 usando percentiles 5 y 95 (resistente a valores extremos). */

@@ -20,6 +20,7 @@ const ai =
         apiKey: aiKey,
         transcribeModel: config.OPENAI_TRANSCRIBE_MODEL,
         analysisModel: config.OPENAI_ANALYSIS_MODEL,
+        visionModel: config.OPENAI_VISION_MODEL || undefined,
         prices: {
           transcribePerMinuteUsd: config.OPENAI_TRANSCRIBE_COST_PER_MINUTE_USD,
           inputPer1MUsd: config.OPENAI_INPUT_COST_PER_1M_TOKENS_USD,
@@ -38,7 +39,7 @@ const stop = (signal: string) => {
 process.on("SIGTERM", () => stop("SIGTERM"));
 process.on("SIGINT", () => stop("SIGINT"));
 
-log.info({ workerId, ai: ai ? ai.name : "desactivada" }, "worker iniciado");
+log.info({ workerId, ai: ai ? ai.name : "desactivada", vision: config.AI_VISION_ENABLED }, "worker iniciado");
 try {
   await runConsumer({
     sqs: new SQSClient({ region: config.AWS_REGION }),
@@ -56,6 +57,11 @@ try {
       ai,
       aiDisabledReason,
       aiMaxAudioMinutes: config.OPENAI_MAX_AUDIO_MINUTES,
+      vision: {
+        enabled: config.AI_VISION_ENABLED,
+        intervalSeconds: config.AI_VISION_INTERVAL_SECONDS,
+        maxFrames: config.AI_VISION_MAX_FRAMES,
+      },
       log: {
         info: (obj, msg) => log.info(obj, msg),
         warn: (obj, msg) => log.warn(obj, msg),

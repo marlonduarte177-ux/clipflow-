@@ -22,7 +22,41 @@ export function makeSampleVideo(file: string) {
   ]);
 }
 
-export async function seedVideoJob(db: Database, root: string, options: { sample: string; fake?: boolean }) {
+/**
+ * Video vertical 720x1280 con la imagen real horizontal en el centro, franjas negras
+ * arriba y abajo y una "marca de agua" blanca en la franja inferior (como un TikTok resubido).
+ */
+export function makeLetterboxedVideo(file: string) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  execFileSync("ffmpeg", [
+    "-hide_banner", "-loglevel", "error", "-y",
+    "-f", "lavfi", "-i", "testsrc2=size=720x405:rate=25:duration=40",
+    "-f", "lavfi", "-i", "aevalsrc='if(between(t\\,25\\,30)\\,0.8\\,0.02)*sin(2*PI*440*t)':s=44100:d=40",
+    "-filter_complex", "[0:v]pad=720:1280:0:437:black,drawbox=x=520:y=1100:w=150:h=20:color=white@1:t=fill[v]",
+    "-map", "[v]", "-map", "1:a", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", file,
+  ]);
+}
+
+/**
+ * "Gameplay" de 60 s: movimiento constante, sonido de fondo parejo y ráfagas de
+ * disparos (golpes de 40 ms) solo entre los segundos 35 y 45.
+ */
+export function makeGameplayVideo(file: string) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  execFileSync("ffmpeg", [
+    "-hide_banner", "-loglevel", "error", "-y",
+    "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25:duration=60",
+    "-f", "lavfi", "-i",
+    "aevalsrc='0.08*sin(2*PI*220*t)+if(between(t\\,35\\,45)*lt(mod(t\\,0.4)\\,0.04)\\,0.9*(random(0)*2-1)\\,0)':s=44100:d=60",
+    "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", file,
+  ]);
+}
+
+export async function seedVideoJob(
+  db: Database,
+  root: string,
+  options: { sample: string; fake?: boolean; params?: Record<string, unknown> },
+) {
   const user = await upsertUser(db, { cognitoSub: `sub-${Math.random()}` });
   const [project] = await db.insert(schema.projects).values({ userId: user.id, name: "P" }).returning();
   const key = `originals/${user.id}/v/original.mp4`;
@@ -47,7 +81,7 @@ export async function seedVideoJob(db: Database, root: string, options: { sample
     videoId: video!.id,
     type: "analyze_video",
     idempotencyKey: `analyze:${video!.id}`,
-    params: { clipDurationSeconds: 15 },
+    params: { clipDurationSeconds: 15, ...options.params },
   });
   return { user, video: video!, job };
 }

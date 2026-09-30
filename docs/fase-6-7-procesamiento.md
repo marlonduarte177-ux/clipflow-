@@ -78,6 +78,57 @@ Se crean clips solo para las ventanas con score ≥ `MIN_CLIP_SCORE` (0.6), sin 
 La interfaz `AIAnalysisProvider` (`shared/src/analysis/ai-provider.ts`) ya está definida: en la
 Fase 8, OpenAI aportará la señal `speech`, los subtítulos y los títulos.
 
+### Videos sin voz (gameplay, música)
+
+Detectado en una prueba real (30/09/2026) con un gameplay de Free Fire sin voz: salió 1 solo clip con un
+título inventado ("Crímenes en serie…").
+
+**Causa:**
+- Whisper "alucina" frases en audio sin habla. Esa transcripción falsa pesaba como contenido importante.
+- Los disparos, de milisegundos, se diluían en el volumen promedio.
+
+**Cambios:**
+- **Señal `action` (nueva, peso 0.3):** el volumen se mide cada 0.1 s y cuenta como pico toda subida
+  brusca de al menos 8 dB sobre la mediana de los 5 s anteriores, por ejemplo disparos, golpes,
+  explosiones o gritos.
+- **Señal `visual`:** ahora mide el movimiento continuo (suma de la puntuación de escena de cada
+  fotograma), no solo los cortes bruscos.
+- **Filtro de alucinaciones:** se descartan las frases que Whisper marca como probable silencio
+  (`no_speech_prob > 0.6`), poco seguras (`avg_logprob < -1`) o repetitivas (`compression_ratio > 2.4`).
+- **Modo "sin habla":** si queda menos del 10 % del audio (o menos de 15 s) con voz real, no se
+  generan títulos ni subtítulos y el resultado se marca `no_speech`. La web lo explica.
+
+Tests:
+- un "gameplay" de 60 s con ráfagas de disparos entre los segundos 35 y 45 → el mejor clip cae ahí;
+- frases alucinadas descartadas;
+- modo sin habla: sin títulos, sin subtítulos, con el costo registrado.
+
+### Encuadre vertical 9:16 (automático)
+
+Cada clip sale en 1080x1920, a pantalla completa:
+
+1. **Quita las franjas negras "quemadas".** Muchos videos ya vienen verticales con la imagen
+   horizontal al centro y franjas negras, por ejemplo al descargarlos de TikTok. El worker toma 8
+   fotogramas y marca como imagen real las filas y columnas donde al menos un 35 % de los píxeles no
+   son negros. Por eso una marca de agua pequeña dentro de la franja no cuenta como imagen y se
+   elimina junto con la franja.
+2. **Sigue la acción.** Si la imagen es más ancha que 9:16, en cada clip se elige la franja vertical
+   con más movimiento y detalle, con una leve preferencia por el centro, en lugar de cortar siempre
+   al centro.
+
+Detectado en una prueba real (30/09/2026): el clip de un video de TikTok salía con la imagen pequeña
+entre franjas negras y con la marca de agua. Ahora sale a pantalla completa.
+
+**Límite honesto:** si el original tiene poca resolución (p. ej. una imagen de 400 px de alto dentro
+de un video vertical), al ampliarla a pantalla completa se verá menos nítida. Ninguna herramienta
+puede recuperar detalle que el archivo no tiene.
+
+Tests:
+- un video 720x1280 con franjas y marca de agua sale a 1080x1920 sin zonas negras;
+- la acción a la derecha o a la izquierda mueve el recorte hacia ese lado, también dentro de un video
+  con franjas;
+- un video sin franjas no se recorta de más.
+
 ### Escalado y costos
 
 - El worker (2 vCPU, 4 GB, 50 GB de disco) **está apagado cuando no hay trabajos**. ECS lo enciende

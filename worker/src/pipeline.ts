@@ -3,13 +3,16 @@ import path from "node:path";
 import { and, eq } from "drizzle-orm";
 import { writeFile } from "node:fs/promises";
 import {
+  bestFrameLabel,
   segmentsForRange,
   selectMoments,
   snapToSentences,
   speechSignalFromHighlights,
   toSrt,
   toVtt,
+  visionSignalFromFrames,
   type AIAnalysisProvider,
+  type FrameScore,
   type AIUsage,
   type JobResult,
   type ProductConfig,
@@ -19,6 +22,9 @@ import {
 import { reportProgress, schema, type Database, type Job, type JobStage } from "@clipflow/shared/db";
 import {
   analyzeSignals,
+  buildFrameSheets,
+  chooseVerticalCrop,
+  detectContentBox,
   extractAudioChunks,
   FfmpegError,
   probe,
@@ -65,6 +71,8 @@ export interface PipelineDeps {
   aiDisabledReason?: string;
   /** Máximo de minutos de audio que se envían a la IA por video (control de costos). */
   aiMaxAudioMinutes: number;
+  /** Análisis de imágenes con IA (experimental, tiene costo por imagen). */
+  vision?: { enabled: boolean; intervalSeconds: number; maxFrames: number };
   log: { info: (obj: object, msg: string) => void; warn: (obj: object, msg: string) => void };
 }
 
@@ -144,6 +152,9 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       .update(videos)
       .set({ status: "ready", durationSeconds: info.durationSeconds, width: info.width, height: info.height, probe: info.raw })
       .where(eq(videos.id, video.id));
+    // Franjas negras "quemadas" en el video (p. ej. horizontal subido como vertical): se quitan.
+    const contentBox = await detectContentBox(deps.tools, input, info, controller.signal);
+    if (contentBox) deps.log.info({ jobId: job.id, contentBox }, "franjas negras detectadas");
     await progress("preparing", 1, true);
 
     // 2. Analizar: señales reales por segundo (volumen y cambios de escena).
@@ -152,14 +163,27 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       onProgress: (s) => void progress("analyzing", (s / info.durationSeconds) * 0.5).catch(() => undefined),
     });
     check();
-    const signals: SignalSeries = { visual: raw.visual, ...(raw.audio ? { audio: raw.audio } : {}) };
+    const signals: SignalSeries = {
+      visual: raw.visual,
+      ...(raw.audio ? { audio: raw.audio } : {}),
+      ...(raw.action ? { action: raw.action } : {}),
+    };
     await progress("analyzing", 0.5, true);
 
     // 2b. IA (si está configurada): transcripción + momentos por contenido.
     //     Si falla, el video se procesa igual con FFmpeg y el resultado lo indica.
-    const ai = await runAI(deps, info, input, dir, controller.signal, (f) => progress("analyzing", 0.5 + f * 0.5));
+    const ai = await runAI(deps, info, input, dir, controller.signal, (f) => progress("analyzing", 0.5 + f * 0.25));
     check();
     if (ai.highlights) signals.speech = speechSignalFromHighlights(ai.highlights, info.durationSeconds);
+
+    // 2c. Imágenes con IA (experimental): lo que se ve en pantalla (kills, avisos, jugadas).
+    const vision = await runVision(deps, info, input, dir, contentBox, controller.signal, (f) =>
+      progress("analyzing", 0.75 + f * 0.25),
+    );
+    check();
+    if (vision.frames.length) {
+      signals.vision = visionSignalFromFrames(vision.frames, info.durationSeconds, vision.intervalSeconds);
+    }
     await progress("analyzing", 1, true);
 
     // 3. Elegir momentos con el score configurable (sin forzar una cantidad).
@@ -189,7 +213,12 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
         deps.log.warn({ jobId: job.id, error: (err as Error).message }, "no se pudieron generar títulos");
       }
     }
-    deps.log.info({ jobId: job.id, moments: finalMoments.length, clipDuration, ai: ai.status }, "momentos elegidos");
+    // Sin título de la transcripción (p. ej. gameplay sin voz): lo que se ve en el mejor fotograma.
+    titles = titles.map((t, i) => t ?? bestFrameLabel(vision.frames, finalMoments[i]!.startSeconds, finalMoments[i]!.endSeconds));
+    deps.log.info(
+      { jobId: job.id, moments: finalMoments.length, clipDuration, ai: ai.status, vision: vision.status },
+      "momentos elegidos",
+    );
     await progress("detecting_moments", 1, true);
 
     // 4. Generar clips verticales y miniaturas; subir a S3 con rutas fijas por trabajo.
@@ -204,11 +233,15 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       const duration = moment.endSeconds - moment.startSeconds;
       const clipFile = path.join(dir, `clip-${index}.mp4`);
       const thumbFile = path.join(dir, `thumb-${index}.jpg`);
-      await renderVerticalClip(deps.tools, input, clipFile, { startSeconds: moment.startSeconds, durationSeconds: duration }, {
+      const segment = { startSeconds: moment.startSeconds, durationSeconds: duration };
+      // Encuadre por clip: sin franjas negras y centrado donde está la acción.
+      const crop = await chooseVerticalCrop(deps.tools, input, info, contentBox, segment, controller.signal);
+      await renderVerticalClip(deps.tools, input, clipFile, segment, {
         signal: controller.signal,
+        crop,
         onProgress: (s) => void progress("rendering_clips", (index + s / duration) / finalMoments.length).catch(() => undefined),
       });
-      await renderThumbnail(deps.tools, input, thumbFile, moment.startSeconds + duration / 2, controller.signal);
+      await renderThumbnail(deps.tools, input, thumbFile, moment.startSeconds + duration / 2, controller.signal, crop);
       check();
       const key = `clips/${job.userId}/${job.id}/${index}.mp4`;
       const thumbKey = `thumbnails/${job.userId}/${job.id}/${index}.jpg`;
@@ -237,6 +270,9 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     // 5. Registrar resultados y consumo (en una transacción).
     await progress("finalizing", 0, true);
     const processingSeconds = (Date.now() - startedAt) / 1000;
+    const computeCostUsd = (processingSeconds / 3600) * deps.costPerHourUsd;
+    const textCostUsd = (ai.usage.estimatedCostUsd ?? 0) - ai.transcribeCostUsd;
+    const visionCostUsd = vision.usage.estimatedCostUsd ?? 0;
     await deps.db.transaction(async (tx) => {
       await tx.delete(clips).where(eq(clips.jobId, job.id)); // reintento: reemplaza, no duplica (y sus subtítulos)
       if (outputs.length > 0) {
@@ -279,7 +315,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
           ...base,
           metric: "processing_seconds",
           quantity: processingSeconds,
-          estimatedCostUsd: (processingSeconds / 3600) * deps.costPerHourUsd,
+          estimatedCostUsd: computeCostUsd,
           details: { workerId: deps.workerId, attempt: job.attempts },
         },
         { ...base, metric: "clips_generated", quantity: outputs.length },
@@ -300,19 +336,46 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
                 ...base,
                 metric: "ai_input_tokens" as const,
                 quantity: ai.usage.inputTokens,
-                estimatedCostUsd: (ai.usage.estimatedCostUsd ?? 0) - ai.transcribeCostUsd,
-                details: { provider: deps.ai?.name },
+                estimatedCostUsd: textCostUsd,
+                details: { provider: deps.ai?.name, kind: "text" },
               },
-              { ...base, metric: "ai_output_tokens" as const, quantity: ai.usage.outputTokens ?? 0 },
+              { ...base, metric: "ai_output_tokens" as const, quantity: ai.usage.outputTokens ?? 0, details: { kind: "text" } },
+            ]
+          : []),
+        ...(vision.usage.inputTokens
+          ? [
+              {
+                ...base,
+                metric: "ai_input_tokens" as const,
+                quantity: vision.usage.inputTokens,
+                estimatedCostUsd: visionCostUsd,
+                details: { provider: deps.ai?.name, kind: "vision", frames: vision.frames.length },
+              },
+              {
+                ...base,
+                metric: "ai_output_tokens" as const,
+                quantity: vision.usage.outputTokens ?? 0,
+                details: { kind: "vision" },
+              },
             ]
           : []),
       ]);
     });
+    const usd = (n: number) => Math.round(n * 1_000_000) / 1_000_000;
     return {
       clipCount: outputs.length,
       ai: ai.status,
       ...(ai.reason ? { aiReason: ai.reason } : {}),
       language: ai.language,
+      vision: vision.status,
+      visionFrames: vision.frames.length,
+      costs: {
+        transcriptionUsd: usd(ai.transcribeCostUsd),
+        textUsd: usd(textCostUsd),
+        visionUsd: usd(visionCostUsd),
+        computeUsd: usd(computeCostUsd),
+        totalUsd: usd(ai.transcribeCostUsd + textCostUsd + visionCostUsd + computeCostUsd),
+      },
     };
   } catch (err) {
     if (stopped) throw stopped;
@@ -365,6 +428,21 @@ async function runAI(
     await onProgress(0.2);
     const transcript = await deps.ai.transcribe(chunks);
     await onProgress(0.7);
+
+    // Sin habla real (p. ej. gameplay o música): no se inventan títulos ni subtítulos,
+    // y los momentos se eligen por acción, sonido y movimiento.
+    const analyzedSeconds = chunks.reduce((sum, c) => sum + c.durationSeconds, 0);
+    const speechSeconds = transcript.segments.reduce((sum, s) => sum + (s.endSeconds - s.startSeconds), 0);
+    if (speechSeconds < Math.max(15, analyzedSeconds * 0.1)) {
+      return {
+        status: "no_speech",
+        reason: "No se detectó habla (p. ej. gameplay o música); los clips se eligieron por acción, sonido y movimiento",
+        segments: [],
+        language: null,
+        usage: { ...transcript.usage },
+        transcribeCostUsd: transcript.usage.estimatedCostUsd ?? 0,
+      };
+    }
     const analysis = await deps.ai.analyze(transcript.segments, info.durationSeconds);
     const usage: AIUsage = { ...transcript.usage };
     const transcribeCostUsd = transcript.usage.estimatedCostUsd ?? 0;
@@ -381,6 +459,45 @@ async function runAI(
     if (signal.aborted) throw err;
     deps.log.warn({ error: (err as Error).message }, "IA no disponible; se continúa solo con FFmpeg");
     return { ...empty, status: "unavailable", reason: "El análisis con IA falló; los clips se eligieron solo por audio y escenas." };
+  }
+}
+
+interface VisionOutcome {
+  status: "used" | "disabled" | "unavailable";
+  frames: FrameScore[];
+  intervalSeconds: number;
+  usage: AIUsage;
+}
+
+/** Análisis de imágenes (experimental). Nunca hace fallar el trabajo. */
+async function runVision(
+  deps: PipelineDeps,
+  info: { durationSeconds: number; width: number; height: number; hasAudio: boolean; videoCodec: string; raw: unknown },
+  input: string,
+  dir: string,
+  box: import("./ffmpeg.js").ContentBox | null,
+  signal: AbortSignal,
+  onProgress: (fraction: number) => Promise<void>,
+): Promise<VisionOutcome> {
+  const config = deps.vision;
+  const off: VisionOutcome = { status: "disabled", frames: [], intervalSeconds: 0, usage: {} };
+  if (!config?.enabled || !deps.ai?.analyzeFrames) return off;
+  // Tope de fotogramas por video (control de costos): en videos largos se espacian más.
+  const intervalSeconds = Math.max(config.intervalSeconds, info.durationSeconds / config.maxFrames);
+  try {
+    const sheets = await buildFrameSheets(deps.tools, input, dir, info, {
+      intervalSeconds,
+      box,
+      signal,
+      onProgress: (s) => void onProgress((s / info.durationSeconds) * 0.3).catch(() => undefined),
+    });
+    await onProgress(0.3);
+    const result = await deps.ai.analyzeFrames(sheets);
+    return { status: "used", frames: result.frames, intervalSeconds, usage: result.usage };
+  } catch (err) {
+    if (signal.aborted) throw err;
+    deps.log.warn({ error: (err as Error).message }, "análisis de imágenes no disponible");
+    return { ...off, status: "unavailable" };
   }
 }
 
