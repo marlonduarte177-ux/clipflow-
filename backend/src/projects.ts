@@ -8,7 +8,9 @@ import {
   type ProjectListResponse,
 } from "@clipflow/shared";
 import { schema, type Database } from "@clipflow/shared/db";
+import { deleteVideoRows, purgeVideoFiles } from "./cleanup.js";
 import { sendError, sendValidationError } from "./http.js";
+import type { VideoStorage } from "./storage.js";
 
 const { projects } = schema;
 type ProjectRow = typeof projects.$inferSelect;
@@ -30,7 +32,7 @@ function toDto(row: ProjectRow): ProjectDto {
  * Rutas de proyectos. REGLA: toda consulta filtra por `request.user.id`.
  * Un proyecto de otro usuario responde 404 (no se revela que existe).
  */
-export function projectRoutes(deps: { db: Database; auth: preHandlerHookHandler }) {
+export function projectRoutes(deps: { db: Database; auth: preHandlerHookHandler; storage: VideoStorage }) {
   const { db } = deps;
   return async (app: FastifyInstance) => {
     app.addHook("preHandler", deps.auth);
@@ -81,14 +83,19 @@ export function projectRoutes(deps: { db: Database; auth: preHandlerHookHandler 
       return row ? toDto(row) : sendError(reply, 404, "not_found", "Proyecto no encontrado.");
     });
 
+    // Borra el proyecto con sus videos, clips y archivos en S3.
     app.delete("/projects/:id", async (request, reply) => {
       const params = IdParams.safeParse(request.params);
       if (!params.success) return sendError(reply, 404, "not_found", "Proyecto no encontrado.");
-      const deleted = await db
-        .delete(projects)
-        .where(and(eq(projects.id, params.data.id), eq(projects.userId, request.user!.id)))
-        .returning({ id: projects.id });
-      return deleted.length > 0 ? reply.code(204).send() : sendError(reply, 404, "not_found", "Proyecto no encontrado.");
+      const userId = request.user!.id;
+      const removed = await deleteVideoRows(db, userId, { projectId: params.data.id });
+      if (removed.status === "not_found") return sendError(reply, 404, "not_found", "Proyecto no encontrado.");
+      if (removed.status === "busy") {
+        return sendError(reply, 409, "video_processing", "Un video de este proyecto se está procesando. Cancélalo o espera a que termine.");
+      }
+      await purgeVideoFiles(deps.storage, removed.files, request.log);
+      request.log.info({ projectId: params.data.id, videos: removed.videoIds.length }, "proyecto eliminado");
+      return reply.code(204).send();
     });
   };
 }

@@ -15,6 +15,7 @@ import {
   type VideoListResponse,
 } from "@clipflow/shared";
 import { createJob, schema, type Database } from "@clipflow/shared/db";
+import { deleteVideoRows, purgeVideoFiles } from "./cleanup.js";
 import { sendError, sendValidationError } from "./http.js";
 import { enqueue, toJobDto, wakeWorkers } from "./jobs.js";
 import type { WorkerLauncher } from "./launcher.js";
@@ -73,6 +74,7 @@ export interface VideoRouteDeps {
  * 2. POST /videos/:id/upload-parts → URLs firmadas para subir partes (por lotes).
  * 3. POST /videos/:id/complete  → S3 une las partes; se verifica el tamaño real.
  *    POST /videos/:id/abort     → cancela y borra lo subido.
+ * DELETE /videos/:id              → elimina el video con sus clips y todos sus archivos.
  * Todas las consultas filtran por el usuario del token.
  */
 export function videoRoutes(deps: VideoRouteDeps) {
@@ -310,6 +312,19 @@ export function videoRoutes(deps: VideoRouteDeps) {
       await enqueue(queue, job, request.log);
       wakeWorkers(db, launcher, request.log);
       return reply.code(201).send(toJobDto(job));
+    });
+
+    app.delete("/videos/:id", async (request, reply) => {
+      const params = IdParams.safeParse(request.params);
+      if (!params.success) return notFound(reply);
+      const removed = await deleteVideoRows(db, request.user!.id, { videoId: params.data.id });
+      if (removed.status === "not_found") return notFound(reply);
+      if (removed.status === "busy") {
+        return sendError(reply, 409, "video_processing", "Este video se está procesando. Cancélalo o espera a que termine para eliminarlo.");
+      }
+      await purgeVideoFiles(storage, removed.files, request.log);
+      request.log.info({ videoId: params.data.id }, "video eliminado");
+      return reply.code(204).send();
     });
 
     app.post("/videos/:id/abort", async (request, reply) => {

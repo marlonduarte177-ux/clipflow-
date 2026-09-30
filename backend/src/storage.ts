@@ -3,8 +3,10 @@ import {
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   NotFound,
   S3Client,
   UploadPartCommand,
@@ -23,6 +25,8 @@ export interface VideoStorage {
   /** Tamaño real del objeto en S3, o null si no existe. */
   getObjectSize(key: string): Promise<number | null>;
   deleteObject(key: string): Promise<void>;
+  /** Borra todos los archivos que empiezan con `prefix` (p. ej. "clips/<usuario>/<trabajo>/"). Devuelve cuántos. */
+  deletePrefix(prefix: string): Promise<number>;
   /** URL temporal de lectura (previews y descargas). */
   presignGet(key: string, expiresInSeconds: number, downloadFilename?: string): Promise<string>;
 }
@@ -74,6 +78,22 @@ export function createS3Storage(options: { bucket: string; region: string; clien
 
     async deleteObject(key) {
       await s3.send(new DeleteObjectCommand({ Bucket, Key: key }));
+    },
+
+    async deletePrefix(prefix) {
+      let deleted = 0;
+      let ContinuationToken: string | undefined;
+      do {
+        const page = await s3.send(new ListObjectsV2Command({ Bucket, Prefix: prefix, ContinuationToken }));
+        const keys = (page.Contents ?? []).flatMap((o) => (o.Key ? [{ Key: o.Key }] : []));
+        if (keys.length > 0) {
+          const result = await s3.send(new DeleteObjectsCommand({ Bucket, Delete: { Objects: keys, Quiet: true } }));
+          if (result.Errors?.length) throw new Error(`S3 no pudo borrar ${result.Errors.length} archivos`);
+          deleted += keys.length;
+        }
+        ContinuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+      } while (ContinuationToken);
+      return deleted;
     },
 
     presignGet(key, expiresInSeconds, downloadFilename) {

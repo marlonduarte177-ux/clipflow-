@@ -91,7 +91,7 @@ export async function buildApp({ config, verifyToken, lookupEmail, db, storage, 
     return { userId: request.user!.id, email: request.user!.email };
   });
 
-  await app.register(projectRoutes({ db, auth }));
+  await app.register(projectRoutes({ db, auth, storage }));
   await app.register(
     videoRoutes({ db, auth, storage, queue, launcher, product, uploadUrlExpiresSeconds: config.S3_UPLOAD_URL_EXPIRES_SECONDS }),
   );

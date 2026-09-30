@@ -168,14 +168,22 @@ describe("API", () => {
     expect(writes).toHaveLength(1);
     expect(JSON.stringify(writes[0]!.Resource)).toContain("/originals/*");
     // Ningún permiso sobre el bucket completo: siempre una carpeta concreta.
-    for (const s of statements) expect(JSON.stringify(s.Resource)).toMatch(/\/(originals|clips|thumbnails|subtitles|exports)\/\*/);
+    for (const s of statements) {
+      if ([s.Action].flat().includes("s3:ListBucket")) {
+        // Listar (para eliminar videos) solo dentro de las carpetas de la app.
+        expect(s.Action).toBe("s3:ListBucket");
+        expect(JSON.stringify(s.Condition)).toContain('"s3:prefix":["originals/*","clips/*","thumbnails/*","subtitles/*","exports/*"]');
+      } else {
+        expect(JSON.stringify(s.Resource)).toMatch(/\/(originals|clips|thumbnails|subtitles|exports)\/\*/);
+      }
+    }
     t.api.hasResourceProperties("AWS::IAM::Policy", {
       PolicyDocument: { Statement: Match.arrayWith([Match.objectLike({ Action: Match.arrayWith(["sqs:SendMessage"]) })]) },
     });
   });
 });
 
-type Statement = { Action: string | string[]; Resource: unknown };
+type Statement = { Action: string | string[]; Resource: unknown; Condition?: unknown };
 function s3Statements(template: Template): Statement[] {
   return Object.values(template.findResources("AWS::IAM::Policy"))
     .flatMap((p) => (p as { Properties: { PolicyDocument: { Statement: Statement[] } } }).Properties.PolicyDocument.Statement)

@@ -66,6 +66,29 @@ La comprobación del **contenido real** (que sea un video de verdad) la hace el 
 | `POST /videos/:id/upload-parts` | URLs firmadas para un lote de partes |
 | `POST /videos/:id/complete` | Confirma la subida |
 | `POST /videos/:id/abort` | Cancela |
+| `DELETE /videos/:id` | Elimina el video con sus clips y todos sus archivos |
+
+### Eliminar videos y proyectos
+
+Para que la cuenta no se llene de videos viejos:
+
+- **En la web:** hay un botón **Eliminar** en cada video de la lista de proyectos, y **Eliminar video**
+  en la página del video. Pide confirmación porque no se puede deshacer.
+- **Qué se borra:**
+  - en la base de datos: el video, su procesamiento, sus clips, subtítulos y exportaciones;
+  - en S3: el original y todas las carpetas del procesamiento (`clips/`, `thumbnails/`, `subtitles/`),
+    incluso archivos sobrantes de reintentos anteriores. Si era una subida sin terminar, se cancela.
+- **Qué se conserva:** el historial de consumo y el de créditos, sin el enlace al video. Sirven para
+  costos y auditoría.
+- **Mientras se procesa no se puede eliminar.** La API responde 409 y la web no muestra el botón. Hay
+  que cancelar o esperar a que termine. Si el procesamiento quedó colgado (sin señal del worker en
+  3 min), sí se puede eliminar.
+- **Borrar un proyecto** (`DELETE /projects/:id`) aplica lo mismo a todos sus videos, en una sola
+  transacción.
+- **Seguridad:**
+  - solo el dueño puede eliminar; a otro usuario se le responde 404, sin revelar que el video existe;
+  - la API solo puede listar y borrar dentro de las carpetas de la app, nunca en todo el bucket;
+  - hay tests para ambas cosas.
 
 ### Web
 

@@ -58,13 +58,23 @@ export function ProjectsView() {
     return () => clearInterval(timer);
   }, [anyActive]);
 
-  async function onDiscard(video: VideoDto) {
-    if (!window.confirm(`¿Descartar la subida sin terminar de "${video.originalFilename}"?`)) return;
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  // Elimina el video con sus clips y archivos (o descarta una subida sin terminar).
+  async function onDelete(video: VideoDto) {
+    const question =
+      video.status === "pending_upload"
+        ? `¿Descartar la subida sin terminar de "${video.originalFilename}"?`
+        : `¿Eliminar "${video.originalFilename}" y todos sus clips? No se puede deshacer.`;
+    if (!window.confirm(question)) return;
+    setDeleting(video.id);
     try {
-      await apiFetch(`/videos/${video.id}/abort`, { method: "POST" });
+      await apiFetch(`/videos/${video.id}`, { method: "DELETE" });
       show(await fetchAll());
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setDeleting(null);
     }
   }
 
@@ -142,9 +152,13 @@ export function ProjectsView() {
                         {formatBytes(video.sizeBytes)} · {formatDuration(video.durationSeconds)}
                       </span>
                       <VideoStatusBadge status={video.status} />
-                      {video.status === "pending_upload" ? (
-                        <button onClick={() => onDiscard(video)} className="text-xs text-muted underline hover:text-foreground">
-                          Descartar
+                      {jobs[video.id]?.status !== "processing" ? (
+                        <button
+                          onClick={() => onDelete(video)}
+                          disabled={deleting === video.id}
+                          className="text-xs text-muted underline hover:text-red-400 disabled:opacity-50"
+                        >
+                          {deleting === video.id ? "Eliminando…" : video.status === "pending_upload" ? "Descartar" : "Eliminar"}
                         </button>
                       ) : null}
                       </div>
