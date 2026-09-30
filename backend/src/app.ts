@@ -4,7 +4,10 @@ import type { MeResponse, ProductConfig } from "@clipflow/shared";
 import type { Database } from "@clipflow/shared/db";
 import type { ApiConfig } from "./config.js";
 import { requireAuth, type EmailLookup, type TokenVerifier } from "./auth.js";
+import { clipRoutes } from "./clips.js";
+import { jobRoutes } from "./jobs.js";
 import { projectRoutes } from "./projects.js";
+import type { JobQueue } from "./queue.js";
 import type { VideoStorage } from "./storage.js";
 import { videoRoutes } from "./videos.js";
 
@@ -14,12 +17,13 @@ export interface AppDeps {
   lookupEmail: EmailLookup;
   db: Database;
   storage: VideoStorage;
+  queue: JobQueue;
   product: ProductConfig;
   /** false en tests para no llenar la salida de logs. */
   logger?: boolean;
 }
 
-export async function buildApp({ config, verifyToken, lookupEmail, db, storage, product, logger = true }: AppDeps): Promise<FastifyInstance> {
+export async function buildApp({ config, verifyToken, lookupEmail, db, storage, queue, product, logger = true }: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
     logger: logger
       ? {
@@ -69,8 +73,10 @@ export async function buildApp({ config, verifyToken, lookupEmail, db, storage, 
 
   await app.register(projectRoutes({ db, auth }));
   await app.register(
-    videoRoutes({ db, auth, storage, product, uploadUrlExpiresSeconds: config.S3_UPLOAD_URL_EXPIRES_SECONDS }),
+    videoRoutes({ db, auth, storage, queue, product, uploadUrlExpiresSeconds: config.S3_UPLOAD_URL_EXPIRES_SECONDS }),
   );
+  await app.register(jobRoutes({ db, auth, queue }));
+  await app.register(clipRoutes({ db, auth, storage }));
 
   return app;
 }

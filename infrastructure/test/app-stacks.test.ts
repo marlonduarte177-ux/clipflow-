@@ -6,9 +6,10 @@ import { AuthStack } from "../lib/auth-stack.js";
 import { DatabaseStack } from "../lib/database-stack.js";
 import { NetworkStack } from "../lib/network-stack.js";
 import { StorageStack } from "../lib/storage-stack.js";
+import { WorkerStack } from "../lib/worker-stack.js";
 
 const WEB = ["https://web.example.com"];
-let t: Record<"network" | "storage" | "database" | "api", Template>;
+let t: Record<"network" | "storage" | "database" | "worker" | "api", Template>;
 
 beforeAll(() => {
   const app = new App();
@@ -20,6 +21,14 @@ beforeAll(() => {
   const network = new NetworkStack(app, "network", { env, stage });
   const storage = new StorageStack(app, "storage", { env, stage, webOrigins: WEB });
   const database = new DatabaseStack(app, "database", { env, stage, vpc: network.vpc });
+  const worker = new WorkerStack(app, "worker", {
+    env,
+    stage,
+    vpc: network.vpc,
+    bucket: storage.bucket,
+    database: database.instance,
+    databaseSecurityGroup: database.securityGroup,
+  });
   const api = new ApiStack(app, "api", {
     env,
     stage,
@@ -29,12 +38,14 @@ beforeAll(() => {
     databaseSecurityGroup: database.securityGroup,
     userPool: auth.userPool,
     userPoolClient: auth.userPoolClient,
+    queue: worker.queue,
     webOrigins: WEB,
   });
   t = {
     network: Template.fromStack(network),
     storage: Template.fromStack(storage),
     database: Template.fromStack(database),
+    worker: Template.fromStack(worker),
     api: Template.fromStack(api),
   };
 }, 120_000);
@@ -145,15 +156,62 @@ describe("API", () => {
     for (const rule of apiSg!.Properties.SecurityGroupIngress ?? []) expect(rule.CidrIp).toBeUndefined();
   });
 
-  it("los permisos de S3 se limitan a la carpeta originals/", () => {
-    const policies = t.api.findResources("AWS::IAM::Policy");
-    const s3Statements = Object.values(policies).flatMap(
-      (p) =>
-        (p as { Properties: { PolicyDocument: { Statement: { Action: string | string[]; Resource: unknown }[] } } })
-          .Properties.PolicyDocument.Statement,
-    ).filter((s) => [s.Action].flat().some((a) => a.startsWith("s3:")));
-    expect(s3Statements).toHaveLength(1);
-    expect(JSON.stringify(s3Statements[0]!.Resource)).toContain("/originals/*");
-    expect([s3Statements[0]!.Action].flat()).not.toContain("s3:*");
+  it("solo puede escribir en originals/ y solo leer resultados; puede encolar trabajos", () => {
+    const statements = s3Statements(t.api);
+    const writes = statements.filter((s) => [s.Action].flat().includes("s3:PutObject"));
+    expect(writes).toHaveLength(1);
+    expect(JSON.stringify(writes[0]!.Resource)).toContain("/originals/*");
+    // Ningún permiso sobre el bucket completo: siempre una carpeta concreta.
+    for (const s of statements) expect(JSON.stringify(s.Resource)).toMatch(/\/(originals|clips|thumbnails|subtitles|exports)\/\*/);
+    t.api.hasResourceProperties("AWS::IAM::Policy", {
+      PolicyDocument: { Statement: Match.arrayWith([Match.objectLike({ Action: Match.arrayWith(["sqs:SendMessage"]) })]) },
+    });
+  });
+});
+
+type Statement = { Action: string | string[]; Resource: unknown };
+function s3Statements(template: Template): Statement[] {
+  return Object.values(template.findResources("AWS::IAM::Policy"))
+    .flatMap((p) => (p as { Properties: { PolicyDocument: { Statement: Statement[] } } }).Properties.PolicyDocument.Statement)
+    .filter((s) => [s.Action].flat().some((a) => a.startsWith("s3:")));
+}
+
+describe("cola y worker", () => {
+  it("la cola tiene cola de errores (DLQ) con alarma", () => {
+    t.worker.hasResourceProperties("AWS::SQS::Queue", {
+      QueueName: "clipflow-staging-jobs",
+      RedrivePolicy: Match.objectLike({ maxReceiveCount: 6 }),
+      SqsManagedSseEnabled: true,
+    });
+    t.worker.hasResourceProperties("AWS::CloudWatch::Alarm", { AlarmName: "clipflow-staging-jobs-dlq-not-empty" });
+  });
+
+  it("el worker empieza en 0 y escala a 0 cuando no hay trabajos", () => {
+    t.worker.hasResourceProperties("AWS::ECS::Service", { DesiredCount: 0 });
+    t.worker.hasResourceProperties("AWS::ApplicationAutoScaling::ScalableTarget", { MinCapacity: 0, MaxCapacity: 3 });
+  });
+
+  it("tiene CPU, memoria y disco para videos largos", () => {
+    t.worker.hasResourceProperties("AWS::ECS::TaskDefinition", {
+      Cpu: "2048",
+      Memory: "4096",
+      EphemeralStorage: { SizeInGiB: 50 },
+    });
+  });
+
+  it("no acepta conexiones entrantes", () => {
+    const groups = t.worker.findResources("AWS::EC2::SecurityGroup");
+    for (const g of Object.values(groups) as { Properties: { SecurityGroupIngress?: unknown[] } }[]) {
+      expect(g.Properties.SecurityGroupIngress ?? []).toEqual([]);
+    }
+  });
+
+  it("lee solo originales y escribe solo resultados", () => {
+    const statements = s3Statements(t.worker);
+    const reads = statements.filter((s) => [s.Action].flat().includes("s3:GetObject"));
+    const writes = statements.filter((s) => [s.Action].flat().includes("s3:PutObject"));
+    expect(JSON.stringify(reads.map((s) => s.Resource))).toContain("/originals/*");
+    expect(JSON.stringify(writes.map((s) => s.Resource))).not.toContain("originals");
+    expect(JSON.stringify(writes.map((s) => s.Resource))).toContain("/clips/*");
   });
 });

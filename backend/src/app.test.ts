@@ -76,6 +76,7 @@ describe("loadApiConfig", () => {
     const config = loadApiConfig({
       DATABASE_URL: "postgres://u:p@localhost:5432/db",
       S3_BUCKET: "clipflow-staging-media",
+      SQS_QUEUE_URL: "https://sqs.us-east-1.amazonaws.com/123456789012/clipflow-staging-jobs",
       COGNITO_USER_POOL_ID: "us-east-1_AbC123",
       COGNITO_CLIENT_ID: "client",
       CORS_ALLOWED_ORIGINS: "http://a.test, https://b.test",

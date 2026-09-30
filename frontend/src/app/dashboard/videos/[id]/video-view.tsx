@@ -1,0 +1,191 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import type { ClipDto, ClipListResponse, JobDto, JobListResponse, VideoDto } from "@clipflow/shared";
+import { Alert } from "@/components/ui";
+import { isActive, JobProgress } from "@/components/job-progress";
+import { VideoStatusBadge } from "@/components/status-badge";
+import { apiConfigured, apiFetch, formatBytes, formatDuration } from "@/lib/api";
+
+interface Data {
+  video: VideoDto;
+  job: JobDto | undefined;
+  clips: ClipDto[];
+}
+
+async function fetchData(videoId: string): Promise<Data> {
+  const [video, jobs, clips] = await Promise.all([
+    apiFetch<VideoDto>(`/videos/${videoId}`),
+    apiFetch<JobListResponse>(`/jobs?videoId=${videoId}`),
+    apiFetch<ClipListResponse>(`/videos/${videoId}/clips`),
+  ]);
+  return { video, job: jobs.jobs[0], clips: clips.clips };
+}
+
+export function VideoView({ videoId }: { videoId: string }) {
+  const [data, setData] = useState<Data | null>(null);
+  const [error, setError] = useState("");
+  const [showDiscarded, setShowDiscarded] = useState(false);
+
+  const [reloadKey, setReloadKey] = useState(0);
+  const processing = isActive(data?.job);
+
+  useEffect(() => {
+    if (!apiConfigured) return;
+    let active = true;
+    const load = () =>
+      fetchData(videoId)
+        .then((d) => active && (setData(d), setError("")))
+        .catch((err: Error) => active && setError(err.message));
+    void load();
+    // Progreso real cada 5 s solo mientras se procesa (así no se reinician los videos al verlos).
+    const timer = processing ? setInterval(load, 5000) : undefined;
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [videoId, processing, reloadKey]);
+
+  async function jobAction(action: "cancel" | "retry") {
+    if (!data?.job) return;
+    try {
+      const job = await apiFetch<JobDto>(`/jobs/${data.job.id}/${action}`, { method: "POST" });
+      setData({ ...data, job });
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function setClipStatus(clip: ClipDto, status: ClipDto["status"]) {
+    try {
+      const updated = await apiFetch<ClipDto>(`/clips/${clip.id}`, { method: "PATCH", body: { status } });
+      setData((d) => d && { ...d, clips: d.clips.map((c) => (c.id === clip.id ? updated : c)) });
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function download(clip: ClipDto) {
+    try {
+      const { url } = await apiFetch<{ url: string }>(`/clips/${clip.id}/download`);
+      window.location.href = url;
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  if (!apiConfigured) return <Alert kind="error">La API todavía no está conectada a esta web.</Alert>;
+  if (!data) return error ? <Alert kind="error">{error}</Alert> : <p className="text-sm text-muted">Cargando…</p>;
+
+  const { video, job, clips } = data;
+  const visible = clips.filter((c) => showDiscarded || c.status !== "discarded");
+  const discardedCount = clips.length - clips.filter((c) => c.status !== "discarded").length;
+
+  return (
+    <div className="space-y-6">
+      <Link href="/dashboard" className="text-sm text-muted hover:text-foreground">
+        ← Proyectos
+      </Link>
+
+      <section className="space-y-3 rounded-2xl border border-line bg-surface p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h1 className="min-w-0 truncate text-lg font-semibold">{video.originalFilename}</h1>
+          <VideoStatusBadge status={video.status} />
+        </div>
+        <p className="text-sm text-muted">
+          {formatBytes(video.sizeBytes)} · {formatDuration(video.durationSeconds)}
+          {job?.params.clipDurationSeconds ? ` · clips de ${job.params.clipDurationSeconds} s` : ""}
+        </p>
+        {video.rejectionReason ? <Alert kind="error">{video.rejectionReason}</Alert> : null}
+        {job ? <JobProgress job={job} /> : <p className="text-sm text-muted">Este video aún no tiene procesamiento.</p>}
+        <div className="flex gap-3 text-sm">
+          {processing ? (
+            <button onClick={() => jobAction("cancel")} className="rounded-lg border border-line px-3 py-1.5">
+              Cancelar procesamiento
+            </button>
+          ) : null}
+          {job && (job.status === "failed" || job.status === "cancelled") ? (
+            <button onClick={() => jobAction("retry")} className="rounded-lg bg-accent px-3 py-1.5 font-medium text-black">
+              Reintentar
+            </button>
+          ) : null}
+        </div>
+      </section>
+
+      <Alert kind="error">{error}</Alert>
+
+      {job?.status === "completed" ? (
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="font-medium">Clips ({clips.length - discardedCount})</h2>
+            {discardedCount > 0 ? (
+              <button onClick={() => setShowDiscarded((v) => !v)} className="text-xs text-muted underline">
+                {showDiscarded ? "Ocultar descartados" : `Ver descartados (${discardedCount})`}
+              </button>
+            ) : null}
+          </div>
+          {clips.length === 0 ? (
+            <p className="rounded-2xl border border-dashed border-line p-4 text-sm text-muted">
+              No encontramos momentos que destaquen en este video (sin cambios claros de volumen ni de escena).
+            </p>
+          ) : null}
+          <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {visible.map((clip, i) => (
+              <li
+                key={clip.id}
+                className={`overflow-hidden rounded-2xl border bg-surface ${clip.status === "approved" ? "border-accent" : "border-line"} ${clip.status === "discarded" ? "opacity-50" : ""}`}
+              >
+                {clip.videoUrl ? (
+                  <video
+                    src={clip.videoUrl}
+                    poster={clip.thumbnailUrl ?? undefined}
+                    controls
+                    playsInline
+                    preload="none"
+                    // Las URLs caducan a los 15 min: si falla, se piden nuevas.
+                    onError={() => setReloadKey((k) => (k < 3 ? k + 1 : k))}
+                    className="aspect-[9/16] w-full bg-black object-cover"
+                  />
+                ) : null}
+                <div className="space-y-2 p-3 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium">{clip.title ?? `Momento ${i + 1}`}</span>
+                    {clip.score != null ? (
+                      <span className="text-xs text-muted" title="Intensidad relativa dentro de este video">
+                        Score {Math.round(clip.score * 100)}
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="text-xs text-muted">
+                    {formatDuration(clip.startSeconds)} – {formatDuration(clip.endSeconds)} ·{" "}
+                    {Math.round(clip.endSeconds - clip.startSeconds)} s
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {clip.status !== "approved" ? (
+                      <button onClick={() => setClipStatus(clip, "approved")} className="rounded-lg bg-accent px-3 py-1 text-xs font-medium text-black">
+                        Aprobar
+                      </button>
+                    ) : null}
+                    {clip.status !== "discarded" ? (
+                      <button onClick={() => setClipStatus(clip, "discarded")} className="rounded-lg border border-line px-3 py-1 text-xs">
+                        Descartar
+                      </button>
+                    ) : (
+                      <button onClick={() => setClipStatus(clip, "generated")} className="rounded-lg border border-line px-3 py-1 text-xs">
+                        Recuperar
+                      </button>
+                    )}
+                    <button onClick={() => download(clip)} className="rounded-lg border border-line px-3 py-1 text-xs">
+                      Descargar
+                    </button>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </div>
+  );
+}

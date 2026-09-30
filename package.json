@@ -8,6 +8,7 @@
   "workspaces": [
     "shared",
     "backend",
+    "worker",
     "frontend",
     "infrastructure"
   ],
@@ -19,6 +20,7 @@
     "test": "npm run test --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "db:migrate": "npm run db:migrate -w @clipflow/shared",
-    "db:generate": "npm run db:generate -w @clipflow/shared"
+    "db:generate": "npm run db:generate -w @clipflow/shared",
+    "dev:worker": "npm run dev -w worker"
   }
 }

@@ -3,6 +3,7 @@ import {
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
   DeleteObjectCommand,
+  GetObjectCommand,
   HeadObjectCommand,
   NotFound,
   S3Client,
@@ -22,6 +23,8 @@ export interface VideoStorage {
   /** Tamaño real del objeto en S3, o null si no existe. */
   getObjectSize(key: string): Promise<number | null>;
   deleteObject(key: string): Promise<void>;
+  /** URL temporal de lectura (previews y descargas). */
+  presignGet(key: string, expiresInSeconds: number, downloadFilename?: string): Promise<string>;
 }
 
 export function createS3Storage(options: { bucket: string; region: string; client?: S3Client }): VideoStorage {
@@ -71,6 +74,15 @@ export function createS3Storage(options: { bucket: string; region: string; clien
 
     async deleteObject(key) {
       await s3.send(new DeleteObjectCommand({ Bucket, Key: key }));
+    },
+
+    presignGet(key, expiresInSeconds, downloadFilename) {
+      const disposition = downloadFilename
+        ? `attachment; filename="${downloadFilename.replace(/[^\w.-]/g, "_")}"`
+        : undefined;
+      return getSignedUrl(s3, new GetObjectCommand({ Bucket, Key: key, ResponseContentDisposition: disposition }), {
+        expiresIn: expiresInSeconds,
+      });
     },
   };
 }

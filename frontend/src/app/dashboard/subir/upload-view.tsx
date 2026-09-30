@@ -188,8 +188,8 @@ export function UploadView() {
 
       {phase === "done" && result ? (
         <Alert kind="info">
-          Video subido y guardado de forma privada. El procesamiento automático se habilita en la siguiente fase.{" "}
-          <Link href="/dashboard" className="underline">Ver proyectos</Link>
+          Video subido. El procesamiento empezó automáticamente.{" "}
+          <Link href={`/dashboard/videos/${result.id}`} className="underline">Ver progreso</Link>
         </Alert>
       ) : null}
       {busy ? (
