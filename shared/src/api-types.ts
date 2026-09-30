@@ -68,9 +68,18 @@ export interface JobDto {
   /** Mensaje apto para el usuario si falló. */
   errorMessage: string | null;
   params: { clipDurationSeconds?: number };
+  result: JobResult | null;
   queuedAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+}
+
+export interface JobResult {
+  clipCount: number;
+  /** "used": hubo análisis de IA; "disabled": no hay clave configurada; "unavailable": la IA falló. */
+  ai: "used" | "disabled" | "unavailable" | "no_audio";
+  aiReason?: string;
+  language?: string | null;
 }
 
 export interface JobListResponse {
@@ -92,6 +101,9 @@ export interface ClipDto {
   /** URLs firmadas temporales (null si el archivo aún no existe). */
   videoUrl: string | null;
   thumbnailUrl: string | null;
+  /** Subtítulos del clip (si hubo transcripción). */
+  subtitlesVttUrl: string | null;
+  subtitlesSrtUrl: string | null;
   createdAt: string;
 }
 

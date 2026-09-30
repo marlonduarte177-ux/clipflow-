@@ -109,6 +109,7 @@ export function VideoView({ videoId }: { videoId: string }) {
           {job?.params.clipDurationSeconds ? ` · clips de ${job.params.clipDurationSeconds} s` : ""}
         </p>
         {video.rejectionReason ? <Alert kind="error">{video.rejectionReason}</Alert> : null}
+        {job?.status === "completed" && job.result ? <AiStatus result={job.result} /> : null}
         {job ? (
           <JobProgress job={job} />
         ) : video.status === "uploaded" || video.status === "ready" ? (
@@ -176,10 +177,16 @@ export function VideoView({ videoId }: { videoId: string }) {
                     controls
                     playsInline
                     preload="none"
+                    // Necesario para mostrar los subtítulos, que vienen de otro dominio (S3).
+                    crossOrigin="anonymous"
                     // Las URLs caducan a los 15 min: si falla, se piden nuevas.
                     onError={() => setReloadKey((k) => (k < 3 ? k + 1 : k))}
                     className="aspect-[9/16] w-full bg-black object-cover"
-                  />
+                  >
+                    {clip.subtitlesVttUrl ? (
+                      <track kind="subtitles" src={clip.subtitlesVttUrl} label="Subtítulos" srcLang="es" default />
+                    ) : null}
+                  </video>
                 ) : null}
                 <div className="space-y-2 p-3 text-sm">
                   <div className="flex items-center justify-between">
@@ -212,6 +219,11 @@ export function VideoView({ videoId }: { videoId: string }) {
                     <button onClick={() => download(clip)} className="rounded-lg border border-line px-3 py-1 text-xs">
                       Descargar
                     </button>
+                    {clip.subtitlesSrtUrl ? (
+                      <a href={clip.subtitlesSrtUrl} className="rounded-lg border border-line px-3 py-1 text-xs">
+                        Subtítulos .srt
+                      </a>
+                    ) : null}
                   </div>
                 </div>
               </li>
@@ -220,5 +232,21 @@ export function VideoView({ videoId }: { videoId: string }) {
         </section>
       ) : null}
     </div>
+  );
+}
+
+function AiStatus({ result }: { result: NonNullable<JobDto["result"]> }) {
+  if (result.ai === "used") {
+    return (
+      <p className="text-xs text-accent">
+        Analizado con IA: transcripción, momentos por contenido, títulos y subtítulos
+        {result.language ? ` · idioma: ${result.language}` : ""}.
+      </p>
+    );
+  }
+  return (
+    <p className="text-xs text-muted">
+      Sin análisis de IA{result.aiReason ? `: ${result.aiReason}` : ""}. Los clips se eligieron por audio y cambios de escena.
+    </p>
   );
 }

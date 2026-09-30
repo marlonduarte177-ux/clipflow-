@@ -55,7 +55,8 @@ describe("consumidor de la cola", () => {
     const sqs = fakeSqs();
     await handleMessage(message(JSON.stringify({ jobId: job.id })), options(sqs.client));
     const [row] = await h!.db.select().from(schema.processingJobs).where(eq(schema.processingJobs.id, job.id));
-    expect(row).toMatchObject({ status: "completed", progress: 100 });
+    expect(row).toMatchObject({ status: "completed", progress: 100, result: { ai: "disabled" } });
+    expect((row!.result as { clipCount: number }).clipCount).toBeGreaterThan(0);
     expect(sqs.calls.map((c) => c.command)).toContain("DeleteMessageCommand");
   });
 

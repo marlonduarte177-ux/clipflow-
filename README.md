@@ -13,6 +13,7 @@ En construcción por fases. Ver `docs/`:
 - [Fase 4 — Base de datos](docs/fase-4-base-de-datos.md)
 - [Fase 5 — Subida de videos e infraestructura base](docs/fase-5-subida-videos.md)
 - [Fases 6 y 7 — Cola de trabajos y procesador de video](docs/fase-6-7-procesamiento.md)
+- [Fase 8 — Análisis con IA (OpenAI)](docs/fase-8-ia-openai.md)
 
 ## Estructura
 
@@ -20,7 +21,7 @@ En construcción por fases. Ver `docs/`:
 |---|---|
 | `frontend/` | Web (Next.js): cuentas, proyectos, subida, progreso y resultados |
 | `backend/` | API (Fastify) + `Dockerfile`: usuarios, proyectos, subida de videos a S3 |
-| `worker/` | Procesador de video (Node.js + FFmpeg) + `Dockerfile`: lee la cola SQS, genera clips 9:16 |
+| `worker/` | Procesador de video (Node.js + FFmpeg + OpenAI) + `Dockerfile`: clips 9:16, subtítulos y títulos |
 | `shared/` | Configuración central, tipos, validaciones, esquema de base de datos y migraciones (`shared/drizzle/`) |
 | `infrastructure/` | AWS CDK: Cognito, red, S3, RDS, SQS, worker y API (Fargate + API Gateway) |
 | `docs/` | Documentación por fase |

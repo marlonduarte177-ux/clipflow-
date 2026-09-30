@@ -80,9 +80,9 @@ export async function handleMessage(message: Message, options: ConsumerOptions):
     (options.visibilitySeconds * 1000) / 3,
   );
   try {
-    const { clipCount } = await processAnalyzeJob(job, deps);
-    await completeJob(deps.db, job.id, deps.workerId);
-    deps.log.info({ jobId, clipCount }, "trabajo completado");
+    const result = await processAnalyzeJob(job, deps);
+    await completeJob(deps.db, job.id, deps.workerId, { ...result });
+    deps.log.info({ jobId, clipCount: result.clipCount, ai: result.ai }, "trabajo completado");
     await remove();
   } catch (err) {
     if (err instanceof JobStopped) {

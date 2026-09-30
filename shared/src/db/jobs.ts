@@ -104,10 +104,22 @@ function ownedBy(jobId: string, workerId: string) {
   return and(eq(processingJobs.id, jobId), eq(processingJobs.lockedBy, workerId), eq(processingJobs.status, "processing"));
 }
 
-export async function completeJob(db: DbExecutor, jobId: string, workerId: string): Promise<boolean> {
+export async function completeJob(
+  db: DbExecutor,
+  jobId: string,
+  workerId: string,
+  result?: Record<string, unknown>,
+): Promise<boolean> {
   const rows = await db
     .update(processingJobs)
-    .set({ status: "completed", stage: "finalizing", progress: 100, finishedAt: sql`now()`, lockedBy: null })
+    .set({
+      status: "completed",
+      stage: "finalizing",
+      progress: 100,
+      finishedAt: sql`now()`,
+      lockedBy: null,
+      ...(result ? { result } : {}),
+    })
     .where(ownedBy(jobId, workerId))
     .returning({ id: processingJobs.id });
   return rows.length > 0;

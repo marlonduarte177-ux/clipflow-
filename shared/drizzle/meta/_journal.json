@@ -15,6 +15,13 @@
       "when": 1790305751827,
       "tag": "0001_credit_ledger_append_only",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790776679008,
+      "tag": "0002_job_result",
+      "breakpoints": true
     }
   ]
 }

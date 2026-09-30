@@ -111,6 +111,10 @@ describe("clips", () => {
         thumbnailS3Key: `thumbnails/${user!.id}/c/thumb.jpg`,
       })
       .returning();
+    await db().insert(schema.subtitles).values([
+      { userId: user!.id, videoId: video.id, clipId: clip!.id, format: "vtt" as const, s3Key: `subtitles/${user!.id}/c/0.vtt` },
+      { userId: user!.id, videoId: video.id, clipId: clip!.id, format: "srt" as const, s3Key: `subtitles/${user!.id}/c/0.srt` },
+    ]);
     return { video, clip: clip! };
   }
 
@@ -121,6 +125,8 @@ describe("clips", () => {
     expect(list.clips[0]).toMatchObject({ score: 0.8, startSeconds: 10, endSeconds: 40, status: "generated" });
     expect(list.clips[0].videoUrl).toContain("expires=900");
     expect(list.clips[0].thumbnailUrl).toContain("thumb.jpg");
+    expect(list.clips[0].subtitlesVttUrl).toContain("0.vtt");
+    expect(list.clips[0].subtitlesSrtUrl).toContain("download=clipflow-10s.srt");
 
     const approved = await app().inject({ method: "PATCH", url: `/clips/${clip.id}`, headers: bearer("alice"), payload: { status: "approved" } });
     expect(approved.json().status).toBe("approved");

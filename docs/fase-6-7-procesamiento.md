@@ -1,6 +1,10 @@
 # ClipFlow — Fases 6 y 7: Cola de trabajos y procesador de video
 
-Estado: **código terminado y probado. Pendiente: desplegar y probar en AWS.**
+Estado: **desplegada y verificada en AWS (staging)** el 30/09/2026.
+
+Prueba real: se procesó un video de 23:24 min (50.8 MB) subido desde el celular. El worker arrancó
+desde 0, generó los clips y la web mostró el progreso y los resultados. El PR #5 corrigió el error
+"Unsupported Media Type" al descartar subidas y agregó "Procesar video" para videos anteriores.
 
 ## Cómo funciona
 
