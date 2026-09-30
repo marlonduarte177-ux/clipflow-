@@ -129,15 +129,37 @@ Tests:
   con franjas;
 - un video sin franjas no se recorta de más.
 
-### Escalado y costos
+### Escalado, velocidad y costos
 
-- El worker (2 vCPU, 4 GB, 50 GB de disco) **está apagado cuando no hay trabajos**. ECS lo enciende
-  cuando `pendientes + en proceso ≥ 1` (hasta 3 workers) y lo apaga cuando llega a 0. Como cuenta
-  los mensajes en proceso, nunca apaga un worker que está trabajando.
-- **Latencia:** después de un rato sin uso, el primer video puede tardar ~3–5 min en empezar
-  (métrica de SQS + arranque del contenedor).
-- **Costo:** ~0.10 USD por hora de procesamiento. Cada trabajo registra en `usage` los segundos de
-  video, los segundos de proceso con su costo estimado y los clips generados.
+**Problema detectado (30/09/2026):** un video quedó varios minutos en "En cola 0 %". Las métricas de
+SQS, que usaba el escalado, tardan de 1 a 5 min en reaccionar, y hasta ~15 min si la cola llevaba
+horas sin uso. Luego el procesador todavía tenía que arrancar.
+
+**Cómo funciona ahora:**
+
+1. **La API enciende el procesador al EMPEZAR la subida** (`ecs:RunTask`), sin esperar métricas. Así
+   arranca (~1 min) mientras el video sube, y al terminar la subida el trabajo empieza enseguida.
+   También lo pide al encolar un trabajo: 1 procesador por trabajo en cola, hasta 3.
+2. **Esos procesadores se apagan solos** tras 10 min sin trabajo (`WORKER_IDLE_EXIT_SECONDS=600`),
+   así los videos seguidos empiezan al instante. Cada espera cuesta ~0.03 USD.
+3. **Respaldo por métricas:** el servicio ECS sigue escalando de 0 a 3 según pendientes + en proceso.
+   Se enciende con 1 pendiente (alarma de 1 min) y se apaga tras 10 min seguidos sin nada (alarma de
+   10 min). Además, al empezar una subida la API deja un aviso en la cola; el worker lo mantiene
+   "en proceso" hasta 15 min para que el respaldo no se apague durante la subida.
+4. **Más rápido por video:**
+   - worker de **4 vCPU / 8 GB**;
+   - el análisis de FFmpeg, la transcripción y el análisis de imágenes corren **en paralelo**;
+   - la transcripción envía hasta 3 trozos a la vez;
+   - se generan **2 clips a la vez**.
+5. **Web:** muestra "Encendiendo el procesador…", el tiempo transcurrido y que se puede cerrar la
+   página porque el trabajo sigue en la nube.
+
+**Permisos mínimos:** la API solo puede lanzar la definición de tarea `clipflow-<entorno>-worker` en
+su cluster, listar tareas de ese cluster y pasar los roles de ese worker a ECS.
+
+**Costo:** ~0.20 USD por hora de procesamiento (4 vCPU / 8 GB). Tarda aproximadamente la mitad que
+antes, así que el costo por video es parecido. Cada trabajo registra en `usage` sus segundos de
+proceso y su costo estimado.
 
 ### Web
 

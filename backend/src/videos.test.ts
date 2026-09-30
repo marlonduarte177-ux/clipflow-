@@ -34,6 +34,7 @@ describe("subida de videos: flujo completo", () => {
   it("crea, firma partes, completa y registra el video", async () => {
     const created = await startUpload("alice");
     expect(created.statusCode).toBe(201);
+    expect(ctx!.queue.warmups).toBe(1); // el procesador se enciende mientras el video sube
     const { video, upload } = created.json();
     expect(video).toMatchObject({ status: "pending_upload", originalFilename: "episodio 1.mp4", durationSeconds: 600 });
     expect(upload).toEqual({ partSizeBytes: 16 * MiB, partCount: 3 });

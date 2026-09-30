@@ -46,6 +46,7 @@ try {
     queueUrl: config.SQS_QUEUE_URL,
     visibilitySeconds: config.SQS_VISIBILITY_SECONDS,
     shouldStop: () => stopping,
+    idleExitSeconds: config.WORKER_IDLE_EXIT_SECONDS,
     deps: {
       db: database.db,
       storage: createS3WorkerStorage({ bucket: config.S3_BUCKET, region: config.AWS_REGION }),

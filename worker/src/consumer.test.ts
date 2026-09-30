@@ -6,7 +6,7 @@ import type { SQSClient } from "@aws-sdk/client-sqs";
 import { eq } from "drizzle-orm";
 import { schema, type DbHandle } from "@clipflow/shared/db";
 import { createTestDb } from "@clipflow/shared/db/testing";
-import { handleMessage, type ConsumerOptions } from "./consumer.js";
+import { handleMessage, runConsumer, type ConsumerOptions } from "./consumer.js";
 import { makeDeps, makeSampleVideo, seedVideoJob } from "./test-helpers.js";
 
 let h: DbHandle | undefined;
@@ -70,6 +70,32 @@ describe("consumidor de la cola", () => {
     expect(sqs.calls.map((c) => c.command)).toEqual(["DeleteMessageCommand"]);
     const clipsAfter = await h!.db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
     expect(clipsAfter.map((c) => c.id)).toEqual(clipsBefore.map((c) => c.id));
+  });
+
+  it("un aviso de encendido se mantiene oculto (worker despierto) y se borra al vencer", async () => {
+    const fresh = fakeSqs();
+    await handleMessage(
+      { MessageId: "w1", ReceiptHandle: "rw", Body: JSON.stringify({ warmup: true }), Attributes: { SentTimestamp: String(Date.now() - 60_000) } },
+      options(fresh.client),
+    );
+    expect(fresh.calls).toHaveLength(1);
+    expect(fresh.calls[0]!.command).toBe("ChangeMessageVisibilityCommand");
+    expect(fresh.calls[0]!.input.VisibilityTimeout).toBeGreaterThan(13 * 60);
+
+    const old = fakeSqs();
+    await handleMessage(
+      { MessageId: "w2", ReceiptHandle: "rw", Body: JSON.stringify({ warmup: true }), Attributes: { SentTimestamp: String(Date.now() - 20 * 60_000) } },
+      options(old.client),
+    );
+    expect(old.calls.map((c) => c.command)).toEqual(["DeleteMessageCommand"]);
+  });
+
+  it("un worker encendido por la API se apaga solo cuando no hay trabajos", async () => {
+    const sqs = fakeSqs();
+    const started = Date.now();
+    await runConsumer({ ...options(sqs.client), shouldStop: () => false, idleExitSeconds: 0.2 });
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(sqs.calls.some((c) => c.command === "ReceiveMessageCommand")).toBe(true);
   });
 
   it("descarta mensajes mal formados", async () => {

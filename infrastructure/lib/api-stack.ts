@@ -31,6 +31,13 @@ export interface ApiStackProps extends StackProps {
   userPoolClient: cognito.IUserPoolClient;
   queue: sqs.IQueue;
   webOrigins: string[];
+  /** Procesador de video que la API enciende directamente al empezar una subida. */
+  worker: {
+    cluster: ecs.ICluster;
+    taskDefinition: ecs.FargateTaskDefinition;
+    taskFamily: string;
+    securityGroup: ec2.ISecurityGroup;
+  };
 }
 
 /**
@@ -85,6 +92,11 @@ export class ApiStack extends Stack {
         COGNITO_CLIENT_ID: props.userPoolClient.userPoolClientId,
         S3_BUCKET: props.bucket.bucketName,
         SQS_QUEUE_URL: props.queue.queueUrl,
+        WORKER_CLUSTER_ARN: props.worker.cluster.clusterArn,
+        WORKER_TASK_FAMILY: props.worker.taskFamily,
+        WORKER_SUBNETS: props.vpc.selectSubnets({ subnetType: ec2.SubnetType.PUBLIC }).subnetIds.join(","),
+        WORKER_SECURITY_GROUPS: props.worker.securityGroup.securityGroupId,
+        WORKER_MAX_TASKS: "3",
         DB_HOST: props.database.dbInstanceEndpointAddress,
         DB_PORT: props.database.dbInstanceEndpointPort,
         DB_NAME: DATABASE_NAME,
@@ -129,6 +141,29 @@ export class ApiStack extends Stack {
       }),
     );
     props.queue.grantSendMessages(taskDefinition.taskRole);
+
+    // Encender el procesador de video al instante: solo ESTA definición de tarea, en ESTE cluster.
+    taskDefinition.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["ecs:RunTask"],
+        resources: [`arn:${this.partition}:ecs:${this.region}:${this.account}:task-definition/${props.worker.taskFamily}:*`],
+        conditions: { ArnEquals: { "ecs:cluster": props.worker.cluster.clusterArn } },
+      }),
+    );
+    taskDefinition.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["ecs:ListTasks"],
+        resources: ["*"],
+        conditions: { ArnEquals: { "ecs:cluster": props.worker.cluster.clusterArn } },
+      }),
+    );
+    taskDefinition.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["iam:PassRole"],
+        resources: [props.worker.taskDefinition.taskRole.roleArn, props.worker.taskDefinition.obtainExecutionRole().roleArn],
+        conditions: { StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" } },
+      }),
+    );
 
     const vpcLinkSecurityGroup = new ec2.SecurityGroup(this, "VpcLinkSecurityGroup", {
       vpc: props.vpc,

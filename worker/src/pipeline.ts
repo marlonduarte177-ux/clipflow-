@@ -71,6 +71,8 @@ export interface PipelineDeps {
   aiDisabledReason?: string;
   /** Máximo de minutos de audio que se envían a la IA por video (control de costos). */
   aiMaxAudioMinutes: number;
+  /** Clips que se generan a la vez (por defecto 2). */
+  renderConcurrency?: number;
   /** Análisis de imágenes con IA (experimental, tiene costo por imagen). */
   vision?: { enabled: boolean; intervalSeconds: number; maxFrames: number };
   log: { info: (obj: object, msg: string) => void; warn: (obj: object, msg: string) => void };
@@ -157,30 +159,31 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     if (contentBox) deps.log.info({ jobId: job.id, contentBox }, "franjas negras detectadas");
     await progress("preparing", 1, true);
 
-    // 2. Analizar: señales reales por segundo (volumen y cambios de escena).
-    const raw = await analyzeSignals(deps.tools, input, info, dir, {
-      signal: controller.signal,
-      onProgress: (s) => void progress("analyzing", (s / info.durationSeconds) * 0.5).catch(() => undefined),
-    });
+    // 2. Analizar EN PARALELO (ahorra minutos):
+    //    a) señales por segundo con FFmpeg (volumen, picos de acción, movimiento);
+    //    b) IA de audio: transcripción + momentos por contenido;
+    //    c) IA de imágenes (experimental): lo que se ve en pantalla.
+    //    Si la IA falla, el video se procesa igual y el resultado lo indica.
+    const parts = { signals: 0, ai: 0, vision: 0 };
+    const report = (part: keyof typeof parts) => (fraction: number) => {
+      parts[part] = Math.min(1, Math.max(0, fraction));
+      return progress("analyzing", parts.signals * 0.5 + parts.ai * 0.25 + parts.vision * 0.25).catch(() => undefined);
+    };
+    const [raw, ai, vision] = await Promise.all([
+      analyzeSignals(deps.tools, input, info, dir, {
+        signal: controller.signal,
+        onProgress: (sec) => void report("signals")(sec / info.durationSeconds),
+      }),
+      runAI(deps, info, input, dir, controller.signal, async (f) => void (await report("ai")(f))),
+      runVision(deps, info, input, dir, contentBox, controller.signal, async (f) => void (await report("vision")(f))),
+    ]);
     check();
     const signals: SignalSeries = {
       visual: raw.visual,
       ...(raw.audio ? { audio: raw.audio } : {}),
       ...(raw.action ? { action: raw.action } : {}),
     };
-    await progress("analyzing", 0.5, true);
-
-    // 2b. IA (si está configurada): transcripción + momentos por contenido.
-    //     Si falla, el video se procesa igual con FFmpeg y el resultado lo indica.
-    const ai = await runAI(deps, info, input, dir, controller.signal, (f) => progress("analyzing", 0.5 + f * 0.25));
-    check();
     if (ai.highlights) signals.speech = speechSignalFromHighlights(ai.highlights, info.durationSeconds);
-
-    // 2c. Imágenes con IA (experimental): lo que se ve en pantalla (kills, avisos, jugadas).
-    const vision = await runVision(deps, info, input, dir, contentBox, controller.signal, (f) =>
-      progress("analyzing", 0.75 + f * 0.25),
-    );
-    check();
     if (vision.frames.length) {
       signals.vision = visionSignalFromFrames(vision.frames, info.durationSeconds, vision.intervalSeconds);
     }
@@ -229,7 +232,17 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       title: string | null;
       subtitleKeys: { srt: string; vtt: string } | null;
     }[] = [];
-    for (const [index, moment] of finalMoments.entries()) {
+    // Progreso real de cada clip (se generan de a varios a la vez).
+    const clipProgress = new Array<number>(finalMoments.length).fill(0);
+    const reportClips = (force = false) =>
+      progress(
+        "rendering_clips",
+        clipProgress.reduce((a, b) => a + b, 0) / Math.max(1, finalMoments.length),
+        force,
+      ).catch(() => undefined);
+
+    const renderOne = async (index: number) => {
+      const moment = finalMoments[index]!;
       const duration = moment.endSeconds - moment.startSeconds;
       const clipFile = path.join(dir, `clip-${index}.mp4`);
       const thumbFile = path.join(dir, `thumb-${index}.jpg`);
@@ -239,7 +252,10 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       await renderVerticalClip(deps.tools, input, clipFile, segment, {
         signal: controller.signal,
         crop,
-        onProgress: (s) => void progress("rendering_clips", (index + s / duration) / finalMoments.length).catch(() => undefined),
+        onProgress: (sec) => {
+          clipProgress[index] = Math.min(0.95, sec / duration);
+          void reportClips();
+        },
       });
       await renderThumbnail(deps.tools, input, thumbFile, moment.startSeconds + duration / 2, controller.signal, crop);
       check();
@@ -263,9 +279,17 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
         await deps.storage.upload(srtFile, subtitleKeys.srt, "application/x-subrip");
         await deps.storage.upload(vttFile, subtitleKeys.vtt, "text/vtt");
       }
-      outputs.push({ moment, key, thumbKey, title: titles[index] ?? null, subtitleKeys });
-      await progress("rendering_clips", (index + 1) / finalMoments.length, true);
-    }
+      outputs[index] = { moment, key, thumbKey, title: titles[index] ?? null, subtitleKeys };
+      clipProgress[index] = 1;
+      await reportClips(true);
+    };
+
+    // Varios clips a la vez (cada FFmpeg usa varios núcleos); el orden final se mantiene.
+    let nextClip = 0;
+    const clipWorker = async () => {
+      while (nextClip < finalMoments.length) await renderOne(nextClip++);
+    };
+    await Promise.all(Array.from({ length: Math.min(deps.renderConcurrency ?? 2, finalMoments.length) }, clipWorker));
 
     // 5. Registrar resultados y consumo (en una transacción).
     await progress("finalizing", 0, true);

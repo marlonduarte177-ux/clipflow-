@@ -15,8 +15,10 @@ const EnvSchema = z.object({
   FFPROBE_PATH: z.string().default("ffprobe"),
   /** Tiempo que un mensaje queda oculto a otros workers; se renueva mientras se procesa. */
   SQS_VISIBILITY_SECONDS: z.coerce.number().int().min(60).max(43_200).default(300),
-  /** Costo estimado por hora del worker (Fargate 2 vCPU / 4 GB x86 en us-east-1 ≈ 0.0987). */
-  WORKER_COST_PER_HOUR_USD: z.coerce.number().nonnegative().default(0.0987),
+  /** Costo estimado por hora del worker (Fargate 4 vCPU / 8 GB x86 en us-east-1 ≈ 0.1975). */
+  /** 0 = no se apaga solo (lo maneja el escalado). Los workers que enciende la API usan 600. */
+  WORKER_IDLE_EXIT_SECONDS: z.coerce.number().int().nonnegative().default(0),
+  WORKER_COST_PER_HOUR_USD: z.coerce.number().nonnegative().default(0.1975),
 
   // --- IA (OpenAI) ---
   AI_PROVIDER: z.enum(["openai", "none"]).default("openai"),

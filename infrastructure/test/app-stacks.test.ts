@@ -39,6 +39,12 @@ beforeAll(() => {
     userPool: auth.userPool,
     userPoolClient: auth.userPoolClient,
     queue: worker.queue,
+    worker: {
+      cluster: worker.cluster,
+      taskDefinition: worker.taskDefinition,
+      taskFamily: worker.taskFamily,
+      securityGroup: worker.securityGroup,
+    },
     webOrigins: WEB,
   });
   t = {
@@ -176,6 +182,20 @@ function s3Statements(template: Template): Statement[] {
     .filter((s) => [s.Action].flat().some((a) => a.startsWith("s3:")));
 }
 
+describe("encendido directo del worker desde la API", () => {
+  it("la API solo puede lanzar la tarea del worker en su cluster y pasarle sus roles", () => {
+    const statements = Object.values(t.api.findResources("AWS::IAM::Policy")).flatMap(
+      (p) => (p as { Properties: { PolicyDocument: { Statement: Record<string, unknown>[] } } }).Properties.PolicyDocument.Statement,
+    );
+    const run = statements.find((st) => st.Action === "ecs:RunTask")!;
+    expect(JSON.stringify(run.Resource)).toContain("task-definition/clipflow-staging-worker:*");
+    expect(run.Condition).toHaveProperty("ArnEquals");
+    const pass = statements.find((st) => st.Action === "iam:PassRole")!;
+    expect(pass.Condition).toEqual({ StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" } });
+    expect(statements.some((st) => st.Action === "ecs:*" || st.Action === "*")).toBe(false);
+  });
+});
+
 describe("cola y worker", () => {
   it("la cola tiene cola de errores (DLQ) con alarma", () => {
     t.worker.hasResourceProperties("AWS::SQS::Queue", {
@@ -186,15 +206,35 @@ describe("cola y worker", () => {
     t.worker.hasResourceProperties("AWS::CloudWatch::Alarm", { AlarmName: "clipflow-staging-jobs-dlq-not-empty" });
   });
 
-  it("el worker empieza en 0 y escala a 0 cuando no hay trabajos", () => {
+  it("el worker empieza en 0, se enciende con 1 pendiente y se apaga tras 10 min sin trabajo", () => {
     t.worker.hasResourceProperties("AWS::ECS::Service", { DesiredCount: 0 });
     t.worker.hasResourceProperties("AWS::ApplicationAutoScaling::ScalableTarget", { MinCapacity: 0, MaxCapacity: 3 });
+    t.worker.hasResourceProperties("AWS::CloudWatch::Alarm", {
+      AlarmName: "clipflow-staging-worker-backlog",
+      Threshold: 1,
+      EvaluationPeriods: 1,
+      ComparisonOperator: "GreaterThanOrEqualToThreshold",
+    });
+    t.worker.hasResourceProperties("AWS::CloudWatch::Alarm", {
+      AlarmName: "clipflow-staging-worker-idle",
+      Threshold: 0,
+      EvaluationPeriods: 10,
+      ComparisonOperator: "LessThanOrEqualToThreshold",
+    });
+    // Solo dos políticas: encender (rápida) y apagar (lenta). Ninguna apaga al instante.
+    t.worker.resourceCountIs("AWS::ApplicationAutoScaling::ScalingPolicy", 2);
+    t.worker.hasResourceProperties("AWS::ApplicationAutoScaling::ScalingPolicy", {
+      StepScalingPolicyConfiguration: Match.objectLike({
+        AdjustmentType: "ExactCapacity",
+        StepAdjustments: [Match.objectLike({ ScalingAdjustment: 0, MetricIntervalUpperBound: 0 })],
+      }),
+    });
   });
 
   it("tiene CPU, memoria y disco para videos largos", () => {
     t.worker.hasResourceProperties("AWS::ECS::TaskDefinition", {
-      Cpu: "2048",
-      Memory: "4096",
+      Cpu: "4096",
+      Memory: "8192",
       EphemeralStorage: { SizeInGiB: 50 },
     });
   });

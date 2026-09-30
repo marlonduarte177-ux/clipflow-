@@ -28,6 +28,12 @@ const EnvSchema = z.object({
   S3_BUCKET: z.string().min(3, "falta el nombre del bucket"),
   S3_UPLOAD_URL_EXPIRES_SECONDS: z.coerce.number().int().min(60).max(7 * 24 * 3600).default(3600),
   SQS_QUEUE_URL: z.url("debe ser la URL de la cola SQS"),
+  // Encendido directo de procesadores (AWS). Vacío en local: no hace nada.
+  WORKER_CLUSTER_ARN: z.string().optional(),
+  WORKER_TASK_FAMILY: z.string().optional(),
+  WORKER_SUBNETS: z.string().optional(),
+  WORKER_SECURITY_GROUPS: z.string().optional(),
+  WORKER_MAX_TASKS: z.coerce.number().int().positive().default(3),
   COGNITO_USER_POOL_ID: z.string().regex(/^[\w-]+_[0-9a-zA-Z]+$/, "formato esperado: us-east-1_XXXXXXX"),
   COGNITO_CLIENT_ID: z.string().min(1),
 });

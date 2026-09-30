@@ -16,7 +16,8 @@ import {
 } from "@clipflow/shared";
 import { createJob, schema, type Database } from "@clipflow/shared/db";
 import { sendError, sendValidationError } from "./http.js";
-import { enqueue, toJobDto } from "./jobs.js";
+import { enqueue, toJobDto, wakeWorkers } from "./jobs.js";
+import type { WorkerLauncher } from "./launcher.js";
 import type { JobQueue } from "./queue.js";
 import type { VideoStorage } from "./storage.js";
 
@@ -61,6 +62,7 @@ export interface VideoRouteDeps {
   auth: preHandlerHookHandler;
   storage: VideoStorage;
   queue: JobQueue;
+  launcher: WorkerLauncher;
   product: ProductConfig;
   uploadUrlExpiresSeconds: number;
 }
@@ -74,7 +76,7 @@ export interface VideoRouteDeps {
  * Todas las consultas filtran por el usuario del token.
  */
 export function videoRoutes(deps: VideoRouteDeps) {
-  const { db, storage, queue, product } = deps;
+  const { db, storage, queue, launcher, product } = deps;
   const notFound = (reply: Parameters<preHandlerHookHandler>[1]) =>
     sendError(reply, 404, "not_found", "Video no encontrado.");
 
@@ -180,6 +182,10 @@ export function videoRoutes(deps: VideoRouteDeps) {
         .returning();
 
       request.log.info({ videoId, sizeBytes, mimeType }, "subida iniciada");
+      // Encender el procesador mientras el video sube: al terminar, empieza sin esperar.
+      wakeWorkers(db, launcher, request.log);
+      // Respaldo: aviso en la cola (el escalado por métricas también lo enciende).
+      queue.warmUp().catch((err: Error) => request.log.warn({ reason: err.name }, "no se pudo enviar el aviso de encendido"));
       return reply.code(201).send({ video: toVideoDto(row!), upload: planUploadParts(sizeBytes) } satisfies CreateVideoResponse);
     });
 
@@ -269,7 +275,10 @@ export function videoRoutes(deps: VideoRouteDeps) {
         idempotencyKey: `analyze:${row.id}`,
         params: { clipDurationSeconds: product.defaultClipDurationSeconds },
       });
-      if (created) await enqueue(queue, job, request.log);
+      if (created) {
+        await enqueue(queue, job, request.log);
+        wakeWorkers(db, launcher, request.log);
+      }
       return { ...toVideoDto(updated!), job: toJobDto(job) };
     });
 
@@ -299,6 +308,7 @@ export function videoRoutes(deps: VideoRouteDeps) {
       });
       if (!created) return sendError(reply, 409, "already_processing", "Este video ya tiene un procesamiento. Usa Reintentar si falló.");
       await enqueue(queue, job, request.log);
+      wakeWorkers(db, launcher, request.log);
       return reply.code(201).send(toJobDto(job));
     });
 

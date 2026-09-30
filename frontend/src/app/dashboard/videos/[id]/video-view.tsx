@@ -111,7 +111,7 @@ export function VideoView({ videoId }: { videoId: string }) {
         {video.rejectionReason ? <Alert kind="error">{video.rejectionReason}</Alert> : null}
         {job?.status === "completed" && job.result ? <AiStatus result={job.result} /> : null}
         {job ? (
-          <JobProgress job={job} />
+          <JobProgress job={job} showHint />
         ) : video.status === "uploaded" || video.status === "ready" ? (
           <div className="flex flex-wrap items-end gap-3">
             <label className="text-sm">
