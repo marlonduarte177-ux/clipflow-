@@ -44,7 +44,7 @@ describe("encuadre inteligente", () => {
     expect(crop.x).toBeLessThan((1280 - 404) / 2);
   });
 
-  it("en un video con franjas negras, recorta dentro de la imagen real y sigue la acción", async () => {
+  it("un video vertical con una imagen horizontal y franjas: solo se acerca un poco, sin recortar a 9:16", async () => {
     const file = path.join(dir, "letterbox-right.mp4");
     actionVideo(file, "right", true);
     const info = await probe(tools, file);
@@ -53,9 +53,40 @@ describe("encuadre inteligente", () => {
     expect(box!.y).toBeGreaterThanOrEqual(437);
     expect(box!.y + box!.height).toBeLessThanOrEqual(437 + 405);
     const crop = await chooseVerticalCrop(tools, file, info, box, { startSeconds: 0, durationSeconds: 6 });
-    expect(crop.y).toBe(box!.y);
-    expect(crop.height).toBe(box!.height);
+    expect(crop.fit).toBe(true);
+    // Zoom 1.25: se ve el 80 % del ancho de la imagen (antes solo ~31 %).
+    expect(crop.width).toBeGreaterThanOrEqual(Math.floor((box!.width * 0.8) / 2) * 2 - 2);
+    expect(crop.width / crop.height).toBeCloseTo(720 / 1280, 2);
+    // Centrado en la imagen y movido hacia donde está la acción.
+    expect(crop.y).toBeLessThanOrEqual(box!.y);
+    expect(crop.y + crop.height).toBeGreaterThanOrEqual(box!.y + box!.height);
     expect(crop.x).toBeGreaterThan((720 - crop.width) / 2);
+  });
+
+  it("un video vertical sin franjas no se recorta nada", async () => {
+    const file = path.join(dir, "vertical.mp4");
+    execFileSync("ffmpeg", [
+      "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=720x1280:rate=25:duration=3",
+      "-c:v", "libx264", "-preset", "ultrafast", file,
+    ]);
+    const info = await probe(tools, file);
+    const box = await detectContentBox(tools, file, info);
+    const crop = await chooseVerticalCrop(tools, file, info, box, { startSeconds: 0, durationSeconds: 3 });
+    expect(crop).toEqual({ x: 0, y: 0, width: 720, height: 1280, fit: true });
+  });
+
+  it("un video vertical de celular guardado con marca de giro se reconoce como vertical", async () => {
+    const flat = path.join(dir, "flat.mp4");
+    const turned = path.join(dir, "turned.mp4");
+    execFileSync("ffmpeg", [
+      "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25:duration=2",
+      "-c:v", "libx264", "-preset", "ultrafast", flat,
+    ]);
+    execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-display_rotation", "90", "-i", flat, "-c", "copy", turned]);
+    const info = await probe(tools, turned);
+    expect({ width: info.width, height: info.height }).toEqual({ width: 360, height: 640 });
+    const crop = await chooseVerticalCrop(tools, turned, info, null, { startSeconds: 0, durationSeconds: 2 });
+    expect(crop).toEqual({ x: 0, y: 0, width: 360, height: 640, fit: true });
   });
 
   it("un video sin franjas no se recorta de más", async () => {

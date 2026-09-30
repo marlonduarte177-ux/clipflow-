@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { DEFAULT_PRODUCT_CONFIG, type ClipDto, type ClipListResponse, type JobDto, type JobListResponse, type VideoDto } from "@clipflow/shared";
 import { Alert } from "@/components/ui";
@@ -30,6 +31,8 @@ export function VideoView({ videoId }: { videoId: string }) {
   const [duration, setDuration] = useState(DEFAULT_PRODUCT_CONFIG.defaultClipDurationSeconds);
 
   const [reloadKey, setReloadKey] = useState(0);
+  const [deleting, setDeleting] = useState(false);
+  const router = useRouter();
   const processing = isActive(data?.job);
 
   useEffect(() => {
@@ -77,6 +80,18 @@ export function VideoView({ videoId }: { videoId: string }) {
     }
   }
 
+  async function deleteVideo() {
+    if (!data || !window.confirm(`¿Eliminar "${data.video.originalFilename}" y todos sus clips? No se puede deshacer.`)) return;
+    setDeleting(true);
+    try {
+      await apiFetch(`/videos/${videoId}`, { method: "DELETE" });
+      router.replace("/dashboard");
+    } catch (err) {
+      setError((err as Error).message);
+      setDeleting(false);
+    }
+  }
+
   async function download(clip: ClipDto) {
     try {
       const { url } = await apiFetch<{ url: string }>(`/clips/${clip.id}/download`);
@@ -102,7 +117,18 @@ export function VideoView({ videoId }: { videoId: string }) {
       <section className="space-y-3 rounded-2xl border border-line bg-surface p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h1 className="min-w-0 truncate text-lg font-semibold">{video.originalFilename}</h1>
-          <VideoStatusBadge status={video.status} />
+          <div className="flex items-center gap-3">
+            <VideoStatusBadge status={video.status} />
+            {job?.status !== "processing" ? (
+              <button
+                onClick={deleteVideo}
+                disabled={deleting}
+                className="rounded-lg border border-line px-3 py-1 text-xs text-muted hover:border-red-400 hover:text-red-400 disabled:opacity-50"
+              >
+                {deleting ? "Eliminando…" : "Eliminar video"}
+              </button>
+            ) : null}
+          </div>
         </div>
         <p className="text-sm text-muted">
           {formatBytes(video.sizeBytes)} · {formatDuration(video.durationSeconds)}

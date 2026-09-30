@@ -105,28 +105,41 @@ Tests:
 
 ### Encuadre vertical 9:16 (automático)
 
-Cada clip sale en 1080x1920, a pantalla completa:
+Cada clip sale en 1080x1920. **Solo se recorta cuando hace falta:**
 
-1. **Quita las franjas negras "quemadas".** Muchos videos ya vienen verticales con la imagen
-   horizontal al centro y franjas negras, por ejemplo al descargarlos de TikTok. El worker toma 8
-   fotogramas y marca como imagen real las filas y columnas donde al menos un 35 % de los píxeles no
-   son negros. Por eso una marca de agua pequeña dentro de la franja no cuenta como imagen y se
-   elimina junto con la franja.
-2. **Sigue la acción.** Si la imagen es más ancha que 9:16, en cada clip se elige la franja vertical
-   con más movimiento y detalle, con una leve preferencia por el centro, en lugar de cortar siempre
-   al centro.
+1. **Video horizontal:** se recorta a 9:16.
+   - Primero se quitan las franjas negras "quemadas". El worker toma 8 fotogramas y marca como imagen
+     real las filas y columnas donde al menos un 35 % de los píxeles no son negros.
+   - Luego, en cada clip, se elige la franja vertical con más movimiento y detalle, con una leve
+     preferencia por el centro, en lugar de cortar siempre al centro.
+2. **Video vertical:** NO se recorta a 9:16.
+   - **Sin franjas:** se muestra completo. Si su proporción no es exactamente 9:16, lo que falte se
+     rellena de negro en vez de cortar.
+   - **Con franjas laterales:** se quitan; la imagen tampoco es 9:16, así que no se pierde nada.
+   - **Con una imagen horizontal y franjas arriba y abajo** (típico al descargar de TikTok): solo se
+     acerca un poco (`VERTICAL_BAND_ZOOM` = 1.25). Se ve el 80 % del ancho, desplazado hacia donde
+     está la acción, y lo que queda de las franjas se pinta de negro para que no se vean marcas de
+     agua ni textos.
+3. **Videos de celular con "marca de giro":** muchos celulares guardan el video vertical acostado
+   (p. ej. 1920x1080) con una marca que indica girarlo. Ahora se leen las medidas ya giradas; antes se
+   trataban como horizontales y se recortaban de más.
 
-Detectado en una prueba real (30/09/2026): el clip de un video de TikTok salía con la imagen pequeña
-entre franjas negras y con la marca de agua. Ahora sale a pantalla completa.
+Historial de pruebas reales (30/09/2026):
+- Primero, el clip de un video de TikTok salía con la imagen pequeña entre franjas negras y con la
+  marca de agua. Se quitaron las franjas.
+- Después, los videos que ya venían verticales se recortaban demasiado: la imagen horizontal del
+  centro se volvía a cortar a 9:16 y se perdían dos tercios. Ahora solo se acerca un poco.
 
 **Límite honesto:** si el original tiene poca resolución (p. ej. una imagen de 400 px de alto dentro
-de un video vertical), al ampliarla a pantalla completa se verá menos nítida. Ninguna herramienta
-puede recuperar detalle que el archivo no tiene.
+de un video vertical), al ampliarla se verá menos nítida. Ninguna herramienta puede recuperar
+detalle que el archivo no tiene.
 
 Tests:
-- un video 720x1280 con franjas y marca de agua sale a 1080x1920 sin zonas negras;
-- la acción a la derecha o a la izquierda mueve el recorte hacia ese lado, también dentro de un video
-  con franjas;
+- la acción a la derecha o a la izquierda mueve el recorte de un video horizontal hacia ese lado;
+- un video vertical con franjas solo se acerca 1.25x, sigue la acción, y la marca de agua de la
+  franja desaparece;
+- un video vertical sin franjas no se recorta nada;
+- un video vertical con marca de giro se reconoce como vertical;
 - un video sin franjas no se recorta de más.
 
 ### Escalado, velocidad y costos

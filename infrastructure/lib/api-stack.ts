@@ -133,11 +133,20 @@ export class ApiStack extends Stack {
         resources: [props.bucket.arnForObjects("originals/*")],
       }),
     );
-    // Previews y descargas: solo lectura de resultados.
+    // Previews y descargas: lectura de resultados. Borrado: solo cuando el usuario elimina un video.
+    const results = ["clips/*", "thumbnails/*", "subtitles/*", "exports/*"];
     taskDefinition.taskRole.addToPrincipalPolicy(
       new iam.PolicyStatement({
-        actions: ["s3:GetObject"],
-        resources: ["clips/*", "thumbnails/*", "subtitles/*", "exports/*"].map((p) => props.bucket.arnForObjects(p)),
+        actions: ["s3:GetObject", "s3:DeleteObject"],
+        resources: results.map((p) => props.bucket.arnForObjects(p)),
+      }),
+    );
+    // Listar archivos para borrarlos, solo dentro de esas mismas carpetas.
+    taskDefinition.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["s3:ListBucket"],
+        resources: [props.bucket.bucketArn],
+        conditions: { StringLike: { "s3:prefix": ["originals/*", ...results] } },
       }),
     );
     props.queue.grantSendMessages(taskDefinition.taskRole);
