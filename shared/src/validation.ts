@@ -68,3 +68,12 @@ export function planUploadParts(sizeBytes: number): { partSizeBytes: number; par
   const partSizeBytes = Math.max(minPart, Math.ceil(sizeBytes / 10_000 / MiB) * MiB);
   return { partSizeBytes, partCount: Math.max(1, Math.ceil(sizeBytes / partSizeBytes)) };
 }
+
+export const ProcessVideoSchema = z.object({
+  clipDurationSeconds: z.number().int().positive().optional(),
+});
+
+export const ClipUpdateSchema = z.object({
+  status: z.enum(["generated", "approved", "discarded"]).optional(),
+  title: z.string().trim().max(120).nullish(),
+});

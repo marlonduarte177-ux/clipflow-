@@ -13,6 +13,7 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import * as rds from "aws-cdk-lib/aws-rds";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as servicediscovery from "aws-cdk-lib/aws-servicediscovery";
+import type * as sqs from "aws-cdk-lib/aws-sqs";
 import type { Construct } from "constructs";
 import { DATABASE_NAME } from "./database-stack.js";
 import { resourcePrefix, type Stage } from "./stage.js";
@@ -28,6 +29,7 @@ export interface ApiStackProps extends StackProps {
   databaseSecurityGroup: ec2.ISecurityGroup;
   userPool: cognito.IUserPool;
   userPoolClient: cognito.IUserPoolClient;
+  queue: sqs.IQueue;
   webOrigins: string[];
 }
 
@@ -82,6 +84,7 @@ export class ApiStack extends Stack {
         COGNITO_USER_POOL_ID: props.userPool.userPoolId,
         COGNITO_CLIENT_ID: props.userPoolClient.userPoolClientId,
         S3_BUCKET: props.bucket.bucketName,
+        SQS_QUEUE_URL: props.queue.queueUrl,
         DB_HOST: props.database.dbInstanceEndpointAddress,
         DB_PORT: props.database.dbInstanceEndpointPort,
         DB_NAME: DATABASE_NAME,
@@ -118,6 +121,14 @@ export class ApiStack extends Stack {
         resources: [props.bucket.arnForObjects("originals/*")],
       }),
     );
+    // Previews y descargas: solo lectura de resultados.
+    taskDefinition.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["s3:GetObject"],
+        resources: ["clips/*", "thumbnails/*", "subtitles/*", "exports/*"].map((p) => props.bucket.arnForObjects(p)),
+      }),
+    );
+    props.queue.grantSendMessages(taskDefinition.taskRole);
 
     const vpcLinkSecurityGroup = new ec2.SecurityGroup(this, "VpcLinkSecurityGroup", {
       vpc: props.vpc,

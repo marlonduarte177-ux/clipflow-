@@ -6,6 +6,7 @@ import { NetworkStack } from "../lib/network-stack.js";
 import { parseStage, resourcePrefix } from "../lib/stage.js";
 import { stageConfig } from "../lib/stage-config.js";
 import { StorageStack } from "../lib/storage-stack.js";
+import { WorkerStack } from "../lib/worker-stack.js";
 
 const app = new App();
 const stage = parseStage(app.node.tryGetContext("stage"));
@@ -21,6 +22,14 @@ const auth = new AuthStack(app, `${prefix}-auth`, { env, stage });
 const network = new NetworkStack(app, `${prefix}-network`, { env, stage });
 const storage = new StorageStack(app, `${prefix}-storage`, { env, stage, webOrigins: config.webOrigins });
 const database = new DatabaseStack(app, `${prefix}-database`, { env, stage, vpc: network.vpc });
+const worker = new WorkerStack(app, `${prefix}-worker`, {
+  env,
+  stage,
+  vpc: network.vpc,
+  bucket: storage.bucket,
+  database: database.instance,
+  databaseSecurityGroup: database.securityGroup,
+});
 new ApiStack(app, `${prefix}-api`, {
   env,
   stage,
@@ -30,6 +39,7 @@ new ApiStack(app, `${prefix}-api`, {
   databaseSecurityGroup: database.securityGroup,
   userPool: auth.userPool,
   userPoolClient: auth.userPoolClient,
+  queue: worker.queue,
   webOrigins: config.webOrigins,
 });
 

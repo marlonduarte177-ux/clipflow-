@@ -3,6 +3,7 @@ import { createDb, databaseUrlFromEnv, runMigrations } from "@clipflow/shared/db
 import { loadApiConfig } from "./config.js";
 import { createCognitoEmailLookup, createCognitoVerifier } from "./auth.js";
 import { buildApp } from "./app.js";
+import { createSqsQueue } from "./queue.js";
 import { createS3Storage } from "./storage.js";
 
 const config = loadApiConfig();
@@ -18,6 +19,7 @@ const app = await buildApp({
   config,
   db: database.db,
   storage: createS3Storage({ bucket: config.S3_BUCKET, region: config.AWS_REGION }),
+  queue: createSqsQueue({ queueUrl: config.SQS_QUEUE_URL, region: config.AWS_REGION }),
   product,
   verifyToken: createCognitoVerifier(config.COGNITO_USER_POOL_ID, config.COGNITO_CLIENT_ID),
   lookupEmail: createCognitoEmailLookup(config.AWS_REGION),

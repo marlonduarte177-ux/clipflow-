@@ -52,6 +52,59 @@ export interface UploadPartUrlsResponse {
   expiresInSeconds: number;
 }
 
+export type JobStatus = "queued" | "processing" | "completed" | "failed" | "cancelled";
+export type JobStageName = "preparing" | "analyzing" | "detecting_moments" | "rendering_clips" | "finalizing";
+
+export interface JobDto {
+  id: string;
+  videoId: string;
+  type: "analyze_video" | "render_clip" | "export_clip";
+  status: JobStatus;
+  stage: JobStageName | null;
+  /** Progreso real 0–100 escrito por el worker. */
+  progress: number;
+  attempts: number;
+  maxAttempts: number;
+  /** Mensaje apto para el usuario si falló. */
+  errorMessage: string | null;
+  params: { clipDurationSeconds?: number };
+  queuedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface JobListResponse {
+  jobs: JobDto[];
+}
+
+export type ClipStatus = "generated" | "approved" | "discarded";
+
+export interface ClipDto {
+  id: string;
+  videoId: string;
+  status: ClipStatus;
+  title: string | null;
+  startSeconds: number;
+  endSeconds: number;
+  aspectRatio: "9:16" | "1:1" | "16:9" | "original";
+  score: number | null;
+  scoreBreakdown: Record<string, number> | null;
+  /** URLs firmadas temporales (null si el archivo aún no existe). */
+  videoUrl: string | null;
+  thumbnailUrl: string | null;
+  createdAt: string;
+}
+
+export interface ClipListResponse {
+  clips: ClipDto[];
+  urlsExpireInSeconds: number;
+}
+
+/** Mensaje de la cola: solo el id; los datos viven en la base. */
+export interface JobQueueMessage {
+  jobId: string;
+}
+
 export interface ApiErrorResponse {
   error: {
     code: string;

@@ -17,6 +17,8 @@ export interface ScoreWeights {
 export interface ProductConfig {
   /** Duraciones de clip permitidas, en segundos. */
   clipDurationsSeconds: number[];
+  /** Duración usada si el usuario no elige otra (debe estar en clipDurationsSeconds). */
+  defaultClipDurationSeconds: number;
   /** Peso de cada señal en el score de interés (se normalizan al usarse). */
   scoreWeights: ScoreWeights;
   /** Score mínimo (0–1) para que un momento se convierta en clip. */
@@ -34,6 +36,7 @@ export interface ProductConfig {
 
 export const DEFAULT_PRODUCT_CONFIG: ProductConfig = {
   clipDurationsSeconds: [15, 30, 45, 60, 90],
+  defaultClipDurationSeconds: 30,
   scoreWeights: { audio: 0.25, speech: 0.35, visual: 0.2, ocr: 0.05, reaction: 0.15 },
   minClipScore: 0.6,
   maxClipsPerVideo: 15,
@@ -104,6 +107,7 @@ export function loadProductConfig(env: Env = process.env): ProductConfig {
 
   const raw = {
     durations: get("CLIP_DURATIONS_SECONDS"),
+    defaultDuration: get("DEFAULT_CLIP_DURATION_SECONDS"),
     minScore: get("MIN_CLIP_SCORE"),
     maxClips: get("MAX_CLIPS_PER_VIDEO"),
     maxBytes: get("UPLOAD_MAX_BYTES"),
@@ -112,10 +116,21 @@ export function loadProductConfig(env: Env = process.env): ProductConfig {
     maxPending: get("UPLOAD_MAX_PENDING"),
   };
 
+  const clipDurationsSeconds = raw.durations
+    ? numberList("CLIP_DURATIONS_SECONDS", raw.durations)
+    : d.clipDurationsSeconds;
+  const defaultClipDurationSeconds = raw.defaultDuration
+    ? positiveNumber("DEFAULT_CLIP_DURATION_SECONDS", raw.defaultDuration)
+    : clipDurationsSeconds.includes(d.defaultClipDurationSeconds)
+      ? d.defaultClipDurationSeconds
+      : clipDurationsSeconds[0]!;
+  if (!clipDurationsSeconds.includes(defaultClipDurationSeconds)) {
+    throw new Error("DEFAULT_CLIP_DURATION_SECONDS debe estar en CLIP_DURATIONS_SECONDS");
+  }
+
   return {
-    clipDurationsSeconds: raw.durations
-      ? numberList("CLIP_DURATIONS_SECONDS", raw.durations)
-      : d.clipDurationsSeconds,
+    clipDurationsSeconds,
+    defaultClipDurationSeconds,
     scoreWeights,
     minClipScore: raw.minScore ? fraction("MIN_CLIP_SCORE", raw.minScore) : d.minClipScore,
     maxClipsPerVideo: raw.maxClips

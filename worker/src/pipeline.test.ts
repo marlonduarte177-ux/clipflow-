@@ -1,0 +1,118 @@
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
+import { claimJob, failJob, schema, type DbHandle } from "@clipflow/shared/db";
+import { createTestDb } from "@clipflow/shared/db/testing";
+import { JobError, processAnalyzeJob } from "./pipeline.js";
+import { makeDeps, makeSampleVideo, seedVideoJob } from "./test-helpers.js";
+
+let h: DbHandle | undefined;
+let root: string;
+let sample: string;
+
+beforeAll(() => {
+  root = mkdtempSync(path.join(tmpdir(), "clipflow-worker-"));
+  sample = path.join(root, "sample.mp4");
+  makeSampleVideo(sample);
+});
+beforeEach(async () => {
+  await h?.close();
+  h = await createTestDb();
+});
+afterAll(async () => {
+  await h?.close();
+  rmSync(root, { recursive: true, force: true });
+});
+
+function probeSize(file: string) {
+  return execFileSync("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", file])
+    .toString()
+    .trim();
+}
+
+describe("procesamiento de un video real con FFmpeg", () => {
+  it("valida, analiza, elige el momento con más señal y genera clips 9:16 con miniatura", async () => {
+    const db = h!.db;
+    const { job, video } = await seedVideoJob(db, root, { sample });
+    const claimed = (await claimJob(db, job.id, "test-worker"))!;
+    const workDir = path.join(root, "work");
+
+    const result = await processAnalyzeJob(claimed, makeDeps(db, root, workDir));
+    expect(result.clipCount).toBeGreaterThan(0);
+
+    // El video quedó validado con su duración real.
+    const [v] = await db.select().from(schema.videos).where(eq(schema.videos.id, video.id));
+    expect(v).toMatchObject({ status: "ready", width: 640, height: 360 });
+    expect(v!.durationSeconds).toBeCloseTo(40, 0);
+
+    // El primer clip cubre el tramo de audio alto (20–26 s).
+    const clipRows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
+    const loud = clipRows.find((c) => c.startSeconds <= 20 && c.endSeconds >= 26);
+    expect(loud).toBeDefined();
+    expect(loud!.endSeconds - loud!.startSeconds).toBe(15);
+    expect(loud!.score).toBeGreaterThanOrEqual(0.6);
+    expect(loud!.scoreBreakdown).toHaveProperty("audio");
+
+    // Los archivos existen y son verticales 1080x1920.
+    for (const c of clipRows) {
+      expect(probeSize(path.join(root, c.s3Key!))).toBe("1080,1920");
+      expect(existsSync(path.join(root, c.thumbnailS3Key!))).toBe(true);
+    }
+
+    // Consumo registrado y carpeta temporal limpia.
+    const usage = await db.select().from(schema.usage).where(eq(schema.usage.jobId, job.id));
+    expect(usage.map((u) => u.metric).sort()).toEqual(["clips_generated", "processing_seconds", "video_seconds_processed"]);
+    expect(usage.find((u) => u.metric === "processing_seconds")!.estimatedCostUsd).toBeGreaterThan(0);
+    expect(existsSync(path.join(workDir, job.id))).toBe(false);
+
+    // Progreso real guardado.
+    const [j] = await db.select().from(schema.processingJobs).where(eq(schema.processingJobs.id, job.id));
+    expect(j!.progress).toBeGreaterThanOrEqual(95);
+  });
+
+  it("repetir el trabajo reemplaza los clips en vez de duplicarlos", async () => {
+    const db = h!.db;
+    const { job } = await seedVideoJob(db, root, { sample });
+    const deps = makeDeps(db, root, path.join(root, "work"));
+    const first = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    // Simula que el primer intento falló al final y el trabajo volvió a la cola.
+    await failJob(db, job.id, "test-worker", { code: "x", message: "x", retryable: true });
+    await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    const rows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
+    expect(rows).toHaveLength(first.clipCount);
+  });
+
+  it("rechaza archivos que no son video sin reintentar", async () => {
+    const db = h!.db;
+    const { job, video } = await seedVideoJob(db, root, { sample, fake: true });
+    const claimed = (await claimJob(db, job.id, "test-worker"))!;
+    const error = await processAnalyzeJob(claimed, makeDeps(db, root, path.join(root, "work"))).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(JobError);
+    expect(error).toMatchObject({ code: "invalid_video", retryable: false });
+    const [v] = await db.select().from(schema.videos).where(eq(schema.videos.id, video.id));
+    expect(v).toMatchObject({ status: "rejected" });
+    expect(readdirSync(path.join(root, "work"))).toEqual([]);
+  });
+
+  it("un video sin variación (plano) termina sin clips: no inventa momentos", async () => {
+    const db = h!.db;
+    const flat = path.join(root, "flat.mp4");
+    execFileSync("ffmpeg", [
+      "-hide_banner", "-loglevel", "error", "-y",
+      "-f", "lavfi", "-i", "color=c=blue:size=320x180:rate=25:duration=40",
+      "-f", "lavfi", "-i", "sine=frequency=300:duration=40",
+      "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", flat,
+    ]);
+    const { job } = await seedVideoJob(db, root, { sample: flat });
+    const result = await processAnalyzeJob(
+      (await claimJob(db, job.id, "test-worker"))!,
+      makeDeps(db, root, path.join(root, "work")),
+    );
+    expect(result.clipCount).toBe(0);
+    const [j] = await db.select().from(schema.processingJobs).where(eq(schema.processingJobs.id, job.id));
+    expect(j!.status).toBe("processing"); // el consumidor lo marca "completed" (0 clips es un resultado válido)
+  });
+});

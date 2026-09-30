@@ -4,6 +4,7 @@ import { createTestDb } from "@clipflow/shared/db/testing";
 import { DEFAULT_PRODUCT_CONFIG, type ProductConfig } from "@clipflow/shared";
 import { buildApp } from "./app.js";
 import type { TokenVerifier } from "./auth.js";
+import type { JobQueue } from "./queue.js";
 import type { VideoStorage } from "./storage.js";
 
 /** Tokens falsos para tests: "token-<sub>" es válido para el usuario <sub>. */
@@ -50,17 +51,35 @@ export class FakeStorage implements VideoStorage {
   async deleteObject(key: string) {
     this.objects.delete(key);
   }
+  async presignGet(key: string, expires: number, downloadName?: string) {
+    return `https://s3.test/${key}?get=1&expires=${expires}${downloadName ? `&download=${downloadName}` : ""}`;
+  }
+}
+
+/** Cola falsa: guarda los ids enviados; `failNext` simula una caída de SQS. */
+export class FakeQueue implements JobQueue {
+  sent: string[] = [];
+  failNext = false;
+  async send(jobId: string) {
+    if (this.failNext) {
+      this.failNext = false;
+      throw Object.assign(new Error("SQS caído"), { name: "ServiceUnavailable" });
+    }
+    this.sent.push(jobId);
+  }
 }
 
 export interface TestContext {
   app: FastifyInstance;
   database: DbHandle;
   storage: FakeStorage;
+  queue: FakeQueue;
 }
 
 export async function createTestApp(product: ProductConfig = DEFAULT_PRODUCT_CONFIG): Promise<TestContext> {
   const database = await createTestDb();
   const storage = new FakeStorage();
+  const queue = new FakeQueue();
   const app = await buildApp({
     config: {
       APP_ENV: "development",
@@ -70,12 +89,13 @@ export async function createTestApp(product: ProductConfig = DEFAULT_PRODUCT_CON
     },
     db: database.db,
     storage,
+    queue,
     product,
     verifyToken,
     lookupEmail: async (token) => `${token.split(".")[1]}@example.com`,
     logger: false,
   });
-  return { app, database, storage };
+  return { app, database, storage, queue };
 }
 
 export async function closeTestApp(ctx: TestContext | undefined) {

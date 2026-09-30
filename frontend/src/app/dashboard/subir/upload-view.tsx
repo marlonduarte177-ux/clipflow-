@@ -37,12 +37,21 @@ export function UploadView() {
       .catch((err: Error) => setMessage(err.message));
   }, []);
 
-  // Evita cerrar la pestaña por accidente durante la subida.
+  // Durante la subida: avisa antes de cerrar la pestaña y evita que la pantalla se apague
+  // (en el celular, con la pantalla bloqueada el navegador pausa la subida).
   useEffect(() => {
     if (phase !== "uploading") return;
     const warn = (e: BeforeUnloadEvent) => e.preventDefault();
     window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
+    let lock: WakeLockSentinel | null = null;
+    navigator.wakeLock
+      ?.request("screen")
+      .then((l) => (lock = l))
+      .catch(() => undefined);
+    return () => {
+      window.removeEventListener("beforeunload", warn);
+      void lock?.release().catch(() => undefined);
+    };
   }, [phase]);
 
   async function onFile(event: ChangeEvent<HTMLInputElement>) {
@@ -179,9 +188,12 @@ export function UploadView() {
 
       {phase === "done" && result ? (
         <Alert kind="info">
-          Video subido y guardado de forma privada. El procesamiento automático se habilita en la siguiente fase.{" "}
-          <Link href="/dashboard" className="underline">Ver proyectos</Link>
+          Video subido. El procesamiento empezó automáticamente.{" "}
+          <Link href={`/dashboard/videos/${result.id}`} className="underline">Ver progreso</Link>
         </Alert>
+      ) : null}
+      {busy ? (
+        <p className="text-xs text-muted">No cierres esta pestaña ni bloquees el celular hasta que termine.</p>
       ) : null}
       {phase === "cancelled" ? <Alert kind="info">Subida cancelada.</Alert> : null}
       <Alert kind="error">{message}</Alert>

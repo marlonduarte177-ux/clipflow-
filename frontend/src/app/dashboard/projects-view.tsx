@@ -2,19 +2,28 @@
 
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
-import type { ProjectDto, ProjectListResponse, VideoDto, VideoListResponse } from "@clipflow/shared";
+import type { JobDto, JobListResponse, ProjectDto, ProjectListResponse, VideoDto, VideoListResponse } from "@clipflow/shared";
+import { isActive, JobProgress } from "@/components/job-progress";
 import { Alert, Field } from "@/components/ui";
 import { VideoStatusBadge } from "@/components/status-badge";
 import { apiConfigured, apiFetch, formatBytes, formatDuration } from "@/lib/api";
 
 async function fetchAll() {
-  const [p, v] = await Promise.all([apiFetch<ProjectListResponse>("/projects"), apiFetch<VideoListResponse>("/videos")]);
-  return { projects: p.projects, videos: v.videos };
+  const [p, v, j] = await Promise.all([
+    apiFetch<ProjectListResponse>("/projects"),
+    apiFetch<VideoListResponse>("/videos"),
+    apiFetch<JobListResponse>("/jobs"),
+  ]);
+  // Último trabajo de cada video (la API los devuelve del más nuevo al más viejo).
+  const jobs: Record<string, JobDto> = {};
+  for (const job of j.jobs) jobs[job.videoId] ??= job;
+  return { projects: p.projects, videos: v.videos, jobs };
 }
 
 export function ProjectsView() {
   const [projects, setProjects] = useState<ProjectDto[] | null>(null);
   const [videos, setVideos] = useState<VideoDto[]>([]);
+  const [jobs, setJobs] = useState<Record<string, JobDto>>({});
   const [error, setError] = useState("");
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -22,6 +31,7 @@ export function ProjectsView() {
   function show(data: Awaited<ReturnType<typeof fetchAll>>) {
     setProjects(data.projects);
     setVideos(data.videos);
+    setJobs(data.jobs);
     setError("");
   }
 
@@ -35,6 +45,28 @@ export function ProjectsView() {
       active = false;
     };
   }, []);
+
+  // Mientras haya videos procesándose, se actualiza el progreso real cada 5 s.
+  const anyActive = Object.values(jobs).some(isActive);
+  useEffect(() => {
+    if (!anyActive) return;
+    const timer = setInterval(() => {
+      fetchAll()
+        .then(show)
+        .catch(() => undefined);
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [anyActive]);
+
+  async function onDiscard(video: VideoDto) {
+    if (!window.confirm(`¿Descartar la subida sin terminar de "${video.originalFilename}"?`)) return;
+    try {
+      await apiFetch(`/videos/${video.id}/abort`, { method: "POST" });
+      show(await fetchAll());
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
 
   async function onCreate(event: FormEvent) {
     event.preventDefault();
@@ -97,12 +129,26 @@ export function ProjectsView() {
               ) : (
                 <ul className="mt-3 divide-y divide-line">
                   {projectVideos.map((video) => (
-                    <li key={video.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
-                      <span className="min-w-0 flex-1 truncate">{video.originalFilename}</span>
+                    <li key={video.id} className="space-y-2 py-3 text-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                      {video.status === "pending_upload" ? (
+                        <span className="min-w-0 flex-1 truncate">{video.originalFilename}</span>
+                      ) : (
+                        <Link href={`/dashboard/videos/${video.id}`} className="min-w-0 flex-1 truncate hover:underline">
+                          {video.originalFilename}
+                        </Link>
+                      )}
                       <span className="text-muted">
                         {formatBytes(video.sizeBytes)} · {formatDuration(video.durationSeconds)}
                       </span>
                       <VideoStatusBadge status={video.status} />
+                      {video.status === "pending_upload" ? (
+                        <button onClick={() => onDiscard(video)} className="text-xs text-muted underline hover:text-foreground">
+                          Descartar
+                        </button>
+                      ) : null}
+                      </div>
+                      {jobs[video.id] ? <JobProgress job={jobs[video.id]!} /> : null}
                     </li>
                   ))}
                 </ul>

@@ -13,8 +13,10 @@ import {
   type VideoDto,
   type VideoListResponse,
 } from "@clipflow/shared";
-import { schema, type Database } from "@clipflow/shared/db";
+import { createJob, schema, type Database } from "@clipflow/shared/db";
 import { sendError, sendValidationError } from "./http.js";
+import { enqueue, toJobDto } from "./jobs.js";
+import type { JobQueue } from "./queue.js";
 import type { VideoStorage } from "./storage.js";
 
 const { projects, videos, usage } = schema;
@@ -57,6 +59,7 @@ export interface VideoRouteDeps {
   db: Database;
   auth: preHandlerHookHandler;
   storage: VideoStorage;
+  queue: JobQueue;
   product: ProductConfig;
   uploadUrlExpiresSeconds: number;
 }
@@ -70,7 +73,7 @@ export interface VideoRouteDeps {
  * Todas las consultas filtran por el usuario del token.
  */
 export function videoRoutes(deps: VideoRouteDeps) {
-  const { db, storage, product } = deps;
+  const { db, storage, queue, product } = deps;
   const notFound = (reply: Parameters<preHandlerHookHandler>[1]) =>
     sendError(reply, 404, "not_found", "Video no encontrado.");
 
@@ -256,7 +259,17 @@ export function videoRoutes(deps: VideoRouteDeps) {
         details: { event: "upload_completed" },
       });
       request.log.info({ videoId: row.id, sizeBytes: row.sizeBytes }, "subida completada");
-      return toVideoDto(updated!);
+
+      // Procesamiento automático: un trabajo por video (la clave evita duplicados).
+      const { job, created } = await createJob(db, {
+        userId,
+        videoId: row.id,
+        type: "analyze_video",
+        idempotencyKey: `analyze:${row.id}`,
+        params: { clipDurationSeconds: product.defaultClipDurationSeconds },
+      });
+      if (created) await enqueue(queue, job, request.log);
+      return { ...toVideoDto(updated!), job: toJobDto(job) };
     });
 
     app.post("/videos/:id/abort", async (request, reply) => {

@@ -1,6 +1,12 @@
 # ClipFlow — Fase 5: Subida de videos (S3) e infraestructura base
 
-Estado: **código terminado y probado. Pendiente: primer despliegue en AWS** (ver "Cómo desplegar").
+Estado: **desplegada y verificada en AWS (staging)** el 01/10/2026.
+
+Prueba real: se creó un proyecto y se subieron videos de 50.8 MB (23:24 min) desde el celular.
+Todos quedaron en S3 con estado "Subido". Una subida quedó "sin terminar" por interrumpirse
+(pantalla bloqueada o pestaña cerrada). Por eso se añadió:
+- un botón **Descartar** para subidas sin terminar (aborta la subida en S3 y borra el registro);
+- durante la subida, la pantalla no se apaga (Wake Lock) y se muestra un aviso.
 
 ## Qué se construyó
 
