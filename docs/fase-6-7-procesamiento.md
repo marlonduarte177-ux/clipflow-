@@ -112,6 +112,8 @@ Cada clip sale en 1080x1920. **Solo se recorta cuando hace falta:**
      real las filas y columnas donde al menos un 35 % de los píxeles no son negros.
    - Luego, en cada clip, se elige la franja vertical con más movimiento y detalle, con una leve
      preferencia por el centro, en lugar de cortar siempre al centro.
+   - **Si hay personas, el recorte las sigue** (ver "Encuadre que sigue caras" abajo). Sin caras,
+     se usa la franja con más acción.
 2. **Video vertical:** NO se recorta a 9:16.
    - **Sin franjas:** se muestra completo. Si su proporción no es exactamente 9:16, lo que falte se
      rellena de negro en vez de cortar.
@@ -141,6 +143,61 @@ Tests:
 - un video vertical sin franjas no se recorta nada;
 - un video vertical con marca de giro se reconoce como vertical;
 - un video sin franjas no se recorta de más.
+
+### Encuadre que sigue caras
+
+En videos horizontales con personas (podcasts, entrevistas, vlogs), el recorte 9:16 sigue a quien
+habla en lugar de quedarse fijo.
+
+- **Detector:** YuNet, el modelo oficial de OpenCV (licencia MIT, 230 KB, en `worker/models/`).
+  - Corre en el mismo worker con `onnxruntime-node`, solo CPU. No se llama a ninguna API ni se paga
+    por imagen.
+  - La telemetría de onnxruntime (que enviaría datos a Microsoft) se apaga antes de cargarlo, y
+    también en la imagen Docker (`ORT_DISABLE_TELEMETRY=1`).
+- **Muestreo:** 4 imágenes por segundo de cada clip, sin franjas negras y a 640 px.
+  - Para ir rápido, se reducen a la mitad y se juntan de a 6 en un mosaico de 640x640: una pasada del
+    modelo analiza 6 imágenes.
+  - Medido: un clip de 60 s se analiza en ~2.5 s más que antes.
+- **Seguimiento:** une las caras de la misma persona entre muestras y descarta "personas" de menos
+  de 1 s (detecciones falsas). Un cambio de escena (la imagen cambia de golpe) empieza de cero.
+- **Quién habla:**
+  - Cuánto cambia la zona de la boca entre muestras, menos lo que cambia la de los ojos (movimiento
+    de toda la cabeza o de la luz).
+  - Se promedia en ventanas de 1.5 s y solo cuenta mientras la transcripción dice que hay voz.
+  - Tras cambiar de persona se queda al menos 2 s, para no rebotar en diálogos rápidos.
+- **A quién encuadrar:**
+  - si el grupo cabe en el 9:16, al grupo;
+  - si no, a quien habla;
+  - si no se sabe, a la cara más grande (entre parecidas, la más central).
+  - En escenas sin caras dentro del clip, se usa el encuadre por acción.
+- **Cámara suave:**
+  - no se mueve por movimientos pequeños (zona muerta de 8 % del ancho);
+  - panea a lo sumo 35 % del ancho por segundo;
+  - salta directo en cambios de escena o de persona;
+  - nunca sale de la imagen.
+  - FFmpeg recibe la trayectoria como una expresión de `t` en `crop=x='…'`. La miniatura usa la
+    posición del medio del clip.
+- **Interruptor:** `FACE_TRACKING_ENABLED` (en AWS, `"true"`). Con `"false"`, o si el detector falla,
+  se usa el encuadre por acción; el video se procesa igual.
+
+**Límites honestos:**
+- Saber quién habla por la boca es una aproximación. Falla con caras de perfil, muy lejanas (en
+  planos abiertos la boca mide pocos píxeles), bocas tapadas o voz en off. En esos casos encuadra la
+  cara más destacada.
+- En videos verticales no se recorta, así que no aplica.
+
+Pruebas:
+- **Detector:** encuentra a las 6 personas de una foto de la NASA de dominio público, también a
+  320 px, y no inventa caras en una imagen sin personas.
+- **Lógica:**
+  - seguimiento, grupo, quién habla con histéresis, diálogo rápido sin rebotes;
+  - cara más grande y más central, voz;
+  - zona muerta, velocidad máxima, saltos, límites, escenas sin caras;
+  - la expresión de FFmpeg da la misma posición que la trayectoria.
+- **De punta a punta:** una cara que cambia de lado en un corte queda centrada en el clip final,
+  antes y después del corte (se verifica detectando la cara en el video renderizado).
+- **Con video real:** probado con un podcast de la NASA (dominio público, 720p) que alterna planos
+  cerrados, planos abiertos y escenas con varias personas.
 
 ### Escalado, velocidad y costos
 

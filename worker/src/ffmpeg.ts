@@ -1,6 +1,17 @@
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { analyzeFaces, FACE_SAMPLES_PER_SECOND } from "./faces/analyze.js";
+import {
+  buildTracks,
+  chooseTargets,
+  FRAMING,
+  pathExpression,
+  positionAt,
+  smoothPath,
+  toPieces,
+  type PathPiece,
+} from "./faces/framing.js";
 
 export interface FfmpegTools {
   ffmpegPath: string;
@@ -322,6 +333,25 @@ export interface VerticalCrop {
   fit?: boolean;
   /** Filas con imagen real dentro del recorte; lo de arriba y abajo se pinta de negro (quita marcas de agua). */
   content?: { y: number; height: number };
+  /** Posición horizontal que cambia en el tiempo (sigue caras). `x` es la del medio del clip. */
+  path?: PathPiece[];
+}
+
+/** Opciones del encuadre de cada clip. */
+export interface CropOptions {
+  /** Seguir caras (detector YuNet). Si no hay caras, se usa el encuadre por acción. */
+  faces?: boolean;
+  /** Si hay voz en el segundo t del clip (de la transcripción). */
+  speaking?: (t: number) => boolean;
+  /** Avisos que no detienen el trabajo (p. ej. el detector de caras falló). */
+  onWarning?: (message: string, err: unknown) => void;
+}
+
+/** El mismo recorte, fijo en la posición del segundo t del clip (para la miniatura). */
+export function cropAt(crop: VerticalCrop, t: number): VerticalCrop {
+  if (!crop.path) return crop;
+  const { path: pieces, ...rest } = crop;
+  return { ...rest, x: Math.round(positionAt(pieces, t)) };
 }
 
 const even = (n: number) => Math.max(2, Math.floor(n / 2) * 2);
@@ -347,6 +377,7 @@ export async function chooseVerticalCrop(
   box: ContentBox | null,
   segment: { startSeconds: number; durationSeconds: number },
   signal?: AbortSignal,
+  options: CropOptions = {},
 ): Promise<VerticalCrop> {
   const frame = { x: 0, y: 0, width: info.width, height: info.height };
 
@@ -373,8 +404,53 @@ export async function chooseVerticalCrop(
     const targetHeight = even((area.width * 16) / 9);
     return { width: even(area.width), height: targetHeight, x: area.x, y: area.y + even((area.height - targetHeight) / 2) };
   }
-  const offset = await bestWindow(tools, input, area, targetWidth, segment, signal);
-  return { width: targetWidth, height: even(area.height), x: area.x + offset, y: area.y };
+  const action = async () => area.x + (await bestWindow(tools, input, area, targetWidth, segment, signal));
+  if (options.faces) {
+    try {
+      const followed = await followFaces(tools, input, area, targetWidth, segment, action, signal, options.speaking);
+      if (followed) return followed;
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      options.onWarning?.("no se pudo seguir caras; se usa el encuadre por acción", err);
+    }
+  }
+  return { width: targetWidth, height: even(area.height), x: await action(), y: area.y };
+}
+
+/**
+ * Encuadre que sigue caras: a quien habla, o al grupo si cabe. Devuelve null si el clip no tiene
+ * caras (se usa el encuadre por acción). Las escenas sin caras dentro del clip también usan ese
+ * encuadre.
+ */
+async function followFaces(
+  tools: FfmpegTools,
+  input: string,
+  area: ContentBox,
+  targetWidth: number,
+  segment: { startSeconds: number; durationSeconds: number },
+  action: () => Promise<number>,
+  signal?: AbortSignal,
+  speaking?: (t: number) => boolean,
+): Promise<VerticalCrop | null> {
+  const analysis = await analyzeFaces(tools, input, area, segment, signal);
+  const { samples, scale } = analysis;
+  const dt = 1 / FACE_SAMPLES_PER_SECOND;
+  const cropW = targetWidth / scale;
+  const targets = chooseTargets(samples, buildTracks(samples), cropW, analysis.width, dt, speaking);
+  if (targets.every((t) => t === null)) return null;
+  const fallback = targets.some((t) => t === null) ? ((await action()) - area.x + targetWidth / 2) / scale : analysis.width / 2;
+  const centers = smoothPath(samples, targets, cropW, analysis.width, dt, fallback);
+  const maxX = area.x + area.width - targetWidth;
+  const xs = centers.map((c) => Math.min(maxX, Math.max(area.x, area.x + c * scale - targetWidth / 2)));
+  // Un cambio mayor que el paneo máximo entre dos muestras es un salto (persona o escena).
+  const pieces = toPieces(samples.map((s) => s.t), xs, dt, FRAMING.maxSpeed * targetWidth * dt * 1.5);
+  return {
+    width: targetWidth,
+    height: even(area.height),
+    x: Math.round(positionAt(pieces, segment.durationSeconds / 2)),
+    y: area.y,
+    path: pieces,
+  };
 }
 
 /** Desplazamiento horizontal (dentro de `area`) de la ventana de `targetWidth` con más acción. */
@@ -436,7 +512,8 @@ async function bestWindow(
 
 /** Filtros de FFmpeg: recorte elegido → 1080x1920 (rellenando o mostrando completo). */
 export function verticalFilter(crop: VerticalCrop | null): string {
-  let cut = crop ? `crop=${crop.width}:${crop.height}:${crop.x}:${crop.y},` : "";
+  const x = crop?.path?.length ? `'${pathExpression(crop.path)}'` : crop?.x;
+  let cut = crop ? `crop=${crop.width}:${crop.height}:${x}:${crop.y},` : "";
   if (crop?.content) {
     const { y, height } = crop.content;
     if (y > 0) cut += `drawbox=x=0:y=0:w=iw:h=${y}:color=black:t=fill,`;

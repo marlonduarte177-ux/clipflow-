@@ -27,6 +27,11 @@ const EnvSchema = z.object({
   OPENAI_TRANSCRIBE_MODEL: z.string().default("whisper-1"),
   OPENAI_ANALYSIS_MODEL: z.string().default("gpt-4o-mini"),
   OPENAI_MAX_AUDIO_MINUTES: z.coerce.number().positive().default(180),
+  /** Encuadre que sigue caras (detector local, sin costo por imagen). "false" lo apaga. */
+  FACE_TRACKING_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
   /** Análisis de imágenes con IA (experimental: cuesta por imagen). */
   AI_VISION_ENABLED: z
     .enum(["true", "false"])

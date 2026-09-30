@@ -263,6 +263,7 @@ describe("cola y worker", () => {
     expect((container.Secrets as { Name: string }[]).map((e) => e.Name)).toContain("OPENAI_API_KEY");
     const env = container.Environment as { Name: string; Value: string }[];
     expect(env.find((e) => e.Name === "AI_VISION_ENABLED")?.Value).toBe("true"); // staging: activado para medir
+    expect(env.find((e) => e.Name === "FACE_TRACKING_ENABLED")?.Value).toBe("true");
     // La API no tiene acceso a la clave.
     expect(JSON.stringify(t.api.toJSON())).not.toContain("openai-api-key");
   });

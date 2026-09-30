@@ -98,6 +98,7 @@ export function makeDeps(db: Database, root: string, workDir: string): PipelineD
     ai: null,
     aiDisabledReason: "IA no configurada en tests",
     aiMaxAudioMinutes: 180,
+    faceTracking: true,
     log: { info: () => undefined, warn: () => undefined },
   };
 }
