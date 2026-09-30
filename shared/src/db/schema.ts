@@ -194,6 +194,8 @@ export const processingJobs = pgTable(
     maxAttempts: integer("max_attempts").notNull().default(3),
     /** Parámetros del trabajo (duraciones pedidas, formato, etc.). */
     params: jsonb("params").notNull().default({}),
+    /** Resumen del resultado (clips generados, si se usó IA y por qué no, idioma). */
+    result: jsonb("result"),
     lockedBy: text("locked_by"),
     heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
     errorCode: text("error_code"),

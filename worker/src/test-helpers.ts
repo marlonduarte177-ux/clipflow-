@@ -61,6 +61,9 @@ export function makeDeps(db: Database, root: string, workDir: string): PipelineD
     workDir,
     workerId: "test-worker",
     costPerHourUsd: 0.0987,
+    ai: null,
+    aiDisabledReason: "IA no configurada en tests",
+    aiMaxAudioMinutes: 180,
     log: { info: () => undefined, warn: () => undefined },
   };
 }

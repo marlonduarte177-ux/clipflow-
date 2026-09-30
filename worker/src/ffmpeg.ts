@@ -237,3 +237,57 @@ export async function renderThumbnail(
     { signal },
   );
 }
+
+/**
+ * Extrae solo el audio (mono, 16 kHz, MP3 32 kbps ≈ 14 MB por hora) en trozos de
+ * `chunkSeconds`, cada uno muy por debajo del límite de 25 MB de OpenAI.
+ */
+export async function extractAudioChunks(
+  tools: FfmpegTools,
+  input: string,
+  workDir: string,
+  options: { maxSeconds: number; chunkSeconds?: number; signal?: AbortSignal },
+): Promise<{ path: string; offsetSeconds: number; durationSeconds: number }[]> {
+  const { readdir } = await import("node:fs/promises");
+  await run(
+    tools.ffmpegPath,
+    [
+      ...FFMPEG_BASE,
+      "-i",
+      input,
+      "-t",
+      options.maxSeconds.toFixed(3),
+      "-map",
+      "0:a:0",
+      "-vn",
+      "-ac",
+      "1",
+      "-ar",
+      "16000",
+      "-c:a",
+      "libmp3lame",
+      "-b:a",
+      "32k",
+      "-f",
+      "segment",
+      "-segment_time",
+      String(options.chunkSeconds ?? 600),
+      "-reset_timestamps",
+      "1",
+      "audio-%03d.mp3",
+    ],
+    { cwd: workDir, signal: options.signal },
+  );
+  const files = (await readdir(workDir)).filter((f) => /^audio-\d{3}\.mp3$/.test(f)).sort();
+  const chunks = [];
+  let offset = 0;
+  for (const file of files) {
+    const full = path.join(workDir, file);
+    const out = await run(tools.ffprobePath, ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", full]);
+    const duration = Number(out.trim());
+    if (!Number.isFinite(duration) || duration <= 0.5) continue;
+    chunks.push({ path: full, offsetSeconds: offset, durationSeconds: duration });
+    offset += duration;
+  }
+  return chunks;
+}

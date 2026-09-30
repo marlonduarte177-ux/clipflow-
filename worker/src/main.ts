@@ -3,7 +3,8 @@ import { SQSClient } from "@aws-sdk/client-sqs";
 import pino from "pino";
 import { loadProductConfig } from "@clipflow/shared";
 import { createDb, databaseUrlFromEnv } from "@clipflow/shared/db";
-import { loadWorkerConfig } from "./config.js";
+import { OpenAIProvider } from "./ai/openai.js";
+import { loadWorkerConfig, looksLikeOpenAIKey } from "./config.js";
 import { runConsumer } from "./consumer.js";
 import { createS3WorkerStorage } from "./storage.js";
 
@@ -11,6 +12,23 @@ const config = loadWorkerConfig();
 const log = pino({ level: config.LOG_LEVEL, base: { service: "worker", env: config.APP_ENV } });
 const database = createDb(databaseUrlFromEnv(), { ssl: config.DATABASE_SSL, maxConnections: 3 });
 const workerId = `${os.hostname()}-${process.pid}`;
+
+const aiKey = config.OPENAI_API_KEY?.trim();
+const ai =
+  config.AI_PROVIDER === "openai" && looksLikeOpenAIKey(aiKey)
+    ? new OpenAIProvider({
+        apiKey: aiKey,
+        transcribeModel: config.OPENAI_TRANSCRIBE_MODEL,
+        analysisModel: config.OPENAI_ANALYSIS_MODEL,
+        prices: {
+          transcribePerMinuteUsd: config.OPENAI_TRANSCRIBE_COST_PER_MINUTE_USD,
+          inputPer1MUsd: config.OPENAI_INPUT_COST_PER_1M_TOKENS_USD,
+          outputPer1MUsd: config.OPENAI_OUTPUT_COST_PER_1M_TOKENS_USD,
+        },
+      })
+    : null;
+const aiDisabledReason =
+  config.AI_PROVIDER === "none" ? "IA desactivada por configuración" : "Falta la clave de OpenAI en Secrets Manager";
 
 let stopping = false;
 const stop = (signal: string) => {
@@ -20,7 +38,7 @@ const stop = (signal: string) => {
 process.on("SIGTERM", () => stop("SIGTERM"));
 process.on("SIGINT", () => stop("SIGINT"));
 
-log.info({ workerId }, "worker iniciado");
+log.info({ workerId, ai: ai ? ai.name : "desactivada" }, "worker iniciado");
 try {
   await runConsumer({
     sqs: new SQSClient({ region: config.AWS_REGION }),
@@ -35,6 +53,9 @@ try {
       workDir: config.WORKER_TMP_DIR,
       workerId,
       costPerHourUsd: config.WORKER_COST_PER_HOUR_USD,
+      ai,
+      aiDisabledReason,
+      aiMaxAudioMinutes: config.OPENAI_MAX_AUDIO_MINUTES,
       log: {
         info: (obj, msg) => log.info(obj, msg),
         warn: (obj, msg) => log.warn(obj, msg),

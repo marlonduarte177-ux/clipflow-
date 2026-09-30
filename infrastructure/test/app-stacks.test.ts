@@ -206,6 +206,17 @@ describe("cola y worker", () => {
     }
   });
 
+  it("la clave de OpenAI vive en Secrets Manager y llega al worker como secreto", () => {
+    t.worker.hasResourceProperties("AWS::SecretsManager::Secret", { Name: "clipflow-staging/openai-api-key" });
+    const [taskDef] = Object.values(t.worker.findResources("AWS::ECS::TaskDefinition"));
+    const container = (taskDef as { Properties: { ContainerDefinitions: Record<string, unknown>[] } }).Properties
+      .ContainerDefinitions[0]!;
+    expect((container.Environment as { Name: string }[]).map((e) => e.Name)).not.toContain("OPENAI_API_KEY");
+    expect((container.Secrets as { Name: string }[]).map((e) => e.Name)).toContain("OPENAI_API_KEY");
+    // La API no tiene acceso a la clave.
+    expect(JSON.stringify(t.api.toJSON())).not.toContain("openai-api-key");
+  });
+
   it("lee solo originales y escribe solo resultados", () => {
     const statements = s3Statements(t.worker);
     const reads = statements.filter((s) => [s.Action].flat().includes("s3:GetObject"));

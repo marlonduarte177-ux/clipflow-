@@ -1,0 +1,1 @@
+ALTER TABLE "processing_jobs" ADD COLUMN "result" jsonb;

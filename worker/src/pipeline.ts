@@ -1,12 +1,34 @@
 import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { and, eq } from "drizzle-orm";
-import { selectMoments, type ProductConfig, type SignalSeries } from "@clipflow/shared";
+import { writeFile } from "node:fs/promises";
+import {
+  segmentsForRange,
+  selectMoments,
+  snapToSentences,
+  speechSignalFromHighlights,
+  toSrt,
+  toVtt,
+  type AIAnalysisProvider,
+  type AIUsage,
+  type JobResult,
+  type ProductConfig,
+  type SignalSeries,
+  type TranscriptSegment,
+} from "@clipflow/shared";
 import { reportProgress, schema, type Database, type Job, type JobStage } from "@clipflow/shared/db";
-import { analyzeSignals, FfmpegError, probe, renderThumbnail, renderVerticalClip, type FfmpegTools } from "./ffmpeg.js";
+import {
+  analyzeSignals,
+  extractAudioChunks,
+  FfmpegError,
+  probe,
+  renderThumbnail,
+  renderVerticalClip,
+  type FfmpegTools,
+} from "./ffmpeg.js";
 import type { WorkerStorage } from "./storage.js";
 
-const { clips, usage, videos } = schema;
+const { clips, subtitles, usage, videos } = schema;
 
 /** Error con mensaje para el usuario y si vale la pena reintentar. */
 export class JobError extends Error {
@@ -37,6 +59,12 @@ export interface PipelineDeps {
   workerId: string;
   /** Costo estimado por hora del worker (Fargate), para registrar rentabilidad. */
   costPerHourUsd: number;
+  /** Proveedor de IA (OpenAI). null = no configurado: se procesa solo con FFmpeg. */
+  ai: AIAnalysisProvider | null;
+  /** Por qué no hay IA (para mostrarlo al usuario). */
+  aiDisabledReason?: string;
+  /** Máximo de minutos de audio que se envían a la IA por video (control de costos). */
+  aiMaxAudioMinutes: number;
   log: { info: (obj: object, msg: string) => void; warn: (obj: object, msg: string) => void };
 }
 
@@ -54,7 +82,7 @@ const STAGES: Record<JobStage, [number, number]> = {
  * genera clips 9:16 y miniaturas → sube a S3 → registra clips y consumo.
  * Es seguro repetirlo: las rutas de salida son fijas por trabajo y los clips previos se reemplazan.
  */
-export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<{ clipCount: number }> {
+export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<JobResult> {
   const startedAt = Date.now();
   const dir = path.join(deps.workDir, job.id);
   const controller = new AbortController();
@@ -121,10 +149,17 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<{
     // 2. Analizar: señales reales por segundo (volumen y cambios de escena).
     const raw = await analyzeSignals(deps.tools, input, info, dir, {
       signal: controller.signal,
-      onProgress: tick("analyzing", info.durationSeconds),
+      onProgress: (s) => void progress("analyzing", (s / info.durationSeconds) * 0.5).catch(() => undefined),
     });
     check();
     const signals: SignalSeries = { visual: raw.visual, ...(raw.audio ? { audio: raw.audio } : {}) };
+    await progress("analyzing", 0.5, true);
+
+    // 2b. IA (si está configurada): transcripción + momentos por contenido.
+    //     Si falla, el video se procesa igual con FFmpeg y el resultado lo indica.
+    const ai = await runAI(deps, info, input, dir, controller.signal, (f) => progress("analyzing", 0.5 + f * 0.5));
+    check();
+    if (ai.highlights) signals.speech = speechSignalFromHighlights(ai.highlights, info.durationSeconds);
     await progress("analyzing", 1, true);
 
     // 3. Elegir momentos con el score configurable (sin forzar una cantidad).
@@ -140,18 +175,38 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<{
       minScore: deps.product.minClipScore,
       maxClips: deps.product.maxClipsPerVideo,
     });
-    deps.log.info({ jobId: job.id, moments: moments.length, clipDuration }, "momentos elegidos");
+    // Con transcripción: el clip empieza y termina en frases completas.
+    const finalMoments = ai.segments.length
+      ? moments.map((m) => snapToSentences(m, ai.segments, { videoDurationSeconds: info.durationSeconds }))
+      : moments;
+    let titles: (string | null)[] = finalMoments.map(() => null);
+    if (deps.ai && ai.segments.length && finalMoments.length) {
+      try {
+        const suggestion = await deps.ai.generateClipSuggestions(ai.segments, finalMoments);
+        titles = suggestion.titles;
+        addUsage(ai.usage, suggestion.usage);
+      } catch (err) {
+        deps.log.warn({ jobId: job.id, error: (err as Error).message }, "no se pudieron generar títulos");
+      }
+    }
+    deps.log.info({ jobId: job.id, moments: finalMoments.length, clipDuration, ai: ai.status }, "momentos elegidos");
     await progress("detecting_moments", 1, true);
 
     // 4. Generar clips verticales y miniaturas; subir a S3 con rutas fijas por trabajo.
-    const outputs: { moment: (typeof moments)[number]; key: string; thumbKey: string }[] = [];
-    for (const [index, moment] of moments.entries()) {
+    const outputs: {
+      moment: (typeof moments)[number];
+      key: string;
+      thumbKey: string;
+      title: string | null;
+      subtitleKeys: { srt: string; vtt: string } | null;
+    }[] = [];
+    for (const [index, moment] of finalMoments.entries()) {
       const duration = moment.endSeconds - moment.startSeconds;
       const clipFile = path.join(dir, `clip-${index}.mp4`);
       const thumbFile = path.join(dir, `thumb-${index}.jpg`);
       await renderVerticalClip(deps.tools, input, clipFile, { startSeconds: moment.startSeconds, durationSeconds: duration }, {
         signal: controller.signal,
-        onProgress: (s) => void progress("rendering_clips", (index + s / duration) / moments.length).catch(() => undefined),
+        onProgress: (s) => void progress("rendering_clips", (index + s / duration) / finalMoments.length).catch(() => undefined),
       });
       await renderThumbnail(deps.tools, input, thumbFile, moment.startSeconds + duration / 2, controller.signal);
       check();
@@ -159,30 +214,63 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<{
       const thumbKey = `thumbnails/${job.userId}/${job.id}/${index}.jpg`;
       await deps.storage.upload(clipFile, key, "video/mp4");
       await deps.storage.upload(thumbFile, thumbKey, "image/jpeg");
-      outputs.push({ moment, key, thumbKey });
-      await progress("rendering_clips", (index + 1) / moments.length, true);
+
+      // Subtítulos del clip (tiempos relativos al clip).
+      let subtitleKeys: { srt: string; vtt: string } | null = null;
+      const clipSegments = segmentsForRange(ai.segments, moment.startSeconds, moment.endSeconds);
+      if (clipSegments.length) {
+        subtitleKeys = {
+          srt: `subtitles/${job.userId}/${job.id}/${index}.srt`,
+          vtt: `subtitles/${job.userId}/${job.id}/${index}.vtt`,
+        };
+        const srtFile = path.join(dir, `sub-${index}.srt`);
+        const vttFile = path.join(dir, `sub-${index}.vtt`);
+        await writeFile(srtFile, toSrt(clipSegments));
+        await writeFile(vttFile, toVtt(clipSegments));
+        await deps.storage.upload(srtFile, subtitleKeys.srt, "application/x-subrip");
+        await deps.storage.upload(vttFile, subtitleKeys.vtt, "text/vtt");
+      }
+      outputs.push({ moment, key, thumbKey, title: titles[index] ?? null, subtitleKeys });
+      await progress("rendering_clips", (index + 1) / finalMoments.length, true);
     }
 
     // 5. Registrar resultados y consumo (en una transacción).
     await progress("finalizing", 0, true);
     const processingSeconds = (Date.now() - startedAt) / 1000;
     await deps.db.transaction(async (tx) => {
-      await tx.delete(clips).where(eq(clips.jobId, job.id)); // reintento: reemplaza, no duplica
+      await tx.delete(clips).where(eq(clips.jobId, job.id)); // reintento: reemplaza, no duplica (y sus subtítulos)
       if (outputs.length > 0) {
-        await tx.insert(clips).values(
-          outputs.map(({ moment, key, thumbKey }) => ({
-            userId: job.userId,
-            videoId: job.videoId,
-            jobId: job.id,
-            startSeconds: moment.startSeconds,
-            endSeconds: moment.endSeconds,
-            aspectRatio: "9:16" as const,
-            score: moment.score,
-            scoreBreakdown: moment.breakdown,
-            s3Key: key,
-            thumbnailS3Key: thumbKey,
-          })),
+        const inserted = await tx
+          .insert(clips)
+          .values(
+            outputs.map(({ moment, key, thumbKey, title }) => ({
+              userId: job.userId,
+              videoId: job.videoId,
+              jobId: job.id,
+              title,
+              startSeconds: moment.startSeconds,
+              endSeconds: moment.endSeconds,
+              aspectRatio: "9:16" as const,
+              score: moment.score,
+              scoreBreakdown: moment.breakdown,
+              s3Key: key,
+              thumbnailS3Key: thumbKey,
+            })),
+          )
+          .returning({ id: clips.id });
+        const subtitleRows = outputs.flatMap((o, i) =>
+          o.subtitleKeys
+            ? (["srt", "vtt"] as const).map((format) => ({
+                userId: job.userId,
+                videoId: job.videoId,
+                clipId: inserted[i]!.id,
+                format,
+                language: ai.language,
+                s3Key: o.subtitleKeys![format],
+              }))
+            : [],
         );
+        if (subtitleRows.length) await tx.insert(subtitles).values(subtitleRows);
       }
       const base = { userId: job.userId, jobId: job.id, videoId: job.videoId };
       await tx.insert(usage).values([
@@ -195,9 +283,37 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<{
           details: { workerId: deps.workerId, attempt: job.attempts },
         },
         { ...base, metric: "clips_generated", quantity: outputs.length },
+        ...(ai.usage.audioSeconds
+          ? [
+              {
+                ...base,
+                metric: "ai_audio_seconds" as const,
+                quantity: ai.usage.audioSeconds,
+                estimatedCostUsd: ai.transcribeCostUsd,
+                details: { provider: deps.ai?.name },
+              },
+            ]
+          : []),
+        ...(ai.usage.inputTokens
+          ? [
+              {
+                ...base,
+                metric: "ai_input_tokens" as const,
+                quantity: ai.usage.inputTokens,
+                estimatedCostUsd: (ai.usage.estimatedCostUsd ?? 0) - ai.transcribeCostUsd,
+                details: { provider: deps.ai?.name },
+              },
+              { ...base, metric: "ai_output_tokens" as const, quantity: ai.usage.outputTokens ?? 0 },
+            ]
+          : []),
       ]);
     });
-    return { clipCount: outputs.length };
+    return {
+      clipCount: outputs.length,
+      ai: ai.status,
+      ...(ai.reason ? { aiReason: ai.reason } : {}),
+      language: ai.language,
+    };
   } catch (err) {
     if (stopped) throw stopped;
     if (err instanceof JobError || err instanceof JobStopped) throw err;
@@ -210,6 +326,61 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<{
   } finally {
     clearInterval(heartbeat);
     await rm(dir, { recursive: true, force: true });
+  }
+}
+
+interface AIOutcome {
+  status: JobResult["ai"];
+  reason?: string;
+  segments: TranscriptSegment[];
+  highlights?: import("@clipflow/shared").ContentHighlight[];
+  language: string | null;
+  usage: AIUsage;
+  transcribeCostUsd: number;
+}
+
+function addUsage(total: AIUsage, extra: AIUsage) {
+  total.inputTokens = (total.inputTokens ?? 0) + (extra.inputTokens ?? 0);
+  total.outputTokens = (total.outputTokens ?? 0) + (extra.outputTokens ?? 0);
+  total.estimatedCostUsd = (total.estimatedCostUsd ?? 0) + (extra.estimatedCostUsd ?? 0);
+}
+
+/** Transcripción + análisis con IA. Nunca hace fallar el trabajo: si algo falla, lo informa. */
+async function runAI(
+  deps: PipelineDeps,
+  info: { durationSeconds: number; hasAudio: boolean },
+  input: string,
+  dir: string,
+  signal: AbortSignal,
+  onProgress: (fraction: number) => Promise<void>,
+): Promise<AIOutcome> {
+  const empty = { segments: [], language: null, usage: {}, transcribeCostUsd: 0 };
+  if (!deps.ai) return { ...empty, status: "disabled", reason: deps.aiDisabledReason ?? "IA no configurada" };
+  if (!info.hasAudio) return { ...empty, status: "no_audio", reason: "El video no tiene audio" };
+  try {
+    const chunks = await extractAudioChunks(deps.tools, input, dir, {
+      maxSeconds: Math.min(info.durationSeconds, deps.aiMaxAudioMinutes * 60),
+      signal,
+    });
+    await onProgress(0.2);
+    const transcript = await deps.ai.transcribe(chunks);
+    await onProgress(0.7);
+    const analysis = await deps.ai.analyze(transcript.segments, info.durationSeconds);
+    const usage: AIUsage = { ...transcript.usage };
+    const transcribeCostUsd = transcript.usage.estimatedCostUsd ?? 0;
+    addUsage(usage, analysis.usage);
+    return {
+      status: "used",
+      segments: transcript.segments,
+      highlights: analysis.highlights,
+      language: transcript.language,
+      usage,
+      transcribeCostUsd,
+    };
+  } catch (err) {
+    if (signal.aborted) throw err;
+    deps.log.warn({ error: (err as Error).message }, "IA no disponible; se continúa solo con FFmpeg");
+    return { ...empty, status: "unavailable", reason: "El análisis con IA falló; los clips se eligieron solo por audio y escenas." };
   }
 }
 

@@ -25,6 +25,7 @@ export function toJobDto(job: Job): JobDto {
     maxAttempts: job.maxAttempts,
     errorMessage: job.errorMessage,
     params: job.params as JobDto["params"],
+    result: (job.result as JobDto["result"]) ?? null,
     queuedAt: job.queuedAt.toISOString(),
     startedAt: job.startedAt?.toISOString() ?? null,
     finishedAt: job.finishedAt?.toISOString() ?? null,

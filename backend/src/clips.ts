@@ -1,12 +1,12 @@
 import type { FastifyInstance, FastifyReply, preHandlerHookHandler } from "fastify";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { ClipUpdateSchema, type ClipDto, type ClipListResponse } from "@clipflow/shared";
 import { schema, type Database } from "@clipflow/shared/db";
 import { sendError, sendValidationError } from "./http.js";
 import type { VideoStorage } from "./storage.js";
 
-const { clips, videos } = schema;
+const { clips, subtitles, videos } = schema;
 type ClipRow = typeof clips.$inferSelect;
 const IdParams = z.object({ id: z.uuid() });
 
@@ -17,7 +17,22 @@ export function clipRoutes(deps: { db: Database; auth: preHandlerHookHandler; st
   const { db, storage } = deps;
   const notFound = (reply: FastifyReply, what = "Clip") => sendError(reply, 404, "not_found", `${what} no encontrado.`);
 
-  async function toDto(row: ClipRow): Promise<ClipDto> {
+  /** Subtítulos de varios clips en una sola consulta. */
+  async function subtitlesFor(clipIds: string[], userId: string) {
+    if (clipIds.length === 0) return new Map<string, { srt?: string; vtt?: string }>();
+    const rows = await db
+      .select()
+      .from(subtitles)
+      .where(and(inArray(subtitles.clipId, clipIds), eq(subtitles.userId, userId)));
+    const map = new Map<string, { srt?: string; vtt?: string }>();
+    for (const r of rows) {
+      if (!r.clipId || r.format === "json") continue;
+      map.set(r.clipId, { ...map.get(r.clipId), [r.format]: r.s3Key });
+    }
+    return map;
+  }
+
+  async function toDto(row: ClipRow, subs?: { srt?: string; vtt?: string }): Promise<ClipDto> {
     return {
       id: row.id,
       videoId: row.videoId,
@@ -30,6 +45,10 @@ export function clipRoutes(deps: { db: Database; auth: preHandlerHookHandler; st
       scoreBreakdown: row.scoreBreakdown as Record<string, number> | null,
       videoUrl: row.s3Key ? await storage.presignGet(row.s3Key, URL_TTL_SECONDS) : null,
       thumbnailUrl: row.thumbnailS3Key ? await storage.presignGet(row.thumbnailS3Key, URL_TTL_SECONDS) : null,
+      subtitlesVttUrl: subs?.vtt ? await storage.presignGet(subs.vtt, URL_TTL_SECONDS) : null,
+      subtitlesSrtUrl: subs?.srt
+        ? await storage.presignGet(subs.srt, URL_TTL_SECONDS, `clipflow-${Math.round(row.startSeconds)}s.srt`)
+        : null,
       createdAt: row.createdAt.toISOString(),
     };
   }
@@ -51,7 +70,14 @@ export function clipRoutes(deps: { db: Database; auth: preHandlerHookHandler; st
         .from(clips)
         .where(and(eq(clips.videoId, video.id), eq(clips.userId, userId)))
         .orderBy(asc(clips.startSeconds));
-      return { clips: await Promise.all(rows.map(toDto)), urlsExpireInSeconds: URL_TTL_SECONDS } satisfies ClipListResponse;
+      const subs = await subtitlesFor(
+        rows.map((r) => r.id),
+        userId,
+      );
+      return {
+        clips: await Promise.all(rows.map((r) => toDto(r, subs.get(r.id)))),
+        urlsExpireInSeconds: URL_TTL_SECONDS,
+      } satisfies ClipListResponse;
     });
 
     app.patch("/clips/:id", async (request, reply) => {
@@ -67,7 +93,9 @@ export function clipRoutes(deps: { db: Database; auth: preHandlerHookHandler; st
         })
         .where(and(eq(clips.id, params.data.id), eq(clips.userId, request.user!.id)))
         .returning();
-      return row ? toDto(row) : notFound(reply);
+      if (!row) return notFound(reply);
+      const subs = await subtitlesFor([row.id], request.user!.id);
+      return toDto(row, subs.get(row.id));
     });
 
     app.get("/clips/:id/download", async (request, reply) => {

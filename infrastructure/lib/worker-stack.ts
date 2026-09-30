@@ -10,6 +10,7 @@ import * as iam from "aws-cdk-lib/aws-iam";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as rds from "aws-cdk-lib/aws-rds";
 import * as s3 from "aws-cdk-lib/aws-s3";
+import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as sqs from "aws-cdk-lib/aws-sqs";
 import type { Construct } from "constructs";
 import { DATABASE_NAME } from "./database-stack.js";
@@ -63,6 +64,15 @@ export class WorkerStack extends Stack {
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
 
+    // Clave de OpenAI: se crea con un valor aleatorio de relleno y el usuario pega la real
+    // en la consola de Secrets Manager. Solo el worker puede leerla; nunca está en el código.
+    const openAiKey = new secretsmanager.Secret(this, "OpenAiApiKey", {
+      secretName: `${prefix}/openai-api-key`,
+      description: "Clave de OpenAI para ClipFlow. Reemplaza el valor por tu clave (sk-...).",
+      generateSecretString: { passwordLength: 32, excludePunctuation: true },
+      removalPolicy: props.stage === "production" ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
+    });
+
     const cluster = new ecs.Cluster(this, "WorkerCluster", { clusterName: `${prefix}-workers`, vpc: props.vpc });
     const logGroup = new logs.LogGroup(this, "WorkerLogs", {
       logGroupName: `/clipflow/${props.stage}/worker`,
@@ -94,8 +104,15 @@ export class WorkerStack extends Stack {
         DB_NAME: DATABASE_NAME,
         DATABASE_SSL: "true",
         SQS_VISIBILITY_SECONDS: "300",
+        AI_PROVIDER: "openai",
+        OPENAI_TRANSCRIBE_MODEL: "whisper-1",
+        OPENAI_ANALYSIS_MODEL: "gpt-4o-mini",
+        OPENAI_MAX_AUDIO_MINUTES: "180",
       },
       secrets: {
+        // ECS lee el secreto al arrancar cada worker (como el worker escala a 0,
+        // una clave nueva se usa desde el siguiente video).
+        OPENAI_API_KEY: ecs.Secret.fromSecretsManager(openAiKey),
         DB_USER: ecs.Secret.fromSecretsManager(dbSecret, "username"),
         DB_PASSWORD: ecs.Secret.fromSecretsManager(dbSecret, "password"),
       },
@@ -165,5 +182,6 @@ export class WorkerStack extends Stack {
       });
 
     new CfnOutput(this, "QueueUrl", { value: this.queue.queueUrl });
+    new CfnOutput(this, "OpenAiSecretName", { value: openAiKey.secretName });
   }
 }
