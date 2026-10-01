@@ -39,6 +39,7 @@ import {
 import type { WorkerStorage } from "./storage.js";
 import { AIProviderError } from "./ai/openai.js";
 import { buildAss, SUBTITLE_FONTS_DIR } from "./subtitles.js";
+import { DownloadError, downloadFromUrl } from "./download.js";
 
 const { clips, subtitles, usage, videos } = schema;
 
@@ -81,6 +82,10 @@ export interface PipelineDeps {
   renderConcurrency?: number;
   /** Encuadre que sigue caras (a quien habla, o al grupo). */
   faceTracking?: boolean;
+  /** yt-dlp, para importar videos de plataformas (YouTube, TikTok…). */
+  ytDlpPath?: string;
+  /** Descarga de enlaces (se reemplaza en tests). */
+  download?: typeof downloadFromUrl;
   /** Análisis de imágenes con IA (experimental, tiene costo por imagen). */
   vision?: {
     enabled: boolean;
@@ -94,12 +99,30 @@ export interface PipelineDeps {
 
 /** Rango de progreso real de cada etapa. */
 const STAGES: Record<JobStage, [number, number]> = {
+  downloading: [0, 0],
   preparing: [0, 10],
   analyzing: [10, 45],
   detecting_moments: [45, 50],
   rendering_clips: [50, 95],
   finalizing: [95, 99],
 };
+/** Videos importados por enlace: primero se descargan (el resto se corre un poco). */
+const IMPORT_STAGES: Record<JobStage, [number, number]> = {
+  downloading: [0, 20],
+  preparing: [20, 26],
+  analyzing: [26, 55],
+  detecting_moments: [55, 58],
+  rendering_clips: [58, 95],
+  finalizing: [95, 99],
+};
+
+const MIME_BY_EXTENSION: Record<string, string> = { ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm", ".mkv": "video/x-matroska" };
+
+/** Título de la plataforma como nombre del archivo (sin caracteres de control). */
+function filenameFromTitle(title: string | null, fallback: string, ext: string): string {
+  const clean = (title ?? "").replace(/[\u0000-\u001f\u007f]/g, "").replace(/\s+/g, " ").trim().slice(0, 200);
+  return clean ? `${clean}${ext}` : fallback;
+}
 
 /**
  * Procesa un video: descarga → valida con ffprobe → calcula señales → elige momentos →
@@ -124,8 +147,9 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
   };
   const heartbeat = setInterval(() => void beat().catch(() => undefined), 30_000);
 
+  let stages = STAGES;
   const progress = async (stage: JobStage, fraction: number, force = false) => {
-    const [from, to] = STAGES[stage];
+    const [from, to] = stages[stage];
     current = { stage, progress: from + (to - from) * Math.min(1, Math.max(0, fraction)) };
     if (force || Date.now() - lastReport > 3000) {
       lastReport = Date.now();
@@ -138,6 +162,50 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     if (stopped) throw stopped;
   };
 
+  const importFromLink = async (video: typeof videos.$inferSelect, workDir: string): Promise<string> => {
+    if (!video.sourceUrl) throw new JobError("import_failed", "Falta el enlace del video.", false);
+    await progress("downloading", 0, true);
+    let downloaded;
+    try {
+      downloaded = await (deps.download ?? downloadFromUrl)(video.sourceUrl, workDir, {
+        ytDlpPath: deps.ytDlpPath ?? "yt-dlp",
+        ffmpegPath: deps.tools.ffmpegPath,
+        maxBytes: deps.product.upload.maxBytes,
+        maxDurationSeconds: deps.product.upload.maxDurationSeconds,
+        signal: controller.signal,
+        onProgress: (f) => void progress("downloading", f).catch(() => undefined),
+      });
+    } catch (err) {
+      if (!(err instanceof DownloadError)) throw err;
+      deps.log.warn({ jobId: job.id, host: new URL(video.sourceUrl).hostname, error: err.message }, "no se pudo descargar el enlace");
+      if (!err.retryable) await rejectVideo(deps.db, video.id, err.message);
+      throw new JobError("import_failed", err.message, err.retryable);
+    }
+    check();
+    const ext = path.extname(downloaded.file).toLowerCase();
+    const mimeType = MIME_BY_EXTENSION[ext] ?? "video/mp4";
+    await deps.storage.upload(downloaded.file, video.s3Key, mimeType);
+    await deps.db
+      .update(videos)
+      .set({
+        status: "uploaded",
+        sizeBytes: downloaded.sizeBytes,
+        mimeType,
+        originalFilename: filenameFromTitle(downloaded.title, video.originalFilename, ext || ".mp4"),
+        uploadedAt: new Date(),
+      })
+      .where(eq(videos.id, video.id));
+    await deps.db.insert(usage).values({
+      userId: job.userId,
+      videoId: video.id,
+      metric: "storage_bytes",
+      quantity: downloaded.sizeBytes,
+      details: { event: "import_completed" },
+    });
+    await progress("downloading", 1, true);
+    return downloaded.file;
+  };
+
   try {
     await mkdir(dir, { recursive: true });
     const [video] = await deps.db
@@ -146,10 +214,17 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       .where(and(eq(videos.id, job.videoId), eq(videos.userId, job.userId)));
     if (!video) throw new JobError("video_not_found", "El video ya no existe.", false);
 
-    // 1. Preparar: descargar y comprobar el contenido real.
-    await progress("preparing", 0, true);
-    const input = path.join(dir, `input${path.extname(video.s3Key)}`);
-    await deps.storage.download(video.s3Key, input, tick("preparing", video.sizeBytes * 1.25), controller.signal);
+    // 0. Video importado por enlace: se descarga aquí (nunca en la API) y se guarda en S3.
+    let input: string;
+    if (video.status === "importing") {
+      stages = IMPORT_STAGES;
+      input = await importFromLink(video, dir);
+    } else {
+      // 1. Preparar: descargar de S3 y comprobar el contenido real.
+      await progress("preparing", 0, true);
+      input = path.join(dir, `input${path.extname(video.s3Key)}`);
+      await deps.storage.download(video.s3Key, input, tick("preparing", video.sizeBytes * 1.25), controller.signal);
+    }
     check();
 
     let info;

@@ -268,12 +268,15 @@ describe("cola y worker", () => {
     expect(JSON.stringify(t.api.toJSON())).not.toContain("openai-api-key");
   });
 
-  it("lee solo originales y escribe solo resultados", () => {
+  it("lee originales, escribe resultados y solo puede AGREGAR originales (videos por enlace), nunca borrarlos", () => {
     const statements = s3Statements(t.worker);
     const reads = statements.filter((s) => [s.Action].flat().includes("s3:GetObject"));
     const writes = statements.filter((s) => [s.Action].flat().includes("s3:PutObject"));
     expect(JSON.stringify(reads.map((s) => s.Resource))).toContain("/originals/*");
-    expect(JSON.stringify(writes.map((s) => s.Resource))).not.toContain("originals");
     expect(JSON.stringify(writes.map((s) => s.Resource))).toContain("/clips/*");
+    const originals = writes.filter((s) => JSON.stringify(s.Resource).includes("/originals/*"));
+    expect(originals).toHaveLength(1);
+    expect([originals[0]!.Action].flat().sort()).toEqual(["s3:AbortMultipartUpload", "s3:PutObject"]);
+    expect(statements.every((s) => ![s.Action].flat().includes("s3:DeleteObject"))).toBe(true);
   });
 });

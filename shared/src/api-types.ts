@@ -18,7 +18,7 @@ export interface ProjectListResponse {
   projects: ProjectDto[];
 }
 
-export type VideoStatus = "pending_upload" | "uploaded" | "ready" | "rejected" | "deleted";
+export type VideoStatus = "pending_upload" | "importing" | "uploaded" | "ready" | "rejected" | "deleted";
 
 export interface VideoDto {
   id: string;
@@ -36,6 +36,14 @@ export interface VideoDto {
   thumbnailUrl?: string | null;
   /** Clips listos (sin contar los descartados). */
   clipCount?: number;
+  /** Enlace de origen, si se importó por enlace. */
+  sourceUrl?: string | null;
+}
+
+/** Respuesta al importar un video por enlace. */
+export interface ImportVideoResponse {
+  video: VideoDto;
+  job: JobDto;
 }
 
 export interface VideoListResponse {
@@ -57,7 +65,7 @@ export interface UploadPartUrlsResponse {
 }
 
 export type JobStatus = "queued" | "processing" | "completed" | "failed" | "cancelled";
-export type JobStageName = "preparing" | "analyzing" | "detecting_moments" | "rendering_clips" | "finalizing";
+export type JobStageName = "downloading" | "preparing" | "analyzing" | "detecting_moments" | "rendering_clips" | "finalizing";
 
 export interface JobDto {
   id: string;

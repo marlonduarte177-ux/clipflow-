@@ -124,6 +124,8 @@ export class WorkerStack extends Stack {
         AI_VISION_MAX_FRAMES: "600",
         // Encuadre que sigue a quien habla (detector local YuNet, sin costo por imagen).
         FACE_TRACKING_ENABLED: "true",
+        // Importar por enlace (YouTube, TikTok…): yt-dlp instalado en la imagen.
+        YTDLP_PATH: "/usr/local/bin/yt-dlp",
       },
       secrets: {
         // ECS lee el secreto al arrancar cada worker (como el worker escala a 0,
@@ -138,6 +140,14 @@ export class WorkerStack extends Stack {
     this.queue.grantConsumeMessages(taskDefinition.taskRole);
     taskDefinition.taskRole.addToPrincipalPolicy(
       new iam.PolicyStatement({ actions: ["s3:GetObject"], resources: [props.bucket.arnForObjects("originals/*")] }),
+    );
+    // Videos importados por enlace: el worker los descarga y guarda el original (en partes si es
+    // grande). No puede borrar originales.
+    taskDefinition.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["s3:PutObject", "s3:AbortMultipartUpload"],
+        resources: [props.bucket.arnForObjects("originals/*")],
+      }),
     );
     taskDefinition.taskRole.addToPrincipalPolicy(
       new iam.PolicyStatement({

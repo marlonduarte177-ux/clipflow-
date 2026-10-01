@@ -2,6 +2,7 @@ import type { JobDto } from "@clipflow/shared";
 import { BellIcon, CheckIcon } from "./icons";
 
 const STAGE_LABELS: Record<NonNullable<JobDto["stage"]>, string> = {
+  downloading: "Descargando el video",
   preparing: "Preparando el video",
   analyzing: "Escuchando y transcribiendo",
   detecting_moments: "Eligiendo los mejores momentos",
@@ -62,19 +63,21 @@ export function JobProgress({ job }: { job: JobDto }) {
 }
 
 /** Pantalla de progreso: anillo con el porcentaje, tiempos y la lista de pasos. */
-export function JobProgressPanel({ job, subtitles }: { job: JobDto; subtitles: boolean }) {
+export function JobProgressPanel({ job, subtitles, imported = false }: { job: JobDto; subtitles: boolean; imported?: boolean }) {
   const radius = 86;
   const circumference = 2 * Math.PI * radius;
   const progress = job.status === "queued" ? 0 : job.progress;
   const current = job.status === "queued" ? -1 : job.stage ? STAGES.indexOf(job.stage) : 0;
   const hint = remaining(job);
-  const steps = [
-    { label: "Video subido", state: "done" as const },
-    ...STAGES.map((stage, i) => ({
-      label: stage === "rendering_clips" && subtitles ? "Generando clips con subtítulos" : STAGE_LABELS[stage],
-      state: i < current ? ("done" as const) : i === current ? ("active" as const) : ("pending" as const),
-    })),
-  ];
+  // Por enlace, el primer paso es descargarlo; si se subió un archivo, ese paso ya pasó.
+  const stageSteps = STAGES.map((stage, i) => ({
+    stage,
+    label: stage === "rendering_clips" && subtitles ? "Generando clips con subtítulos" : STAGE_LABELS[stage],
+    state: i < current ? ("done" as const) : i === current ? ("active" as const) : ("pending" as const),
+  }));
+  const steps = imported
+    ? stageSteps
+    : [{ label: "Video subido", state: "done" as const }, ...stageSteps.filter((s) => s.stage !== "downloading")];
 
   return (
     <div className="space-y-5">

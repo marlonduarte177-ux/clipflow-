@@ -62,6 +62,7 @@ try {
       aiDisabledReason,
       aiMaxAudioMinutes: config.OPENAI_MAX_AUDIO_MINUTES,
       faceTracking: config.FACE_TRACKING_ENABLED,
+      ytDlpPath: config.YTDLP_PATH,
       vision: {
         enabled: config.AI_VISION_ENABLED,
         intervalSeconds: config.AI_VISION_INTERVAL_SECONDS,

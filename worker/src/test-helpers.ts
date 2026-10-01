@@ -55,15 +55,18 @@ export function makeGameplayVideo(file: string) {
 export async function seedVideoJob(
   db: Database,
   root: string,
-  options: { sample: string; fake?: boolean; params?: Record<string, unknown> },
+  options: { sample: string; fake?: boolean; params?: Record<string, unknown>; importUrl?: string },
 ) {
   const user = await upsertUser(db, { cognitoSub: `sub-${Math.random()}` });
   const [project] = await db.insert(schema.projects).values({ userId: user.id, name: "P" }).returning();
   const key = `originals/${user.id}/v/original.mp4`;
   const target = path.join(root, key);
   mkdirSync(path.dirname(target), { recursive: true });
-  if (options.fake) writeFileSync(target, "<html>esto no es un video</html>");
-  else execFileSync("cp", [options.sample, target]);
+  // Video por enlace: todavía no hay archivo (lo descarga el worker).
+  if (!options.importUrl) {
+    if (options.fake) writeFileSync(target, "<html>esto no es un video</html>");
+    else execFileSync("cp", [options.sample, target]);
+  }
   const [video] = await db
     .insert(schema.videos)
     .values({
@@ -71,9 +74,11 @@ export async function seedVideoJob(
       projectId: project!.id,
       originalFilename: "sample.mp4",
       mimeType: "video/mp4",
-      sizeBytes: 1000,
+      sizeBytes: options.importUrl ? 0 : 1000,
       s3Key: key,
-      status: "uploaded",
+      status: options.importUrl ? "importing" : "uploaded",
+      sourceUrl: options.importUrl ?? null,
+      rightsConfirmedAt: options.importUrl ? new Date() : null,
     })
     .returning();
   const { job } = await createJob(db, {

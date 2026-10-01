@@ -1,14 +1,17 @@
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
-import { and, count, desc, eq, gt, inArray } from "drizzle-orm";
+import { and, count, desc, eq, gt, inArray, or } from "drizzle-orm";
 import { z } from "zod";
 import {
+  checkImportUrl,
   CompleteUploadSchema,
   CreateVideoSchema,
+  ImportVideoSchema,
   ProcessVideoSchema,
   UploadPartsRequestSchema,
   planUploadParts,
   resolveVideoMimeType,
   type CreateVideoResponse,
+  type ImportVideoResponse,
   type JobParams,
   type ProductConfig,
   type SubtitleStyle,
@@ -55,7 +58,14 @@ export function toVideoDto(row: VideoRow, extras: Pick<VideoDto, "thumbnailUrl" 
     rejectionReason: row.rejectionReason,
     createdAt: row.createdAt.toISOString(),
     uploadedAt: row.uploadedAt?.toISOString() ?? null,
+    sourceUrl: row.sourceUrl,
   };
+}
+
+/** Nombre que se muestra mientras se descarga (el worker lo cambia por el título real). */
+function nameFromUrl(url: string): string {
+  const u = new URL(url);
+  return `${u.hostname.replace(/^www\./, "")}${u.pathname === "/" ? "" : u.pathname}`.slice(0, 120);
 }
 
 /** Quita caracteres de control del nombre (solo se muestra; nunca se usa como ruta en S3). */
@@ -202,7 +212,7 @@ export function videoRoutes(deps: VideoRouteDeps) {
         .where(
           and(
             eq(videos.userId, userId),
-            eq(videos.status, "pending_upload"),
+            or(eq(videos.status, "pending_upload"), eq(videos.status, "importing")),
             gt(videos.createdAt, new Date(Date.now() - PENDING_WINDOW_MS)),
           ),
         );
@@ -241,6 +251,72 @@ export function videoRoutes(deps: VideoRouteDeps) {
       // Respaldo: aviso en la cola (el escalado por métricas también lo enciende).
       queue.warmUp().catch((err: Error) => request.log.warn({ reason: err.name }, "no se pudo enviar el aviso de encendido"));
       return reply.code(201).send({ video: toVideoDto(row!), upload: planUploadParts(sizeBytes) } satisfies CreateVideoResponse);
+    });
+
+    // Importar por enlace: lo descarga el worker (nunca la API). El usuario debe confirmar que
+    // tiene derechos o permiso para usar el video; se guarda cuándo lo confirmó.
+    app.post("/videos/import", async (request, reply) => {
+      const input = ImportVideoSchema.safeParse(request.body);
+      if (!input.success) return sendValidationError(reply, input.error);
+      const checked = checkImportUrl(input.data.url);
+      if (!checked.ok) return sendError(reply, 400, "invalid_url", checked.message);
+      const options = processingParams(product, input.data);
+      if (!options.ok) return sendError(reply, 400, "invalid_duration", options.message);
+      const userId = request.user!.id;
+
+      const [project] = await db
+        .select({ id: projects.id })
+        .from(projects)
+        .where(and(eq(projects.id, input.data.projectId), eq(projects.userId, userId)));
+      if (!project) return sendError(reply, 404, "not_found", "Proyecto no encontrado.");
+
+      const [pending] = await db
+        .select({ n: count() })
+        .from(videos)
+        .where(
+          and(
+            eq(videos.userId, userId),
+            or(eq(videos.status, "pending_upload"), eq(videos.status, "importing")),
+            gt(videos.createdAt, new Date(Date.now() - PENDING_WINDOW_MS)),
+          ),
+        );
+      if ((pending?.n ?? 0) >= product.upload.maxPendingUploads) {
+        return sendError(
+          reply,
+          429,
+          "too_many_uploads",
+          `Ya tienes ${product.upload.maxPendingUploads} videos subiéndose o descargándose. Espera a que terminen.`,
+        );
+      }
+
+      const videoId = crypto.randomUUID();
+      const [row] = await db
+        .insert(videos)
+        .values({
+          id: videoId,
+          userId,
+          projectId: project.id,
+          status: "importing",
+          originalFilename: nameFromUrl(checked.url),
+          mimeType: "video/mp4",
+          sizeBytes: 0,
+          s3Key: `originals/${userId}/${videoId}/original.mp4`,
+          sourceUrl: checked.url,
+          rightsConfirmedAt: new Date(),
+        })
+        .returning();
+      const { job } = await createJob(db, {
+        userId,
+        videoId,
+        type: "analyze_video",
+        idempotencyKey: `analyze:${videoId}`,
+        params: { ...options.params },
+      });
+      // Solo el dominio en los registros: el enlace completo puede llevar datos privados.
+      request.log.info({ videoId, host: new URL(checked.url).hostname }, "importación por enlace iniciada");
+      await enqueue(queue, job, request.log);
+      wakeWorkers(db, launcher, request.log);
+      return reply.code(201).send({ video: toVideoDto(row!), job: toJobDto(job) } satisfies ImportVideoResponse);
     });
 
     app.post("/videos/:id/upload-parts", async (request, reply) => {
