@@ -1,12 +1,12 @@
 import type { FastifyInstance, FastifyReply, preHandlerHookHandler } from "fastify";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { ClipUpdateSchema, type ClipDto, type ClipListResponse } from "@clipflow/shared";
+import { ClipUpdateSchema, fullTranscriptKey, type ClipDto, type ClipListResponse, type JobResult } from "@clipflow/shared";
 import { schema, type Database } from "@clipflow/shared/db";
 import { sendError, sendValidationError } from "./http.js";
 import type { VideoStorage } from "./storage.js";
 
-const { clips, subtitles, videos } = schema;
+const { clips, subtitles, videos, processingJobs } = schema;
 type ClipRow = typeof clips.$inferSelect;
 const IdParams = z.object({ id: z.uuid() });
 
@@ -30,6 +30,22 @@ export function clipRoutes(deps: { db: Database; auth: preHandlerHookHandler; st
       map.set(r.clipId, { ...map.get(r.clipId), [r.format]: r.s3Key });
     }
     return map;
+  }
+
+  /** Transcripción completa del último procesamiento terminado con IA (si el archivo existe). */
+  async function transcriptFor(videoId: string, userId: string): Promise<ClipListResponse["transcript"]> {
+    const [job] = await db
+      .select({ id: processingJobs.id, result: processingJobs.result })
+      .from(processingJobs)
+      .where(and(eq(processingJobs.videoId, videoId), eq(processingJobs.userId, userId), eq(processingJobs.status, "completed")))
+      .orderBy(desc(processingJobs.createdAt))
+      .limit(1);
+    const result = job?.result as JobResult | null | undefined;
+    if (!job || result?.ai !== "used") return null;
+    const key = fullTranscriptKey(userId, job.id);
+    // Videos procesados antes de que existiera no la tienen.
+    if ((await storage.getObjectSize(key)) === null) return null;
+    return { vttUrl: await storage.presignGet(key, URL_TTL_SECONDS), language: result.language ?? null };
   }
 
   async function toDto(row: ClipRow, subs?: { srt?: string; vtt?: string }): Promise<ClipDto> {
@@ -77,6 +93,7 @@ export function clipRoutes(deps: { db: Database; auth: preHandlerHookHandler; st
       return {
         clips: await Promise.all(rows.map((r) => toDto(r, subs.get(r.id)))),
         urlsExpireInSeconds: URL_TTL_SECONDS,
+        transcript: await transcriptFor(video.id, userId),
       } satisfies ClipListResponse;
     });
 

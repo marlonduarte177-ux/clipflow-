@@ -1,4 +1,4 @@
-import type { CreateVideoResponse, UploadPartUrlsResponse, VideoDto } from "@clipflow/shared";
+import type { CreateVideoResponse, JobDto, SubtitleStyle, UploadPartUrlsResponse, VideoDto } from "@clipflow/shared";
 import { apiFetch, ApiError } from "./api";
 
 /** Partes que se suben al mismo tiempo. */
@@ -19,6 +19,13 @@ export interface UploadOptions {
   onProgress: (p: UploadProgress) => void;
   /** Se llama en cuanto existe el video (para poder cancelar). */
   onCreated?: (video: VideoDto) => void;
+  /** Se llama cuando todas las partes ya están en S3. */
+  onUploaded?: () => void;
+  /**
+   * Opciones de procesamiento. La subida espera esta promesa antes de confirmar: el usuario
+   * puede elegirlas (y apretar "Crear clips") mientras el video se sube.
+   */
+  completeWith?: () => Promise<{ clipDurationSeconds?: number; subtitleStyle?: SubtitleStyle }>;
   signal: AbortSignal;
 }
 
@@ -46,7 +53,7 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * pide a la API que abra la subida, sube cada parte con una URL firmada
  * (3 a la vez, con reintentos) y al final pide a la API que la confirme.
  */
-export async function uploadVideo(options: UploadOptions): Promise<VideoDto> {
+export async function uploadVideo(options: UploadOptions): Promise<VideoDto & { job?: JobDto }> {
   const { file, signal } = options;
   const created = await apiFetch<CreateVideoResponse>("/videos", {
     method: "POST",
@@ -110,10 +117,13 @@ export async function uploadVideo(options: UploadOptions): Promise<VideoDto> {
   }
 
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, partCount) }, worker));
+  options.onUploaded?.();
+  const processing = options.completeWith ? await options.completeWith() : {};
+  if (signal.aborted) throw new DOMException("Cancelado", "AbortError");
 
-  return apiFetch<VideoDto>(`/videos/${video.id}/complete`, {
+  return apiFetch<VideoDto & { job?: JobDto }>(`/videos/${video.id}/complete`, {
     method: "POST",
-    body: { parts: [...etags].map(([partNumber, etag]) => ({ partNumber, etag })) },
+    body: { parts: [...etags].map(([partNumber, etag]) => ({ partNumber, etag })), ...processing },
     signal,
   });
 }

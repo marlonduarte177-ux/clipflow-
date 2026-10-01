@@ -550,8 +550,22 @@ export async function renderVerticalClip(
   input: string,
   output: string,
   segment: { startSeconds: number; durationSeconds: number },
-  options: { signal?: AbortSignal; onProgress?: (seconds: number) => void; crop?: VerticalCrop | null } = {},
+  options: {
+    signal?: AbortSignal;
+    onProgress?: (seconds: number) => void;
+    crop?: VerticalCrop | null;
+    /** Subtítulos a quemar: archivo ASS (tiempos relativos al clip) y carpeta de fuentes. */
+    subtitles?: { file: string; fontsDir: string };
+  } = {},
 ): Promise<void> {
+  let filter = verticalFilter(options.crop ?? null);
+  if (options.subtitles) {
+    // Se dibujan sobre el 1080x1920 final. Rutas entre comillas: pueden tener ":".
+    const quote = (p: string) => `'${p.replace(/'/g, "")}'`;
+    filter =
+      filter.replace(/\[v\]$/, "[vbase]") +
+      `;[vbase]ass=filename=${quote(options.subtitles.file)}:fontsdir=${quote(options.subtitles.fontsDir)}[v]`;
+  }
   await run(
     tools.ffmpegPath,
     [
@@ -566,7 +580,7 @@ export async function renderVerticalClip(
       "-t",
       segment.durationSeconds.toFixed(3),
       "-filter_complex",
-      verticalFilter(options.crop ?? null),
+      filter,
       "-map",
       "[v]",
       "-map",

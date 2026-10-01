@@ -28,11 +28,22 @@ export const UploadPartsRequestSchema = z.object({
   partNumbers: z.array(z.number().int().min(1).max(10_000)).min(1).max(100),
 });
 
+/** Estilo de los subtítulos quemados en el video. */
+export const SUBTITLE_STYLES = ["highlight", "classic", "none"] as const;
+export const SubtitleStyleSchema = z.enum(SUBTITLE_STYLES);
+
+/** Opciones que el usuario elige antes de procesar. */
+const ProcessingOptions = {
+  clipDurationSeconds: z.number().int().positive().optional(),
+  subtitleStyle: SubtitleStyleSchema.optional(),
+};
+
 export const CompleteUploadSchema = z.object({
   parts: z
     .array(z.object({ partNumber: z.number().int().min(1).max(10_000), etag: z.string().min(1).max(200) }))
     .min(1)
     .max(10_000),
+  ...ProcessingOptions,
 });
 
 export type CreateVideoInput = z.infer<typeof CreateVideoSchema>;
@@ -69,9 +80,7 @@ export function planUploadParts(sizeBytes: number): { partSizeBytes: number; par
   return { partSizeBytes, partCount: Math.max(1, Math.ceil(sizeBytes / partSizeBytes)) };
 }
 
-export const ProcessVideoSchema = z.object({
-  clipDurationSeconds: z.number().int().positive().optional(),
-});
+export const ProcessVideoSchema = z.object(ProcessingOptions);
 
 export const ClipUpdateSchema = z.object({
   status: z.enum(["generated", "approved", "discarded"]).optional(),
