@@ -254,6 +254,16 @@ describe("cola y worker", () => {
     }
   });
 
+  it("el proxy de descarga vive en Secrets Manager, llega solo al worker y nunca como texto", () => {
+    t.worker.hasResourceProperties("AWS::SecretsManager::Secret", { Name: "clipflow-staging/download-proxy" });
+    const [taskDef] = Object.values(t.worker.findResources("AWS::ECS::TaskDefinition"));
+    const container = (taskDef as { Properties: { ContainerDefinitions: Record<string, unknown>[] } }).Properties
+      .ContainerDefinitions[0]!;
+    expect((container.Environment as { Name: string }[]).map((e) => e.Name)).not.toContain("DOWNLOAD_PROXY_URL");
+    expect((container.Secrets as { Name: string }[]).map((e) => e.Name)).toContain("DOWNLOAD_PROXY_URL");
+    expect(JSON.stringify(t.api.toJSON())).not.toContain("download-proxy");
+  });
+
   it("la clave de OpenAI vive en Secrets Manager y llega al worker como secreto", () => {
     t.worker.hasResourceProperties("AWS::SecretsManager::Secret", { Name: "clipflow-staging/openai-api-key" });
     const [taskDef] = Object.values(t.worker.findResources("AWS::ECS::TaskDefinition"));
