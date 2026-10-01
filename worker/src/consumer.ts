@@ -124,7 +124,10 @@ export async function handleMessage(message: Message, options: ConsumerOptions):
       message: jobError.userMessage,
       retryable: jobError.retryable,
     });
-    deps.log.warn({ jobId, code: jobError.code, result }, "trabajo con error");
+    deps.log.warn(
+      { jobId, code: jobError.code, result, ...(err instanceof JobError ? {} : { error: (err as Error).message }) },
+      "trabajo con error",
+    );
     // Reintento: el mismo mensaje reaparece tras una espera creciente.
     if (result === "requeued") await delay(Math.min(900, 60 * job.attempts));
     else await remove();

@@ -241,4 +241,37 @@ describe("videos importados por enlace", () => {
     const [row] = await db.select().from(schema.videos).where(eq(schema.videos.id, video.id));
     expect(row!.status).toBe("importing");
   });
+
+  it("un error inesperado dice en qué paso falló y su código, sin detalles internos", async () => {
+    const db = h!.db;
+    const { job, video } = await seedVideoJob(db, root, { sample, importUrl: "https://vt.tiktok.com/abc/" });
+    const base = makeDeps(db, root, path.join(root, "work"));
+    const warnings: Record<string, unknown>[] = [];
+    const deps = {
+      ...base,
+      log: { info: () => undefined, warn: (o: Record<string, unknown>) => void warnings.push(o) },
+      download: async (_url: string, dir: string) => {
+        const file = path.join(dir, "source.mp4");
+        execFileSync("cp", [sample, file]);
+        return { file, sizeBytes: statSync(file).size, title: "Mi video" };
+      },
+      storage: {
+        ...base.storage,
+        upload: async () => {
+          throw Object.assign(new Error("User arn:aws:sts::123:assumed-role/x is not authorized"), { name: "AccessDenied" });
+        },
+      },
+    };
+    const error = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps).catch((e) => e);
+    expect(error).toBeInstanceOf(JobError);
+    expect(error).toMatchObject({
+      code: "unexpected",
+      retryable: true,
+      userMessage: "Ocurrió un error temporal al guardar el video importado (AccessDenied). Lo intentaremos de nuevo.",
+    });
+    // El detalle completo queda solo en el registro del worker.
+    expect(warnings.find((w) => w.step === "guardar el video importado")).toMatchObject({ code: "AccessDenied" });
+    const [row] = await db.select().from(schema.videos).where(eq(schema.videos.id, video.id));
+    expect(row!.status).toBe("importing");
+  });
 });
