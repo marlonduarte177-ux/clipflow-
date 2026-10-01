@@ -84,6 +84,8 @@ export interface PipelineDeps {
   faceTracking?: boolean;
   /** yt-dlp, para importar videos de plataformas (YouTube, TikTok…). */
   ytDlpPath?: string;
+  /** Proxy residencial para plataformas que bloquean a AWS (null = sin proxy). */
+  downloadProxyUrl?: string | null;
   /** Descarga de enlaces (se reemplaza en tests). */
   download?: typeof downloadFromUrl;
   /** Análisis de imágenes con IA (experimental, tiene costo por imagen). */
@@ -184,6 +186,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     try {
       downloaded = await (deps.download ?? downloadFromUrl)(video.sourceUrl, workDir, {
         ytDlpPath: deps.ytDlpPath ?? "yt-dlp",
+        proxyUrl: deps.downloadProxyUrl ?? null,
         ffmpegPath: deps.tools.ffmpegPath,
         maxBytes: deps.product.upload.maxBytes,
         maxDurationSeconds: deps.product.upload.maxDurationSeconds,
@@ -192,7 +195,10 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       });
     } catch (err) {
       if (!(err instanceof DownloadError)) throw err;
-      deps.log.warn({ jobId: job.id, host: new URL(video.sourceUrl).hostname, error: err.message }, "no se pudo descargar el enlace");
+      deps.log.warn(
+        { jobId: job.id, host: new URL(video.sourceUrl).hostname, error: err.message, detail: err.detail },
+        "no se pudo descargar el enlace",
+      );
       if (!err.retryable) await rejectVideo(deps.db, video.id, err.message);
       throw new JobError("import_failed", err.message, err.retryable);
     }

@@ -93,7 +93,51 @@ de AWS en `169.254.170.2`. Para evitarlo:
     pidió iniciar sesión.
   - Cuando pasa, el usuario ve: "La plataforma bloqueó la descarga desde nuestros servidores.
     Descarga el video y súbelo como archivo".
-  - Evitarlo exige cuentas o proxies; no se hace por ahora.
+  - Para YouTube y compañía hay un **proxy residencial** opcional (ver abajo).
+
+## Proxy residencial (YouTube y plataformas que bloquean a AWS)
+
+Desde el 02/10/2026 el procesador puede descargar a través de un proxy residencial (probado con
+**Evomi**, ~0,49 USD/GB). Así la descarga sale desde IPs "de casa" en lugar de AWS.
+- **Cuándo se usa:**
+  - **YouTube y youtu.be:** siempre por el proxy, porque desde AWS siempre bloquean.
+  - **El resto** (Instagram, Facebook, Vimeo…): primero sin proxy, que es gratis. Solo si la
+    plataforma bloquea, se reintenta una vez por el proxy.
+  - **TikTok:** ya funciona sin proxy, así que normalmente no gasta nada.
+- **Por el proxy se descarga hasta 720p:** se paga por GB y para clips verticales alcanza.
+  - Un video de 10 min pesa ~50–100 MB, unos 0,03–0,05 USD.
+- **Sesión fija:** YouTube ata el enlace del video a la IP que lo pidió. Con Evomi el procesador
+  agrega solo `_session-XXXXXXXX_lifetime-60` a la contraseña, para mantener la misma IP durante toda la descarga.
+  - Con otro proveedor hay que pegar la URL ya con su sesión fija.
+- **Seguridad:**
+  - El usuario y la contraseña del proxy viven solo en Secrets Manager. Nunca están en GitHub ni en
+    el código.
+  - En los registros solo aparece el host del proxy; las contraseñas se borran de cualquier mensaje de error.
+- **Si el proxy falla** (credenciales mal puestas o saldo agotado): el usuario ve "Nuestro servicio
+  de descarga no respondió" y se reintenta. En CloudWatch el detalle empieza con `[proxy]`.
+- **Sin proxy configurado** todo funciona igual que antes.
+- **Configuración:** el procesador lee la variable `DOWNLOAD_PROXY_URL`, con el formato
+  `http://USUARIO:CONTRASEÑA@rp.evomi.com:1000`. Si no es una URL válida, el proxy queda apagado.
+  - La infraestructura crea el secreto `clipflow-<etapa>/download-proxy` con un valor de relleno, y ECS
+    se lo entrega solo al procesador.
+
+### Cómo activarlo (una sola vez)
+
+1. Despliega (Actions → Deploy → staging).
+2. En Evomi, en la pantalla del proxy residencial, elige **HTTP**, **puerto 1000** y país **Mundial**.
+   Copia tu usuario y tu contraseña.
+3. En AWS → **Secrets Manager**, abre `clipflow-staging/download-proxy`.
+4. Toca **Recuperar el valor del secreto → Editar** y pestaña **Texto sin formato**.
+5. Borra lo que hay y pega:
+   `http://TU_USUARIO:TU_CONTRASEÑA@rp.evomi.com:1000`
+6. Guarda.
+   - El procesador se apaga cuando no hay trabajo, así que el siguiente video ya usa el proxy.
+   - Si hay un video procesándose en ese momento, el proxy empieza a usarse cuando el procesador vuelva a arrancar.
+7. Para comprobarlo, busca `worker iniciado` en CloudWatch (`/clipflow/staging/worker`): debe decir
+   `downloadProxy: "rp.evomi.com"`.
+
+Si el usuario o la contraseña tienen símbolos como `@`, `:` o `/`, hay que escribirlos codificados:
+`@` → `%40`, `:` → `%3A`, `/` → `%2F`.
 - **Videos privados o con restricción de edad:** no se pueden importar.
 - **yt-dlp hay que actualizarlo seguido** (las plataformas cambian): se cambia `YTDLP_VERSION` en el
   Dockerfile y se vuelve a desplegar.

@@ -77,6 +77,16 @@ export class WorkerStack extends Stack {
       removalPolicy: props.stage === "production" ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     });
 
+    // Proxy residencial para importar de plataformas que bloquean a AWS (YouTube…). Se crea con un
+    // valor de relleno (el proxy queda apagado) y el usuario pega su URL en Secrets Manager:
+    // http://USUARIO:CONTRASEÑA@rp.evomi.com:1000. Solo el worker puede leerla.
+    const downloadProxy = new secretsmanager.Secret(this, "DownloadProxy", {
+      secretName: `${prefix}/download-proxy`,
+      description: "Proxy residencial para descargar videos por enlace. Valor: http://USUARIO:CONTRASEÑA@host:puerto",
+      generateSecretString: { passwordLength: 32, excludePunctuation: true },
+      removalPolicy: props.stage === "production" ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
+    });
+
     const cluster = new ecs.Cluster(this, "WorkerCluster", { clusterName: `${prefix}-workers`, vpc: props.vpc });
     this.cluster = cluster;
     this.taskFamily = `${prefix}-worker`;
@@ -131,6 +141,7 @@ export class WorkerStack extends Stack {
         // ECS lee el secreto al arrancar cada worker (como el worker escala a 0,
         // una clave nueva se usa desde el siguiente video).
         OPENAI_API_KEY: ecs.Secret.fromSecretsManager(openAiKey),
+        DOWNLOAD_PROXY_URL: ecs.Secret.fromSecretsManager(downloadProxy),
         DB_USER: ecs.Secret.fromSecretsManager(dbSecret, "username"),
         DB_PASSWORD: ecs.Secret.fromSecretsManager(dbSecret, "password"),
       },
@@ -239,5 +250,6 @@ export class WorkerStack extends Stack {
 
     new CfnOutput(this, "QueueUrl", { value: this.queue.queueUrl });
     new CfnOutput(this, "OpenAiSecretName", { value: openAiKey.secretName });
+    new CfnOutput(this, "DownloadProxySecretName", { value: downloadProxy.secretName });
   }
 }

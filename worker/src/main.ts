@@ -4,7 +4,7 @@ import pino from "pino";
 import { loadProductConfig } from "@clipflow/shared";
 import { createDb, databaseUrlFromEnv } from "@clipflow/shared/db";
 import { OpenAIProvider } from "./ai/openai.js";
-import { loadWorkerConfig, looksLikeOpenAIKey } from "./config.js";
+import { loadWorkerConfig, looksLikeOpenAIKey, parseProxyUrl } from "./config.js";
 import { runConsumer } from "./consumer.js";
 import { createS3WorkerStorage } from "./storage.js";
 
@@ -31,6 +31,8 @@ const ai =
 const aiDisabledReason =
   config.AI_PROVIDER === "none" ? "IA desactivada por configuración" : "Falta la clave de OpenAI en Secrets Manager";
 
+const downloadProxyUrl = parseProxyUrl(config.DOWNLOAD_PROXY_URL);
+
 let stopping = false;
 const stop = (signal: string) => {
   log.info({ signal }, "apagando worker (termina el mensaje actual si puede)");
@@ -40,7 +42,14 @@ process.on("SIGTERM", () => stop("SIGTERM"));
 process.on("SIGINT", () => stop("SIGINT"));
 
 log.info(
-  { workerId, ai: ai ? ai.name : "desactivada", vision: config.AI_VISION_ENABLED, faces: config.FACE_TRACKING_ENABLED },
+  {
+    workerId,
+    ai: ai ? ai.name : "desactivada",
+    vision: config.AI_VISION_ENABLED,
+    faces: config.FACE_TRACKING_ENABLED,
+    // Solo el host del proxy: nunca el usuario ni la contraseña.
+    downloadProxy: downloadProxyUrl ? new URL(downloadProxyUrl).hostname : "desactivado",
+  },
   "worker iniciado",
 );
 try {
@@ -63,6 +72,7 @@ try {
       aiMaxAudioMinutes: config.OPENAI_MAX_AUDIO_MINUTES,
       faceTracking: config.FACE_TRACKING_ENABLED,
       ytDlpPath: config.YTDLP_PATH,
+      downloadProxyUrl,
       vision: {
         enabled: config.AI_VISION_ENABLED,
         intervalSeconds: config.AI_VISION_INTERVAL_SECONDS,

@@ -1,11 +1,19 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DownloadError, downloadFromUrl, downloadWithYtDlp, isPlatformUrl, ytDlpErrorMessage } from "./download.js";
+import {
+  DownloadError,
+  downloadFromUrl,
+  downloadWithYtDlp,
+  isPlatformUrl,
+  redactCredentials,
+  withStickySession,
+  ytDlpErrorMessage,
+} from "./download.js";
 
 /** yt-dlp instalado (en la imagen del worker sí; en CI puede no estar). */
 const YTDLP = process.env.YTDLP_PATH ?? "yt-dlp";
@@ -119,5 +127,96 @@ describe("plataformas (yt-dlp)", () => {
     expect(readFileSync(result.file).length).toBe(sample.length);
     expect(result.title).toBe("video");
     expect(progress.at(-1)).toBe(1);
+  });
+});
+
+describe("proxy residencial para plataformas que bloquean a AWS", () => {
+  /**
+   * yt-dlp falso: sin --proxy responde como YouTube a un servidor de nube ("not a bot"); con
+   * --proxy "descarga" y anota la URL del proxy que recibió.
+   */
+  function fakeYtDlp(name: string) {
+    const d = target(name);
+    const script = path.join(d, "yt-dlp.sh");
+    writeFileSync(
+      script,
+      [
+        "#!/bin/sh",
+        'out=""; proxy=""; sort=""; prev=""',
+        'for a in "$@"; do',
+        '  [ "$prev" = "-o" ] && out="$a"',
+        '  [ "$prev" = "--proxy" ] && proxy="$a"',
+        '  [ "$prev" = "-S" ] && sort="$a"',
+        '  prev="$a"',
+        "done",
+        'echo "call proxy=$proxy sort=$sort" >> "$(dirname "$0")/calls.log"',
+        'if [ -z "$proxy" ]; then echo "ERROR: [youtube] x: Sign in to confirm you are not a bot" >&2; exit 1; fi',
+        'file=$(echo "$out" | sed "s/%(ext)s/mp4/")',
+        'echo data > "$file"',
+        'echo "TITLE Video de prueba"',
+        'echo "FILE $file"',
+      ].join("\n"),
+    );
+    chmodSync(script, 0o755);
+    const work = target(`${name}-work`);
+    const calls = () => readFileSync(path.join(d, "calls.log"), "utf8").trim().split("\n");
+    return { script, work, calls };
+  }
+
+  it("YouTube va directo por el proxy, con sesión fija y hasta 720p", async () => {
+    const yt = fakeYtDlp("proxy-youtube");
+    const result = await downloadFromUrl("https://youtu.be/abc", yt.work, {
+      ...options(),
+      ytDlpPath: yt.script,
+      proxyUrl: "http://user:secreto@rp.evomi.com:1000",
+    });
+    expect(result).toMatchObject({ title: "Video de prueba", sizeBytes: 5 });
+    const calls = yt.calls();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatch(/proxy=http:\/\/user:secreto_session-[A-Za-z0-9]{8}_lifetime-60@rp\.evomi\.com:1000/);
+    expect(calls[0]).toContain("sort=res:720,");
+  });
+
+  it("otras plataformas: primero sin proxy (gratis) y, si las bloquean, una vez por el proxy", async () => {
+    const yt = fakeYtDlp("proxy-fallback");
+    const result = await downloadFromUrl("https://www.instagram.com/reel/abc/", yt.work, {
+      ...options(),
+      ytDlpPath: yt.script,
+      proxyUrl: "http://user:secreto@rp.evomi.com:1000",
+    });
+    expect(result.title).toBe("Video de prueba");
+    const calls = yt.calls();
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toBe("call proxy= sort=res:1080,vcodec:h264,acodec:aac");
+    expect(calls[1]).toMatch(/proxy=http:\/\/user:secreto_session-/);
+  });
+
+  it("sin proxy configurado se comporta como antes, y el detalle del error no lleva contraseñas", async () => {
+    const yt = fakeYtDlp("proxy-off");
+    const error = await downloadFromUrl("https://youtu.be/abc", yt.work, { ...options(), ytDlpPath: yt.script }).catch((e) => e);
+    expect(error).toBeInstanceOf(DownloadError);
+    expect(error).toMatchObject({ retryable: false, blocked: true });
+    expect(error.message).toMatch(/bloqueó la descarga/);
+    expect(error.detail).toMatch(/not a bot/);
+    expect(yt.calls()).toHaveLength(1);
+  });
+
+  it("sesión fija solo para Evomi y sin duplicarla", () => {
+    expect(withStickySession("http://u:p@rp.evomi.com:1000")).toMatch(/^http:\/\/u:p_session-[A-Za-z0-9]{8}_lifetime-60@rp\.evomi\.com:1000\/?$/);
+    expect(withStickySession("http://u:p_session-abcdefgh@rp.evomi.com:1000")).not.toMatch(/_lifetime/);
+    expect(withStickySession("http://u:p@proxy.example.com:8080")).toBe("http://u:p@proxy.example.com:8080/");
+  });
+
+  it("borra credenciales de los textos que van a los registros", () => {
+    expect(redactCredentials("Unable to connect to proxy http://user:clave_session-x@rp.evomi.com:1000 (407)")).toBe(
+      "Unable to connect to proxy http://***@rp.evomi.com:1000 (407)",
+    );
+  });
+
+  it("los fallos del propio proxy se reintentan y no se confunden con un bloqueo", () => {
+    const proxyDown = ytDlpErrorMessage("ERROR: Unable to download webpage: ('Unable to connect to proxy', OSError('Tunnel connection failed: 407'))");
+    expect(proxyDown).toMatchObject({ retryable: true });
+    expect(proxyDown.blocked).toBeFalsy();
+    expect(ytDlpErrorMessage("ERROR: [instagram] x: Requested content is not available, rate-limit reached or login required").blocked).toBe(true);
   });
 });

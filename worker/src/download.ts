@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { lookup as dnsLookup, type LookupAddress } from "node:dns";
 import { createWriteStream } from "node:fs";
 import { readdir, rm, stat } from "node:fs/promises";
@@ -23,6 +24,10 @@ export class DownloadError extends Error {
   constructor(
     message: string,
     readonly retryable: boolean,
+    /** La plataforma bloqueó a nuestro servidor (vale la pena reintentar con el proxy). */
+    readonly blocked = false,
+    /** Detalle técnico para los registros (sin contraseñas); nunca se muestra al usuario. */
+    readonly detail?: string,
   ) {
     super(message);
     this.name = "DownloadError";
@@ -62,6 +67,11 @@ export interface DownloadOptions {
   onProgress?: (fraction: number) => void;
   /** Solo para tests: hosts permitidos aunque sean locales. */
   allowHosts?: string[];
+  /**
+   * Proxy residencial (http://usuario:contraseña@host:puerto) para plataformas que bloquean a
+   * los servidores de nube. Se usa solo cuando hace falta (ver `downloadWithYtDlp`).
+   */
+  proxyUrl?: string | null;
 }
 
 export interface Downloaded {
@@ -85,12 +95,17 @@ export async function downloadFromUrl(url: string, dir: string, options: Downloa
 // ---------------------------------------------------------------------------
 
 /** Traduce los errores de yt-dlp a mensajes claros. */
-export function ytDlpErrorMessage(stderr: string): { message: string; retryable: boolean } {
+export function ytDlpErrorMessage(stderr: string): { message: string; retryable: boolean; blocked?: boolean } {
   const s = stderr.toLowerCase();
+  // Fallos del propio proxy (credenciales, saldo agotado, caída): no son culpa del video.
+  if (s.includes("proxy") || s.includes("tunnel connection failed") || s.includes("http error 407")) {
+    return { message: "Nuestro servicio de descarga no respondió. Lo intentaremos de nuevo.", retryable: true };
+  }
   if ((s.includes("confirm you") && s.includes("bot")) || s.includes("http error 403")) {
     return {
       message: "La plataforma bloqueó la descarga desde nuestros servidores. Descarga el video y súbelo como archivo.",
       retryable: false,
+      blocked: true,
     };
   }
   if (
@@ -103,7 +118,9 @@ export function ytDlpErrorMessage(stderr: string): { message: string; retryable:
     s.includes("age-restricted") ||
     s.includes("confirm your age")
   ) {
-    return { message: "Este video es privado o pide iniciar sesión, así que no se puede descargar.", retryable: false };
+    // Instagram, Vimeo y otras piden "iniciar sesión" a los servidores de nube aunque el video sea
+    // público: con el proxy se reintenta (si de verdad es privado, falla igual y casi sin costo).
+    return { message: "Este video es privado o pide iniciar sesión, así que no se puede descargar.", retryable: false, blocked: true };
   }
   // yt-dlp no dice cuál de los dos filtros falló (duración o en vivo).
   if (s.includes("does not pass filter")) {
@@ -120,15 +137,65 @@ export function ytDlpErrorMessage(stderr: string): { message: string; retryable:
     return {
       message: "La plataforma no permitió descargar este video desde nuestros servidores. Descárgalo y súbelo como archivo.",
       retryable: false,
+      blocked: true,
     };
   }
-  if (s.includes("timed out") || s.includes("connection") || s.includes("http error 5") || s.includes("http error 429")) {
+  if (s.includes("http error 429") || s.includes("rate-limit") || s.includes("rate limit")) {
+    return { message: "La plataforma no respondió. Lo intentaremos de nuevo.", retryable: true, blocked: true };
+  }
+  if (s.includes("timed out") || s.includes("connection") || s.includes("http error 5")) {
     return { message: "La plataforma no respondió. Lo intentaremos de nuevo.", retryable: true };
   }
   return { message: "No pudimos descargar el video de ese enlace.", retryable: false };
 }
 
+/** Plataformas que bloquean SIEMPRE a los servidores de nube: van directo por el proxy. */
+const PROXY_FIRST_DOMAINS = ["youtube.com", "youtu.be"];
+
+/**
+ * Descarga con yt-dlp. Con proxy configurado:
+ * - YouTube va directo por el proxy (sin él siempre bloquea);
+ * - el resto se intenta primero sin proxy (gratis) y, si la plataforma nos bloquea, se reintenta
+ *   una vez por el proxy.
+ * Por el proxy se descarga hasta 720p: se paga por GB y para clips verticales sobra.
+ */
 export async function downloadWithYtDlp(url: string, dir: string, options: DownloadOptions): Promise<Omit<Downloaded, "sizeBytes">> {
+  const proxy = options.proxyUrl ? withStickySession(options.proxyUrl) : null;
+  if (!proxy) return runYtDlp(url, dir, options, null);
+  const host = new URL(url).hostname.toLowerCase();
+  if (PROXY_FIRST_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`))) return runYtDlp(url, dir, options, proxy);
+  try {
+    return await runYtDlp(url, dir, options, null);
+  } catch (err) {
+    if (!(err instanceof DownloadError) || !err.blocked) throw err;
+    for (const leftover of (await readdir(dir)).filter((f) => f.startsWith("source."))) {
+      await rm(path.join(dir, leftover), { force: true });
+    }
+    return runYtDlp(url, dir, options, proxy);
+  }
+}
+
+/**
+ * Misma IP durante toda la descarga: YouTube ata el enlace del video a la IP que lo pidió, y un
+ * proxy que rota la IP en cada petición lo rompería. En Evomi la sesión fija se pide agregando
+ * `_session-<8 caracteres>` a la contraseña (dura 60 min). Otros proveedores: pegar la URL ya
+ * con su sesión fija.
+ */
+export function withStickySession(proxyUrl: string): string {
+  const url = new URL(proxyUrl);
+  if (url.hostname.endsWith("evomi.com") && url.password && !decodeURIComponent(url.password).includes("_session-")) {
+    const session = randomBytes(6).toString("base64url").replace(/[^A-Za-z0-9]/g, "x").slice(0, 8);
+    url.password = `${url.password}_session-${session}_lifetime-60`;
+  }
+  return url.toString();
+}
+
+/** Quita usuarios y contraseñas de cualquier URL dentro de un texto (para los registros). */
+export function redactCredentials(text: string): string {
+  return text.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1***@");
+}
+
+async function runYtDlp(url: string, dir: string, options: DownloadOptions, proxy: string | null): Promise<Omit<Downloaded, "sizeBytes">> {
   const args = [
     "--no-playlist",
     "--no-warnings",
@@ -146,7 +213,8 @@ export async function downloadWithYtDlp(url: string, dir: string, options: Downl
     "-f",
     "bv*+ba/b",
     "-S",
-    "res:1080,vcodec:h264,acodec:aac",
+    proxy ? "res:720,vcodec:h264,acodec:aac" : "res:1080,vcodec:h264,acodec:aac",
+    ...(proxy ? ["--proxy", proxy] : []),
     "--merge-output-format",
     "mp4",
     "--match-filters",
@@ -197,7 +265,8 @@ export async function downloadWithYtDlp(url: string, dir: string, options: Downl
       if (options.signal?.aborted) return reject(new DOMException("Cancelado", "AbortError"));
       if (code === 0) return resolve();
       const mapped = ytDlpErrorMessage(stderr);
-      reject(new DownloadError(mapped.message, mapped.retryable));
+      const lastLine = redactCredentials(stderr.trim().split("\n").pop() ?? "").slice(0, 300);
+      reject(new DownloadError(mapped.message, mapped.retryable, mapped.blocked ?? false, `${proxy ? "[proxy] " : ""}${lastLine}`));
     });
   });
   // yt-dlp no descarga nada si el video no pasa los filtros (duración, en vivo) pero termina bien.
