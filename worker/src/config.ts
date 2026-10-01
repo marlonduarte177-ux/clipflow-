@@ -15,6 +15,11 @@ const EnvSchema = z.object({
   FFPROBE_PATH: z.string().default("ffprobe"),
   /** yt-dlp para importar videos por enlace (YouTube, TikTok…). */
   YTDLP_PATH: z.string().default("yt-dlp"),
+  /**
+   * Proxy residencial para plataformas que bloquean a AWS (YouTube…). Viene de Secrets Manager;
+   * mientras tenga el valor de relleno (no es una URL), el proxy queda apagado.
+   */
+  DOWNLOAD_PROXY_URL: z.string().optional(),
   /** Tiempo que un mensaje queda oculto a otros workers; se renueva mientras se procesa. */
   SQS_VISIBILITY_SECONDS: z.coerce.number().int().min(60).max(43_200).default(300),
   /** Costo estimado por hora del worker (Fargate 4 vCPU / 8 GB x86 en us-east-1 ≈ 0.1975). */
@@ -64,4 +69,16 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
 /** Una clave de OpenAI tiene el formato "sk-...". El valor inicial del secreto en AWS no lo tiene. */
 export function looksLikeOpenAIKey(value: string | undefined): value is string {
   return typeof value === "string" && /^sk-[A-Za-z0-9_-]{20,}$/.test(value.trim());
+}
+
+/** URL de proxy válida (http, https o socks5 con host) o null si es el valor de relleno. */
+export function parseProxyUrl(value: string | undefined): string | null {
+  const v = value?.trim();
+  if (!v) return null;
+  try {
+    const url = new URL(v);
+    return ["http:", "https:", "socks5:", "socks5h:"].includes(url.protocol) && url.hostname ? v : null;
+  } catch {
+    return null;
+  }
 }
