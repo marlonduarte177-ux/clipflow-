@@ -13,6 +13,8 @@ const EnvSchema = z.object({
   WORKER_TMP_DIR: z.string().default("/tmp/clipflow"),
   FFMPEG_PATH: z.string().default("ffmpeg"),
   FFPROBE_PATH: z.string().default("ffprobe"),
+  /** yt-dlp para importar videos por enlace (YouTube, TikTok…). */
+  YTDLP_PATH: z.string().default("yt-dlp"),
   /** Tiempo que un mensaje queda oculto a otros workers; se renueva mientras se procesa. */
   SQS_VISIBILITY_SECONDS: z.coerce.number().int().min(60).max(43_200).default(300),
   /** Costo estimado por hora del worker (Fargate 4 vCPU / 8 GB x86 en us-east-1 ≈ 0.1975). */

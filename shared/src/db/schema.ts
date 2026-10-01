@@ -42,6 +42,7 @@ const updatedAt = () =>
 
 export const videoStatus = pgEnum("video_status", [
   "pending_upload", // registro creado, el navegador está subiendo a S3
+  "importing", // se descarga desde un enlace (lo hace el worker)
   "uploaded", // S3 confirmó el archivo completo
   "ready", // validado con ffprobe, listo para procesar
   "rejected", // no es un video válido o supera los límites
@@ -53,6 +54,7 @@ export const jobType = pgEnum("job_type", ["analyze_video", "render_clip", "expo
 export const jobStatus = pgEnum("job_status", ["queued", "processing", "completed", "failed", "cancelled"]);
 
 export const jobStage = pgEnum("job_stage", [
+  "downloading", // solo videos importados por enlace
   "preparing",
   "analyzing",
   "detecting_moments",
@@ -158,6 +160,10 @@ export const videos = pgTable(
     /** Resultado de ffprobe (codecs, fps, etc.). */
     probe: jsonb("probe"),
     rejectionReason: text("rejection_reason"),
+    /** Enlace de origen (videos importados por enlace). */
+    sourceUrl: text("source_url"),
+    /** Cuándo el usuario confirmó tener derechos o permiso para usar el video del enlace. */
+    rightsConfirmedAt: timestamp("rights_confirmed_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     uploadedAt: timestamp("uploaded_at", { withTimezone: true }),
@@ -171,7 +177,10 @@ export const videos = pgTable(
       foreignColumns: [projects.id, projects.userId],
     }).onDelete("cascade"),
     index("videos_project_idx").on(t.projectId),
-    check("videos_size_positive", sql`${t.sizeBytes} > 0`),
+    // Un video que se importa por enlace no tiene tamaño (0) hasta descargarse, ni si la descarga
+    // falla (queda rechazado). (status::text: un valor nuevo de un enum no se puede usar en la
+    // misma transacción que lo crea.)
+    check("videos_size_positive", sql`${t.sizeBytes} > 0 or ${t.status}::text in ('importing', 'rejected')`),
   ],
 );
 

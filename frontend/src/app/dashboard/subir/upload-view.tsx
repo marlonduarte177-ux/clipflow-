@@ -3,15 +3,18 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
+  checkImportUrl,
   DEFAULT_PRODUCT_CONFIG,
   resolveVideoMimeType,
+  type ImportVideoResponse,
   type ProjectDto,
   type ProjectListResponse,
   type SubtitleStyle,
   type VideoDto,
 } from "@clipflow/shared";
 import { DEFAULT_DURATION, DurationPicker, SubtitlePicker } from "@/components/clip-options";
-import { CheckIcon, CloseIcon, DownIcon, UploadIcon } from "@/components/icons";
+import { CheckIcon, CloseIcon, DownIcon, LinesIcon, UploadIcon } from "@/components/icons";
+import { RightsDialog } from "@/components/rights-dialog";
 import { Alert } from "@/components/ui";
 import { apiConfigured, apiFetch, formatBytes, formatDuration } from "@/lib/api";
 import { readVideoDuration, uploadVideo, type UploadProgress } from "@/lib/uploader";
@@ -40,6 +43,11 @@ export function UploadView() {
   const [clipSeconds, setClipSeconds] = useState(DEFAULT_DURATION);
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>("highlight");
   const [confirmed, setConfirmed] = useState(false);
+  // Subir un archivo o importar desde un enlace (lo descarga el worker).
+  const [source, setSource] = useState<"file" | "link">("file");
+  const [link, setLink] = useState("");
+  const [askRights, setAskRights] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const videoRef = useRef<VideoDto | null>(null);
@@ -139,6 +147,32 @@ export function UploadView() {
     }
   }
 
+  function onImportClick() {
+    const checked = checkImportUrl(link);
+    if (!checked.ok) {
+      setError(checked.message);
+      return;
+    }
+    setError("");
+    setAskRights(true);
+  }
+
+  async function onConfirmImport() {
+    setImporting(true);
+    try {
+      const project = await ensureProject();
+      const { video } = await apiFetch<ImportVideoResponse>("/videos/import", {
+        method: "POST",
+        body: { projectId: project, url: link.trim(), rightsConfirmed: true, clipDurationSeconds: clipSeconds, subtitleStyle },
+      });
+      router.push(`/dashboard/videos/${video.id}`);
+    } catch (err) {
+      setError((err as Error).message);
+      setAskRights(false);
+      setImporting(false);
+    }
+  }
+
   function onCreateClips() {
     setConfirmed(true);
     setPhase((p) => (p === "uploaded" ? "starting" : p));
@@ -171,7 +205,55 @@ export function UploadView() {
         </p>
       </div>
 
-      {file ? (
+      {!file ? (
+        <div role="tablist" aria-label="Origen del video" className="grid grid-cols-2 gap-1 rounded-2xl border border-line bg-surface p-1">
+          {(
+            [
+              ["file", "Archivo"],
+              ["link", "Enlace"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={source === id}
+              onClick={() => {
+                setSource(id);
+                setError("");
+              }}
+              className={`h-10 rounded-xl text-sm font-semibold transition ${source === id ? "bg-accent text-black" : "text-muted hover:text-foreground"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {source === "link" && !file ? (
+        <div className="space-y-2.5 rounded-[22px] border border-line bg-surface p-4">
+          <label htmlFor="video-link" className="flex items-center gap-2 text-[15px] font-semibold">
+            <LinesIcon size={18} className="text-accent" />
+            Enlace del video
+          </label>
+          <input
+            id="video-link"
+            type="url"
+            inputMode="url"
+            autoComplete="off"
+            value={link}
+            onChange={(e) => {
+              setLink(e.target.value);
+              setError("");
+            }}
+            placeholder="https://www.youtube.com/watch?v=…"
+            className="h-12 w-full rounded-xl border border-line bg-background px-3.5 text-base outline-none focus:border-accent"
+          />
+          <p className="text-xs leading-[17px] text-muted">
+            YouTube, TikTok, Instagram, Facebook, X, Vimeo y más, o un enlace directo a un archivo de video. Lo descargamos
+            nosotros: no gasta tus datos. Hasta {formatDuration(LIMITS.maxDurationSeconds)}.
+          </p>
+        </div>
+      ) : file ? (
         <div className="flex items-center gap-3.5 rounded-[18px] border border-line bg-surface p-3">
           <div className="grid h-[76px] w-14 shrink-0 place-items-center rounded-[10px] bg-[#1d2433] text-accent">
             {phase === "uploaded" || phase === "starting" ? <CheckIcon size={24} strokeWidth={2.6} /> : <UploadIcon size={22} />}
@@ -207,6 +289,9 @@ export function UploadView() {
           <input type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska,.mkv" onChange={onFile} className="sr-only" />
         </label>
       )}
+      {source === "file" && !file ? (
+        <p className="-mt-3 text-center text-xs text-muted">Al subir un video confirmas que es tuyo o que tienes permiso para usarlo.</p>
+      ) : null}
 
       <Alert kind="error">{error}</Alert>
 
@@ -240,19 +325,23 @@ export function UploadView() {
       <div className="fixed inset-x-0 bottom-0 z-20 border-t border-[#1a1e28] bg-background px-5 pb-[104px] pt-3 sm:static sm:border-0 sm:bg-transparent sm:p-0">
         <div className="mx-auto max-w-xl space-y-2">
           <button
-            onClick={onCreateClips}
-            disabled={!file || confirmed || phase === "error"}
+            onClick={source === "link" && !file ? onImportClick : onCreateClips}
+            disabled={source === "link" && !file ? !link.trim() || importing : !file || confirmed || phase === "error"}
             className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-accent text-[17px] font-bold text-black transition hover:brightness-105 disabled:opacity-50"
           >
             {confirmed ? (phase === "uploading" ? "Empieza al terminar la subida" : "Empezando…") : "Crear clips"}
           </button>
           <p className="text-center text-xs text-muted">
-            {file && phase === "uploading"
-              ? "No bloquees el celular hasta que termine de subir."
-              : "Puedes cerrar la página cuando empiece el procesamiento."}
+            {source === "link" && !file
+              ? "Lo descargamos nosotros: puedes cerrar la página cuando empiece."
+              : file && phase === "uploading"
+                ? "No bloquees el celular hasta que termine de subir."
+                : "Puedes cerrar la página cuando empiece el procesamiento."}
           </p>
         </div>
       </div>
+
+      {askRights ? <RightsDialog url={link} busy={importing} onCancel={() => setAskRights(false)} onConfirm={onConfirmImport} /> : null}
     </div>
   );
 }

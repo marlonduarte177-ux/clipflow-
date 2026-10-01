@@ -4,6 +4,7 @@ import path from "node:path";
 import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { Upload } from "@aws-sdk/lib-storage";
 
 /** Lo que el worker necesita de S3. */
 export interface WorkerStorage {
@@ -28,6 +29,17 @@ export function createS3WorkerStorage(options: { bucket: string; region: string;
     },
     async upload(file, key, contentType) {
       const { size } = await stat(file);
+      if (size > MULTIPART_THRESHOLD) {
+        // Archivos grandes (p. ej. un video importado por enlace): en partes. Una sola petición
+        // de S3 no acepta más de 5 GB.
+        await new Upload({
+          client: s3,
+          params: { Bucket, Key: key, Body: createReadStream(file), ContentType: contentType, ServerSideEncryption: "AES256" },
+          partSize: 64 * 1024 * 1024,
+          queueSize: 4,
+        }).done();
+        return;
+      }
       await s3.send(
         new PutObjectCommand({
           Bucket,
@@ -41,6 +53,9 @@ export function createS3WorkerStorage(options: { bucket: string; region: string;
     },
   };
 }
+
+/** Desde este tamaño se sube en partes. */
+const MULTIPART_THRESHOLD = 256 * 1024 * 1024;
 
 /** Almacenamiento en una carpeta local (tests y desarrollo sin AWS). */
 export function createLocalStorage(root: string): WorkerStorage {

@@ -82,6 +82,83 @@ export function planUploadParts(sizeBytes: number): { partSizeBytes: number; par
 
 export const ProcessVideoSchema = z.object(ProcessingOptions);
 
+/** Importar un video desde un enlace (lo descarga el worker). */
+export const ImportVideoSchema = z.object({
+  projectId: z.uuid("Proyecto inválido"),
+  url: z.string().trim().min(1, "Pega el enlace del video").max(2048, "El enlace es demasiado largo"),
+  /** El usuario confirma que el video es suyo o que tiene permiso de quien tenga los derechos. */
+  rightsConfirmed: z.literal(true, "Debes confirmar que tienes derechos o permiso para usar el video"),
+  ...ProcessingOptions,
+});
+
+/**
+ * Revisa un enlace antes de aceptarlo: solo http(s), sin usuario/contraseña y sin direcciones
+ * internas escritas a mano (el worker vuelve a comprobar la IP real al descargar).
+ * Devuelve el enlace normalizado o un mensaje de error.
+ */
+export function checkImportUrl(raw: string): { ok: true; url: string } | { ok: false; message: string } {
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    return { ok: false, message: "Ese enlace no es válido. Cópialo completo, empezando por https://" };
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    return { ok: false, message: "Solo se aceptan enlaces que empiecen con https:// o http://" };
+  }
+  if (url.username || url.password) return { ok: false, message: "El enlace no puede incluir usuario ni contraseña." };
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".internal") || isPrivateAddress(host)) {
+    return { ok: false, message: "Ese enlace apunta a una dirección privada." };
+  }
+  if (!host.includes(".") && !host.includes(":")) return { ok: false, message: "Ese enlace no es válido." };
+  url.hash = "";
+  return { ok: true, url: url.toString() };
+}
+
+/** true si es una IP (v4 o v6) privada, local, reservada o de metadatos de la nube. */
+export function isPrivateAddress(address: string): boolean {
+  const a = address.toLowerCase();
+  // IPv4 dentro de IPv6 (::ffff:127.0.0.1, o como la normaliza el navegador: ::ffff:7f00:1).
+  let v4 = a.startsWith("::ffff:") ? a.slice(7) : a;
+  const hex = v4.match(/^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (a.startsWith("::ffff:") && hex) {
+    const hi = parseInt(hex[1]!, 16);
+    const lo = parseInt(hex[2]!, 16);
+    v4 = `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
+  }
+  const m = v4.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (m) {
+    const [o1, o2] = [Number(m[1]), Number(m[2])];
+    return (
+      o1 === 0 ||
+      o1 === 10 ||
+      o1 === 127 ||
+      (o1 === 100 && o2 >= 64 && o2 <= 127) || // CGNAT
+      (o1 === 169 && o2 === 254) || // enlace local y metadatos (169.254.169.254, 169.254.170.2)
+      (o1 === 172 && o2 >= 16 && o2 <= 31) ||
+      (o1 === 192 && o2 === 168) ||
+      (o1 === 192 && o2 === 0) ||
+      (o1 === 198 && (o2 === 18 || o2 === 19)) ||
+      o1 >= 224 // multicast y reservadas
+    );
+  }
+  if (a.includes(":")) {
+    return (
+      a === "::" ||
+      a === "::1" ||
+      a.startsWith("fc") ||
+      a.startsWith("fd") || // privadas (ULA), incluye fd00:ec2::254 de AWS
+      a.startsWith("fe8") ||
+      a.startsWith("fe9") ||
+      a.startsWith("fea") ||
+      a.startsWith("feb") || // enlace local
+      a.startsWith("ff") // multicast
+    );
+  }
+  return false;
+}
+
 export const ClipUpdateSchema = z.object({
   status: z.enum(["generated", "approved", "discarded"]).optional(),
   title: z.string().trim().max(120).nullish(),

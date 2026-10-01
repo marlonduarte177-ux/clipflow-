@@ -15,6 +15,7 @@ En construcción por fases. Ver `docs/`:
 - [Fases 6 y 7 — Cola de trabajos y procesador de video](docs/fase-6-7-procesamiento.md)
 - [Fase 8 — Análisis con IA (OpenAI)](docs/fase-8-ia-openai.md)
 - [Interfaz para celular y subtítulos en el video](docs/interfaz-movil.md)
+- [Importar videos por enlace (con aviso de derechos de autor)](docs/importar-por-enlace.md)
 
 ## Estructura
 

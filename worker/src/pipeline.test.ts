@@ -1,11 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { claimJob, failJob, schema, type DbHandle } from "@clipflow/shared/db";
 import { createTestDb } from "@clipflow/shared/db/testing";
+import { DownloadError } from "./download.js";
 import { JobError, processAnalyzeJob } from "./pipeline.js";
 import { makeDeps, makeGameplayVideo, makeLetterboxedVideo, makeSampleVideo, seedVideoJob } from "./test-helpers.js";
 
@@ -156,5 +157,64 @@ describe("gameplay sin voz", () => {
     expect(best.startSeconds).toBeGreaterThanOrEqual(28);
     expect(best.endSeconds).toBeLessThanOrEqual(52);
     expect(best.scoreBreakdown).toHaveProperty("action");
+  });
+});
+
+describe("videos importados por enlace", () => {
+  it("descarga el enlace, lo guarda como original, usa el título como nombre y genera clips", async () => {
+    const db = h!.db;
+    const { job, video } = await seedVideoJob(db, root, { sample, importUrl: "https://www.youtube.com/watch?v=abc" });
+    const calls: string[] = [];
+    const deps = {
+      ...makeDeps(db, root, path.join(root, "work")),
+      download: async (url: string, dir: string, options: { onProgress?: (f: number) => void }) => {
+        calls.push(url);
+        options.onProgress?.(0.5);
+        const file = path.join(dir, "source.mp4");
+        execFileSync("cp", [sample, file]);
+        return { file, sizeBytes: statSync(file).size, title: "Mi entrevista: parte 1" };
+      },
+    };
+    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    expect(calls).toEqual(["https://www.youtube.com/watch?v=abc"]);
+    expect(result.clipCount).toBeGreaterThan(0);
+
+    const [row] = await db.select().from(schema.videos).where(eq(schema.videos.id, video.id));
+    expect(row).toMatchObject({ status: "ready", originalFilename: "Mi entrevista: parte 1.mp4", mimeType: "video/mp4" });
+    expect(row!.sizeBytes).toBe(statSync(sample).size);
+    // El original quedó en S3 (aquí, almacenamiento local) para poder reprocesar sin volver a descargar.
+    expect(statSync(path.join(root, video.s3Key)).size).toBe(statSync(sample).size);
+    const usage = await db.select().from(schema.usage).where(eq(schema.usage.videoId, video.id));
+    expect(usage.find((u) => u.metric === "storage_bytes")).toMatchObject({ details: { event: "import_completed" } });
+  });
+
+  it("si el enlace no se puede descargar, el video queda rechazado con un mensaje claro", async () => {
+    const db = h!.db;
+    const { job, video } = await seedVideoJob(db, root, { sample, importUrl: "https://www.youtube.com/watch?v=privado" });
+    const deps = {
+      ...makeDeps(db, root, path.join(root, "work")),
+      download: async () => {
+        throw new DownloadError("Este video es privado o pide iniciar sesión, así que no se puede descargar.", false);
+      },
+    };
+    const error = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps).catch((e) => e);
+    expect(error).toMatchObject({ code: "import_failed", retryable: false });
+    const [row] = await db.select().from(schema.videos).where(eq(schema.videos.id, video.id));
+    expect(row).toMatchObject({ status: "rejected", rejectionReason: "Este video es privado o pide iniciar sesión, así que no se puede descargar." });
+  });
+
+  it("un corte temporal se reintenta sin rechazar el video", async () => {
+    const db = h!.db;
+    const { job, video } = await seedVideoJob(db, root, { sample, importUrl: "https://example.com/v.mp4" });
+    const deps = {
+      ...makeDeps(db, root, path.join(root, "work")),
+      download: async () => {
+        throw new DownloadError("La descarga se cortó. Lo intentaremos de nuevo.", true);
+      },
+    };
+    const error = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps).catch((e) => e);
+    expect(error).toMatchObject({ code: "import_failed", retryable: true });
+    const [row] = await db.select().from(schema.videos).where(eq(schema.videos.id, video.id));
+    expect(row!.status).toBe("importing");
   });
 });

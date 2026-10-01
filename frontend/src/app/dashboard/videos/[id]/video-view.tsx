@@ -125,8 +125,14 @@ export function VideoView({ videoId }: { videoId: string }) {
   const result = job?.status === "completed" ? job.result : null;
   const language = languageName(result?.language ?? transcript?.language);
   const style = job?.params.subtitleStyle ?? "highlight";
+  let origin: string | null = null;
+  try {
+    origin = video.sourceUrl ? `desde ${new URL(video.sourceUrl).hostname.replace(/^www\./, "")}` : null;
+  } catch {
+    origin = null;
+  }
   const summary = [
-    job?.status === "completed" ? `${counts.all} clips` : formatBytes(video.sizeBytes),
+    job?.status === "completed" ? `${counts.all} clips` : video.sizeBytes > 0 ? formatBytes(video.sizeBytes) : origin,
     job?.params.clipDurationSeconds ? `de ${job.params.clipDurationSeconds} s` : formatDuration(video.durationSeconds),
     result?.ai === "used" && style !== "none" ? `subtítulos en ${(language ?? "su idioma").toLowerCase()}` : null,
   ]
@@ -161,7 +167,7 @@ export function VideoView({ videoId }: { videoId: string }) {
 
       {job && isActive(job) ? (
         <div className="mx-auto max-w-xl space-y-3">
-          <JobProgressPanel job={job} subtitles={style !== "none"} />
+          <JobProgressPanel job={job} subtitles={style !== "none"} imported={Boolean(video.sourceUrl)} />
           <button onClick={() => jobAction("cancel")} className="h-11 w-full text-sm text-muted underline">
             Cancelar procesamiento
           </button>
