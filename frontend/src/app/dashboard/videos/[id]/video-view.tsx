@@ -163,7 +163,8 @@ export function VideoView({ videoId }: { videoId: string }) {
       </header>
 
       <Alert kind="error">{error}</Alert>
-      {video.rejectionReason ? <Alert kind="error">{video.rejectionReason}</Alert> : null}
+      {/* Si hay un procesamiento en curso o fallido, su tarjeta ya explica qué pasa. */}
+      {video.rejectionReason && (!job || job.status === "completed") ? <Alert kind="error">{video.rejectionReason}</Alert> : null}
 
       {job && isActive(job) ? (
         <div className="mx-auto max-w-xl space-y-3">

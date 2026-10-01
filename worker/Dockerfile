@@ -19,12 +19,13 @@ RUN ort=node_modules/onnxruntime-node/bin/napi-v6 \
 
 FROM node:22-bookworm-slim
 # FFmpeg y, para importar videos por enlace, yt-dlp (versión fijada; se actualiza cambiando
-# YTDLP_VERSION: las plataformas cambian seguido). Usa Node (ya instalado) para YouTube.
+# YTDLP_VERSION: las plataformas cambian seguido). Usa Node (ya instalado) para YouTube y
+# curl-cffi para "parecerse" a un navegador real, que TikTok exige.
 ARG YTDLP_VERSION=2026.8.19
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ffmpeg python3 python3-venv ca-certificates \
   && python3 -m venv /opt/yt-dlp \
-  && /opt/yt-dlp/bin/pip install --no-cache-dir "yt-dlp[default]==${YTDLP_VERSION}" \
+  && /opt/yt-dlp/bin/pip install --no-cache-dir "yt-dlp[default,curl-cffi]==${YTDLP_VERSION}" \
   && ln -s /opt/yt-dlp/bin/yt-dlp /usr/local/bin/yt-dlp \
   && yt-dlp --version \
   && rm -rf /var/lib/apt/lists/*

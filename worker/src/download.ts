@@ -116,6 +116,12 @@ export function ytDlpErrorMessage(stderr: string): { message: string; retryable:
   if (s.includes("unsupported url") || s.includes("no video formats") || s.includes("unavailable") || s.includes("http error 404")) {
     return { message: "No encontramos un video en ese enlace (puede que se haya borrado).", retryable: false };
   }
+  if (s.includes("unexpected response from webpage") || s.includes("ip address is blocked") || s.includes("impersonat")) {
+    return {
+      message: "La plataforma no permitió descargar este video desde nuestros servidores. Descárgalo y súbelo como archivo.",
+      retryable: false,
+    };
+  }
   if (s.includes("timed out") || s.includes("connection") || s.includes("http error 5") || s.includes("http error 429")) {
     return { message: "La plataforma no respondió. Lo intentaremos de nuevo.", retryable: true };
   }

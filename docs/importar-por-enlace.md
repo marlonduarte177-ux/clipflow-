@@ -12,8 +12,10 @@ Antes de importar se abre una ventana obligatoria:
   - reutilizar contenido ajeno puede infringir derechos de autor y las reglas de la plataforma;
   - el usuario es responsable de lo que importa;
   - se guardan el enlace y la fecha de la confirmación.
-- **Casilla obligatoria:** "Confirmo que el video es mío o que tengo permiso de quien tiene los
-  derechos para usarlo". Sin marcarla, el botón "Importar video" no se activa.
+- **Aceptar es tocar el botón:** el botón dice "Acepto, importar" y la ventana aclara que al tocarlo
+  el usuario confirma que el video es suyo o que tiene permiso.
+  - Al principio había además una casilla obligatoria; se quitó a pedido del dueño del producto
+    (01/10/2026).
 - **La API también la exige** (`rightsConfirmed: true`) y guarda `videos.rights_confirmed_at` y
   `videos.source_url`.
 - **Al subir un archivo** se muestra una nota corta: "Al subir un video confirmas que es tuyo o que
@@ -29,10 +31,14 @@ varios países.
    curso (3, sumando subidas e importaciones). Crea el video en estado `importing` y su trabajo. La
    API **nunca descarga nada**.
 2. **El worker descarga** (nueva etapa `downloading`; la barra muestra "Descargando el video"):
-   - **Plataformas conocidas:** con **yt-dlp** (versión fijada `2026.8.19` en `worker/Dockerfile`).
+   - **Plataformas conocidas:** con **yt-dlp** (versión fijada `2026.8.19` en `worker/Dockerfile`),
+     con `curl-cffi` para "parecerse" a un navegador real.
      - Hasta 1080p, prefiriendo H.264/AAC; todo en un `.mp4`.
      - Rechaza transmisiones en vivo y videos de más de 3 h.
      - Usa Node (ya en la imagen) como intérprete de JavaScript, que YouTube exige.
+     - TikTok exige la imitación de navegador. Sin `curl-cffi`, en la primera prueba real
+       (01/10/2026) TikTok respondió "Unexpected response". Con `curl-cffi` se probó un enlace
+       `vt.tiktok.com`: lee título y duración y descarga H.264 + AAC.
    - **Otros enlaces:** deben ser un archivo de video directo. Si es una página web, se explica que
      hay que subirlo como archivo.
 3. **Guarda el original** en S3 (`originals/…`; en partes si pesa más de 256 MB) y usa el título
@@ -41,6 +47,8 @@ varios países.
    - un error definitivo (privado, bloqueado, demasiado largo, no es un video) deja el video
      **rechazado** con el motivo en lenguaje simple;
    - un corte temporal se **reintenta** solo.
+   - **"Reintentar"** en un enlace que no se pudo descargar lo **vuelve a descargar** (antes buscaba un
+     archivo que nunca existió). Mientras se reintenta, la web no muestra el error viejo.
 
 ## Seguridad (SSRF)
 
@@ -98,12 +106,13 @@ El original ocupa S3 igual que un video subido y se borra al eliminar el video.
 - **Procesador:**
   - un video importado se descarga, queda como original con su título y genera clips;
   - un error definitivo lo rechaza con el motivo;
-  - un corte temporal se reintenta.
+  - un corte temporal se reintenta;
+  - reintentar un enlace rechazado lo vuelve a descargar.
 - **Imagen:** la instalación de yt-dlp se probó en Debian bookworm (la base de la imagen).
 - **Web (capturas reales):**
   - pestaña Enlace;
   - el aviso de enlace interno;
-  - la ventana de derechos con el botón bloqueado hasta marcar la casilla;
+  - la ventana de derechos;
   - la importación envía las opciones elegidas;
   - la pantalla "Descargando el video";
   - el estado en Mis videos.

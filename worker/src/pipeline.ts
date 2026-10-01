@@ -216,7 +216,13 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
 
     // 0. Video importado por enlace: se descarga aquí (nunca en la API) y se guarda en S3.
     let input: string;
-    if (video.status === "importing") {
+    // También al REINTENTAR un enlace que no se pudo descargar (quedó rechazado y sin archivo):
+    // se vuelve a descargar en lugar de buscar un original que nunca existió.
+    const retryImport = video.status === "rejected" && Boolean(video.sourceUrl) && video.sizeBytes === 0;
+    if (video.status === "importing" || retryImport) {
+      if (retryImport) {
+        await deps.db.update(videos).set({ status: "importing", rejectionReason: null }).where(eq(videos.id, video.id));
+      }
       stages = IMPORT_STAGES;
       input = await importFromLink(video, dir);
     } else {

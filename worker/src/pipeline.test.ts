@@ -203,6 +203,30 @@ describe("videos importados por enlace", () => {
     expect(row).toMatchObject({ status: "rejected", rejectionReason: "Este video es privado o pide iniciar sesión, así que no se puede descargar." });
   });
 
+  it("reintentar un enlace que falló vuelve a descargarlo (no busca un archivo que nunca existió)", async () => {
+    const db = h!.db;
+    const { job, video } = await seedVideoJob(db, root, { sample, importUrl: "https://vt.tiktok.com/abc/" });
+    await db
+      .update(schema.videos)
+      .set({ status: "rejected", rejectionReason: "No pudimos descargar el video de ese enlace." })
+      .where(eq(schema.videos.id, video.id));
+    let downloads = 0;
+    const deps = {
+      ...makeDeps(db, root, path.join(root, "work")),
+      download: async (_url: string, dir: string) => {
+        downloads++;
+        const file = path.join(dir, "source.mp4");
+        execFileSync("cp", [sample, file]);
+        return { file, sizeBytes: statSync(file).size, title: null };
+      },
+    };
+    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    expect(downloads).toBe(1);
+    expect(result.clipCount).toBeGreaterThan(0);
+    const [row] = await db.select().from(schema.videos).where(eq(schema.videos.id, video.id));
+    expect(row).toMatchObject({ status: "ready", rejectionReason: null });
+  });
+
   it("un corte temporal se reintenta sin rechazar el video", async () => {
     const db = h!.db;
     const { job, video } = await seedVideoJob(db, root, { sample, importUrl: "https://example.com/v.mp4" });
