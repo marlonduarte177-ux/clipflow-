@@ -50,6 +50,24 @@ varios países.
    - **"Reintentar"** en un enlace que no se pudo descargar lo **vuelve a descargar** (antes buscaba un
      archivo que nunca existió). Mientras se reintenta, la web no muestra el error viejo.
 
+## Si aparece "Ocurrió un error temporal…"
+
+Ese mensaje sale cuando algo falla de forma inesperada (no es un bloqueo de la plataforma).
+- **Desde 01/10/2026 dice en qué paso falló y un código corto.** Ejemplo: "Ocurrió un error temporal al
+  guardar el video importado (AccessDenied)".
+  - El paso indica dónde mirar.
+  - El código es el nombre técnico del error: `AccessDenied` es un permiso de S3, `ENOSPC` es falta de disco.
+  - No se muestra el mensaje completo porque puede llevar datos internos.
+- **El detalle completo queda en CloudWatch:**
+  1. Abre AWS → CloudWatch → Grupos de registros → `/clipflow/staging/worker`.
+  2. Busca `error inesperado`. Cada línea trae el paso (`step`), el código (`code`), el mensaje
+     (`error`) y dónde ocurrió (`stack`).
+- **Prueba del 01/10/2026:** se probó en local el enlace `vt.tiktok.com/ZSbUY2r6S` que falló en AWS.
+  - El video dura 54 min, pesa 307 MB y viene en HEVC + MP3.
+  - Se descargó con la misma versión de yt-dlp y los mismos parámetros que el procesador.
+  - Se procesó completo, con clips de 60 s, y generó 15 clips sin error.
+  - Por eso el fallo es algo propio de AWS; el nuevo mensaje dirá cuál.
+
 ## Seguridad (SSRF)
 
 Un enlace podría intentar que el servidor se conecte a direcciones internas, como las credenciales

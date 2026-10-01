@@ -119,6 +119,18 @@ const IMPORT_STAGES: Record<JobStage, [number, number]> = {
 const MIME_BY_EXTENSION: Record<string, string> = { ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm", ".mkv": "video/x-matroska" };
 
 /** Título de la plataforma como nombre del archivo (sin caracteres de control). */
+/**
+ * Código técnico corto del error (p. ej. "AccessDenied" de S3 o "ENOSPC" de disco): ayuda a
+ * diagnosticar sin mostrar el mensaje completo, que puede llevar rutas o datos internos.
+ */
+export function errorCode(err: unknown): string | null {
+  const e = err as { code?: unknown; name?: unknown; Code?: unknown };
+  for (const value of [e?.Code, e?.code, e?.name]) {
+    if (typeof value === "string" && /^[A-Za-z][A-Za-z0-9_]{1,39}$/.test(value) && value !== "Error") return value;
+  }
+  return null;
+}
+
 function filenameFromTitle(title: string | null, fallback: string, ext: string): string {
   const clean = (title ?? "").replace(/[\u0000-\u001f\u007f]/g, "").replace(/\s+/g, " ").trim().slice(0, 200);
   return clean ? `${clean}${ext}` : fallback;
@@ -161,9 +173,12 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
   const check = () => {
     if (stopped) throw stopped;
   };
+  // Paso en curso: si algo falla de forma inesperada, se dice dónde (y se registra el detalle).
+  let step = "preparar el trabajo";
 
   const importFromLink = async (video: typeof videos.$inferSelect, workDir: string): Promise<string> => {
     if (!video.sourceUrl) throw new JobError("import_failed", "Falta el enlace del video.", false);
+    step = "descargar el enlace";
     await progress("downloading", 0, true);
     let downloaded;
     try {
@@ -184,7 +199,9 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     check();
     const ext = path.extname(downloaded.file).toLowerCase();
     const mimeType = MIME_BY_EXTENSION[ext] ?? "video/mp4";
+    step = "guardar el video importado";
     await deps.storage.upload(downloaded.file, video.s3Key, mimeType);
+    step = "registrar el video importado";
     await deps.db
       .update(videos)
       .set({
@@ -227,11 +244,13 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       input = await importFromLink(video, dir);
     } else {
       // 1. Preparar: descargar de S3 y comprobar el contenido real.
+      step = "leer el video original";
       await progress("preparing", 0, true);
       input = path.join(dir, `input${path.extname(video.s3Key)}`);
       await deps.storage.download(video.s3Key, input, tick("preparing", video.sizeBytes * 1.25), controller.signal);
     }
     check();
+    step = "revisar el video";
 
     let info;
     try {
@@ -259,6 +278,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     //    b) IA de audio: transcripción + momentos por contenido;
     //    c) IA de imágenes (experimental): lo que se ve en pantalla.
     //    Si la IA falla, el video se procesa igual y el resultado lo indica.
+    step = "analizar el video";
     const parts = { signals: 0, ai: 0, vision: 0 };
     const report = (part: keyof typeof parts) => (fraction: number) => {
       parts[part] = Math.min(1, Math.max(0, fraction));
@@ -288,6 +308,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     }
     await progress("analyzing", 1, true);
 
+    step = "elegir los momentos";
     // 3. Elegir momentos con el score configurable (sin forzar una cantidad).
     const params = job.params as JobParams;
     const clipDuration = deps.product.clipDurationsSeconds.includes(params.clipDurationSeconds ?? -1)
@@ -323,6 +344,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     );
     await progress("detecting_moments", 1, true);
 
+    step = "generar y guardar los clips";
     // Transcripción completa del video (la web la muestra en "Ver todo el video").
     if (ai.segments.length) {
       const fullFile = path.join(dir, "full.vtt");
@@ -420,6 +442,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     await Promise.all(Array.from({ length: Math.min(deps.renderConcurrency ?? 2, finalMoments.length) }, clipWorker));
 
     // 5. Registrar resultados y consumo (en una transacción).
+    step = "guardar el resultado";
     await progress("finalizing", 0, true);
     const processingSeconds = (Date.now() - startedAt) / 1000;
     const computeCostUsd = (processingSeconds / 3600) * deps.costPerHourUsd;
@@ -537,8 +560,13 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       deps.log.warn({ jobId: job.id, stderr: err.stderrTail }, "FFmpeg falló");
       throw new JobError("ffmpeg_failed", "No pudimos procesar este video. Lo intentaremos de nuevo.", true);
     }
-    deps.log.warn({ jobId: job.id, error: (err as Error).message }, "error inesperado");
-    throw new JobError("unexpected", "Ocurrió un error temporal al procesar el video.", true);
+    const code = errorCode(err);
+    deps.log.warn({ jobId: job.id, step, code, error: (err as Error).message, stack: (err as Error).stack }, "error inesperado");
+    throw new JobError(
+      "unexpected",
+      `Ocurrió un error temporal al ${step}${code ? ` (${code})` : ""}. Lo intentaremos de nuevo.`,
+      true,
+    );
   } finally {
     clearInterval(heartbeat);
     await rm(dir, { recursive: true, force: true });
