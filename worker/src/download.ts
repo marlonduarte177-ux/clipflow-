@@ -98,8 +98,9 @@ export async function downloadFromUrl(url: string, dir: string, options: Downloa
 export function ytDlpErrorMessage(stderr: string): { message: string; retryable: boolean; blocked?: boolean } {
   const s = stderr.toLowerCase();
   // Fallos del propio proxy (credenciales, saldo agotado, caída): no son culpa del video.
-  if (s.includes("proxy") || s.includes("tunnel connection failed") || s.includes("http error 407")) {
-    return { message: "Nuestro servicio de descarga no respondió. Lo intentaremos de nuevo.", retryable: true };
+  if (s.includes("proxy") || s.includes("tunnel") || s.includes("http error 407")) {
+    const { reason, retryable } = proxyFailure(s);
+    return { message: `Nuestro servicio de descarga no respondió (proxy: ${reason}). Lo intentaremos de nuevo.`, retryable };
   }
   if ((s.includes("confirm you") && s.includes("bot")) || s.includes("http error 403")) {
     return {
@@ -147,6 +148,21 @@ export function ytDlpErrorMessage(stderr: string): { message: string; retryable:
     return { message: "La plataforma no respondió. Lo intentaremos de nuevo.", retryable: true };
   }
   return { message: "No pudimos descargar el video de ese enlace.", retryable: false };
+}
+
+/**
+ * Motivo corto de un fallo del proxy, para verlo en la app sin entrar a CloudWatch. Credenciales,
+ * saldo o un sitio bloqueado por el proveedor no se arreglan reintentando.
+ */
+function proxyFailure(s: string): { reason: string; retryable: boolean } {
+  const status = /(?:tunnel connection failed:?|tunnel failed, response|response|http error)\s*(\d{3})/.exec(s)?.[1] ?? /\b(40[2378])\b/.exec(s)?.[1];
+  if (status === "407") return { reason: "usuario o contraseña incorrectos, 407", retryable: false };
+  if (status === "402") return { reason: "sin saldo, 402", retryable: false };
+  if (status === "403") return { reason: "el proveedor no permite este sitio, 403", retryable: false };
+  if (status) return { reason: `error ${status}`, retryable: true };
+  if (s.includes("resolve")) return { reason: "no se encontró el servidor del proxy", retryable: false };
+  if (s.includes("timed out") || s.includes("timeout")) return { reason: "tiempo de espera agotado", retryable: true };
+  return { reason: "no se pudo conectar", retryable: true };
 }
 
 /** Plataformas que bloquean SIEMPRE a los servidores de nube: van directo por el proxy. */
