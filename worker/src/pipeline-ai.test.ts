@@ -1,9 +1,10 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import type { AIAnalysisProvider, AudioChunk, FrameSheet, TranscriptSegment } from "@clipflow/shared";
+import { fullTranscriptKey, type AIAnalysisProvider, type AudioChunk, type FrameSheet, type TranscriptSegment } from "@clipflow/shared";
 import { claimJob, schema, type DbHandle } from "@clipflow/shared/db";
 import { createTestDb } from "@clipflow/shared/db/testing";
 import { AIProviderError } from "./ai/openai.js";
@@ -172,11 +173,39 @@ describe("procesamiento con IA", () => {
     expect(vtt.startsWith("WEBVTT")).toBe(true);
     expect(vtt).toContain("00:00:00.000 -->");
 
+    // Transcripción completa del video, para la web.
+    const full = readFileSync(path.join(root, fullTranscriptKey(job.userId, job.id)), "utf8");
+    expect(full.startsWith("WEBVTT")).toBe(true);
+    expect(full).toContain("Frase número 8.");
+
     const usage = await db.select().from(schema.usage).where(eq(schema.usage.jobId, job.id));
     const metric = (m: string) => usage.find((u) => u.metric === m);
     expect(metric("ai_audio_seconds")).toMatchObject({ quantity: 40, estimatedCostUsd: 0.004 });
     expect(metric("ai_input_tokens")!.quantity).toBe(600);
     expect(metric("ai_output_tokens")!.quantity).toBe(70);
+  });
+
+  it("los subtítulos quedan dibujados en el video según el estilo elegido", async () => {
+    const db = h!.db;
+    /** Píxeles (grises) de una franja del cuadro del segundo t. */
+    const band = (file: string, t: number, y: number) =>
+      execFileSync("ffmpeg", [
+        "-loglevel", "error", "-ss", String(t), "-i", file, "-frames:v", "1",
+        "-vf", `crop=1080:300:0:${y},scale=216:60,format=gray`, "-f", "rawvideo", "-",
+      ]);
+    const diff = (a: Buffer, b: Buffer) => a.reduce((sum, v, i) => sum + Math.abs(v - b[i]!), 0) / a.length;
+    const hookClip = async (subtitleStyle: string) => {
+      const { job } = await seedVideoJob(db, root, { sample, params: { subtitleStyle } });
+      const deps = { ...makeDeps(db, root, path.join(root, "work")), ai: new FakeAI() };
+      await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+      const rows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
+      return path.join(root, rows.find((c) => c.startSeconds <= 2 && c.endSeconds >= 12)!.s3Key!);
+    };
+    const withSubs = await hookClip("highlight");
+    const without = await hookClip("none");
+    // Mismo clip; solo cambia la franja de los subtítulos (abajo de la imagen central).
+    expect(diff(band(withSubs, 1, 1200), band(without, 1, 1200))).toBeGreaterThan(8);
+    expect(diff(band(withSubs, 1, 450), band(without, 1, 450))).toBeLessThan(2);
   });
 
   it("si la IA falla, el video se procesa igual y el resultado lo dice", async () => {

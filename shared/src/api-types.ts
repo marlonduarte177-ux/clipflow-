@@ -32,6 +32,10 @@ export interface VideoDto {
   rejectionReason: string | null;
   createdAt: string;
   uploadedAt: string | null;
+  /** Miniatura del mejor clip (URL temporal), si ya hay clips. */
+  thumbnailUrl?: string | null;
+  /** Clips listos (sin contar los descartados). */
+  clipCount?: number;
 }
 
 export interface VideoListResponse {
@@ -67,11 +71,19 @@ export interface JobDto {
   maxAttempts: number;
   /** Mensaje apto para el usuario si falló. */
   errorMessage: string | null;
-  params: { clipDurationSeconds?: number };
+  params: JobParams;
   result: JobResult | null;
   queuedAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+}
+
+/** "highlight": palabra que suena en color (estilo TikTok); "classic": frase en caja; "none": sin subtítulos en el video. */
+export type SubtitleStyle = "highlight" | "classic" | "none";
+
+export interface JobParams {
+  clipDurationSeconds?: number;
+  subtitleStyle?: SubtitleStyle;
 }
 
 export interface JobResult {
@@ -126,6 +138,8 @@ export interface ClipDto {
 export interface ClipListResponse {
   clips: ClipDto[];
   urlsExpireInSeconds: number;
+  /** Transcripción completa del video (WebVTT, URL temporal) y su idioma, si la hay. */
+  transcript?: { vttUrl: string; language: string | null } | null;
 }
 
 /** Mensaje de la cola: solo el id; los datos viven en la base. */

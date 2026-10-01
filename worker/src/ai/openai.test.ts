@@ -59,8 +59,35 @@ describe("OpenAIProvider.transcribe", () => {
     const form = calls[0]!.init.body as FormData;
     expect(form.get("model")).toBe("whisper-1");
     expect(form.get("response_format")).toBe("verbose_json");
-    expect(form.get("timestamp_granularities[]")).toBe("segment");
+    expect(form.getAll("timestamp_granularities[]")).toEqual(["segment", "word"]);
     expect((calls[0]!.init.headers as Record<string, string>).Authorization).toBe("Bearer sk-test");
+  });
+
+  it("asigna a cada frase los tiempos de sus palabras (para resaltar la que suena)", async () => {
+    const { impl } = fakeFetch([
+      json({
+        language: "spanish",
+        segments: [{ start: 0, end: 2, text: "Hola mundo" }, { start: 2, end: 4, text: "Adiós" }],
+        words: [
+          { word: "Hola", start: 0.1, end: 0.6 },
+          { word: "mundo", start: 0.7, end: 1.5 },
+          { word: "Adiós", start: 2.2, end: 3 },
+        ],
+      }),
+    ]);
+    const result = await provider(impl).transcribe([{ path: chunkA, offsetSeconds: 100, durationSeconds: 600 }]);
+    expect(result.segments).toEqual([
+      {
+        startSeconds: 100,
+        endSeconds: 102,
+        text: "Hola mundo",
+        words: [
+          { startSeconds: 100.1, endSeconds: 100.6, text: "Hola" },
+          { startSeconds: 100.7, endSeconds: 101.5, text: "mundo" },
+        ],
+      },
+      { startSeconds: 102, endSeconds: 104, text: "Adiós", words: [{ startSeconds: 102.2, endSeconds: 103, text: "Adiós" }] },
+    ]);
   });
 
   it("descarta frases que Whisper marca como probable silencio o poco seguras (alucinaciones)", async () => {

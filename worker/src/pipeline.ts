@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { writeFile } from "node:fs/promises";
 import {
   bestFrameLabel,
+  fullTranscriptKey,
   segmentsForRange,
   selectMoments,
   snapToSentences,
@@ -14,9 +15,11 @@ import {
   type AIAnalysisProvider,
   type FrameScore,
   type AIUsage,
+  type JobParams,
   type JobResult,
   type ProductConfig,
   type SignalSeries,
+  type SubtitleStyle,
   type TranscriptSegment,
 } from "@clipflow/shared";
 import { reportProgress, schema, type Database, type Job, type JobStage } from "@clipflow/shared/db";
@@ -35,6 +38,7 @@ import {
 } from "./ffmpeg.js";
 import type { WorkerStorage } from "./storage.js";
 import { AIProviderError } from "./ai/openai.js";
+import { buildAss, SUBTITLE_FONTS_DIR } from "./subtitles.js";
 
 const { clips, subtitles, usage, videos } = schema;
 
@@ -204,7 +208,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     await progress("analyzing", 1, true);
 
     // 3. Elegir momentos con el score configurable (sin forzar una cantidad).
-    const params = job.params as { clipDurationSeconds?: number };
+    const params = job.params as JobParams;
     const clipDuration = deps.product.clipDurationsSeconds.includes(params.clipDurationSeconds ?? -1)
       ? params.clipDurationSeconds!
       : deps.product.defaultClipDurationSeconds;
@@ -238,6 +242,15 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     );
     await progress("detecting_moments", 1, true);
 
+    // Transcripción completa del video (la web la muestra en "Ver todo el video").
+    if (ai.segments.length) {
+      const fullFile = path.join(dir, "full.vtt");
+      await writeFile(fullFile, toVtt(ai.segments));
+      await deps.storage.upload(fullFile, fullTranscriptKey(job.userId, job.id), "text/vtt");
+    }
+    const requested = (job.params as JobParams).subtitleStyle;
+    const subtitleStyle: SubtitleStyle = requested === "classic" || requested === "none" ? requested : "highlight";
+
     // 4. Generar clips verticales y miniaturas; subir a S3 con rutas fijas por trabajo.
     const outputs: {
       moment: (typeof moments)[number];
@@ -261,6 +274,18 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       const clipFile = path.join(dir, `clip-${index}.mp4`);
       const thumbFile = path.join(dir, `thumb-${index}.jpg`);
       const segment = { startSeconds: moment.startSeconds, durationSeconds: duration };
+      // Subtítulos del clip (tiempos relativos al clip): en archivo y, según el estilo elegido,
+      // dibujados en el video.
+      const clipSegments = segmentsForRange(ai.segments, moment.startSeconds, moment.endSeconds);
+      let burn: { file: string; fontsDir: string } | undefined;
+      if (subtitleStyle !== "none" && clipSegments.length) {
+        const ass = buildAss(clipSegments, subtitleStyle, duration);
+        if (ass) {
+          const assFile = path.join(dir, `sub-${index}.ass`);
+          await writeFile(assFile, ass);
+          burn = { file: assFile, fontsDir: SUBTITLE_FONTS_DIR };
+        }
+      }
       // Encuadre por clip: sin franjas negras; sigue a quien habla (o al grupo) y, sin caras,
       // se centra donde está la acción. La voz de la transcripción dice cuándo cuenta la boca.
       const start = moment.startSeconds;
@@ -275,6 +300,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       await renderVerticalClip(deps.tools, input, clipFile, segment, {
         signal: controller.signal,
         crop,
+        subtitles: burn,
         onProgress: (sec) => {
           clipProgress[index] = Math.min(0.95, sec / duration);
           void reportClips();
@@ -287,9 +313,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       await deps.storage.upload(clipFile, key, "video/mp4");
       await deps.storage.upload(thumbFile, thumbKey, "image/jpeg");
 
-      // Subtítulos del clip (tiempos relativos al clip).
       let subtitleKeys: { srt: string; vtt: string } | null = null;
-      const clipSegments = segmentsForRange(ai.segments, moment.startSeconds, moment.endSeconds);
       if (clipSegments.length) {
         subtitleKeys = {
           srt: `subtitles/${job.userId}/${job.id}/${index}.srt`,

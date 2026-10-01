@@ -1,5 +1,5 @@
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
-import { and, count, desc, eq, gt } from "drizzle-orm";
+import { and, count, desc, eq, gt, inArray } from "drizzle-orm";
 import { z } from "zod";
 import {
   CompleteUploadSchema,
@@ -9,7 +9,9 @@ import {
   planUploadParts,
   resolveVideoMimeType,
   type CreateVideoResponse,
+  type JobParams,
   type ProductConfig,
+  type SubtitleStyle,
   type UploadPartUrlsResponse,
   type VideoDto,
   type VideoListResponse,
@@ -22,7 +24,9 @@ import type { WorkerLauncher } from "./launcher.js";
 import type { JobQueue } from "./queue.js";
 import type { VideoStorage } from "./storage.js";
 
-const { projects, videos, usage } = schema;
+const { projects, videos, usage, clips } = schema;
+/** Miniaturas en listas: URLs temporales cortas (la web las vuelve a pedir al recargar). */
+const THUMB_TTL_SECONDS = 15 * 60;
 type VideoRow = typeof videos.$inferSelect;
 
 const IdParams = z.object({ id: z.uuid() });
@@ -38,8 +42,9 @@ const EXTENSION_BY_MIME: Record<string, string> = {
 /** Solo las subidas iniciadas en las últimas 24 h cuentan para el límite (S3 limpia las viejas). */
 const PENDING_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-export function toVideoDto(row: VideoRow): VideoDto {
+export function toVideoDto(row: VideoRow, extras: Pick<VideoDto, "thumbnailUrl" | "clipCount"> = {}): VideoDto {
   return {
+    ...extras,
     id: row.id,
     projectId: row.projectId,
     status: row.status,
@@ -56,6 +61,18 @@ export function toVideoDto(row: VideoRow): VideoDto {
 /** Quita caracteres de control del nombre (solo se muestra; nunca se usa como ruta en S3). */
 function cleanFilename(name: string): string {
   return name.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 255);
+}
+
+/** Opciones de procesamiento elegidas por el usuario, validadas con la configuración del producto. */
+function processingParams(
+  product: ProductConfig,
+  input: { clipDurationSeconds?: number; subtitleStyle?: SubtitleStyle },
+): { ok: true; params: JobParams } | { ok: false; message: string } {
+  const duration = input.clipDurationSeconds ?? product.defaultClipDurationSeconds;
+  if (!product.clipDurationsSeconds.includes(duration)) {
+    return { ok: false, message: `Duraciones permitidas: ${product.clipDurationsSeconds.join(", ")} s.` };
+  }
+  return { ok: true, params: { clipDurationSeconds: duration, subtitleStyle: input.subtitleStyle ?? "highlight" } };
 }
 
 export interface VideoRouteDeps {
@@ -81,6 +98,35 @@ export function videoRoutes(deps: VideoRouteDeps) {
   const { db, storage, queue, launcher, product } = deps;
   const notFound = (reply: Parameters<preHandlerHookHandler>[1]) =>
     sendError(reply, 404, "not_found", "Video no encontrado.");
+
+  /** Cantidad de clips listos y miniatura del mejor clip de cada video (una sola consulta). */
+  async function clipExtras(videoIds: string[], userId: string) {
+    const extras = new Map<string, Pick<VideoDto, "thumbnailUrl" | "clipCount">>();
+    if (videoIds.length === 0) return extras;
+    const rows = await db
+      .select({ videoId: clips.videoId, status: clips.status, score: clips.score, thumb: clips.thumbnailS3Key })
+      .from(clips)
+      .where(and(eq(clips.userId, userId), inArray(clips.videoId, videoIds)));
+    const best = new Map<string, { score: number; thumb: string | null; count: number }>();
+    for (const r of rows) {
+      if (r.status === "discarded") continue;
+      const current = best.get(r.videoId) ?? { score: -1, thumb: null, count: 0 };
+      current.count++;
+      if ((r.score ?? 0) > current.score && r.thumb) {
+        current.score = r.score ?? 0;
+        current.thumb = r.thumb;
+      }
+      best.set(r.videoId, current);
+    }
+    for (const id of videoIds) {
+      const b = best.get(id);
+      extras.set(id, {
+        clipCount: b?.count ?? 0,
+        thumbnailUrl: b?.thumb ? await storage.presignGet(b.thumb, THUMB_TTL_SECONDS) : null,
+      });
+    }
+    return extras;
+  }
 
   async function findOwnVideo(id: string, userId: string) {
     const [row] = await db
@@ -108,14 +154,20 @@ export function videoRoutes(deps: VideoRouteDeps) {
         )
         .orderBy(desc(videos.createdAt))
         .limit(200);
-      return { videos: rows.map(toVideoDto) } satisfies VideoListResponse;
+      const extras = await clipExtras(
+        rows.map((r) => r.id),
+        userId,
+      );
+      return { videos: rows.map((r) => toVideoDto(r, extras.get(r.id))) } satisfies VideoListResponse;
     });
 
     app.get("/videos/:id", async (request, reply) => {
       const params = IdParams.safeParse(request.params);
       if (!params.success) return notFound(reply);
       const row = await findOwnVideo(params.data.id, request.user!.id);
-      return row ? toVideoDto(row) : notFound(reply);
+      if (!row) return notFound(reply);
+      const extras = await clipExtras([row.id], request.user!.id);
+      return toVideoDto(row, extras.get(row.id));
     });
 
     app.post("/videos", async (request, reply) => {
@@ -231,6 +283,9 @@ export function videoRoutes(deps: VideoRouteDeps) {
         return sendError(reply, 409, "not_uploading", "Este video no tiene una subida en curso.");
       }
 
+      const options = processingParams(product, input.data);
+      if (!options.ok) return sendError(reply, 400, "invalid_duration", options.message);
+
       const { partCount } = planUploadParts(row.sizeBytes);
       const parts = [...input.data.parts].sort((a, b) => a.partNumber - b.partNumber);
       const complete = parts.length === partCount && parts.every((p, i) => p.partNumber === i + 1);
@@ -275,7 +330,7 @@ export function videoRoutes(deps: VideoRouteDeps) {
         videoId: row.id,
         type: "analyze_video",
         idempotencyKey: `analyze:${row.id}`,
-        params: { clipDurationSeconds: product.defaultClipDurationSeconds },
+        params: { ...options.params },
       });
       if (created) {
         await enqueue(queue, job, request.log);
@@ -297,16 +352,14 @@ export function videoRoutes(deps: VideoRouteDeps) {
       if (row.status !== "uploaded" && row.status !== "ready") {
         return sendError(reply, 409, "not_processable", "Este video no se puede procesar.");
       }
-      const duration = input.data.clipDurationSeconds ?? product.defaultClipDurationSeconds;
-      if (!product.clipDurationsSeconds.includes(duration)) {
-        return sendError(reply, 400, "invalid_duration", `Duraciones permitidas: ${product.clipDurationsSeconds.join(", ")} s.`);
-      }
+      const options = processingParams(product, input.data);
+      if (!options.ok) return sendError(reply, 400, "invalid_duration", options.message);
       const { job, created } = await createJob(db, {
         userId,
         videoId: row.id,
         type: "analyze_video",
         idempotencyKey: `analyze:${row.id}`,
-        params: { clipDurationSeconds: duration },
+        params: { ...options.params },
       });
       if (!created) return sendError(reply, 409, "already_processing", "Este video ya tiene un procesamiento. Usa Reintentar si falló.");
       await enqueue(queue, job, request.log);

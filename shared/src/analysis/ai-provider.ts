@@ -2,10 +2,18 @@
  * Punto único de conexión con un proveedor de IA (OpenAI en la Fase 8).
  * El resto del sistema solo conoce esta interfaz: cambiar de proveedor no toca el worker.
  */
+export interface TranscriptWord {
+  startSeconds: number;
+  endSeconds: number;
+  text: string;
+}
+
 export interface TranscriptSegment {
   startSeconds: number;
   endSeconds: number;
   text: string;
+  /** Tiempos de cada palabra (si el proveedor los da): para resaltar la palabra que suena. */
+  words?: TranscriptWord[];
 }
 
 export interface AIUsage {

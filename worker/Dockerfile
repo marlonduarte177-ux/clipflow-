@@ -36,6 +36,8 @@ COPY --from=build /app/worker/package.json worker/
 COPY --from=build /app/worker/dist worker/dist
 # Modelo del detector de caras (YuNet, MIT, ~230 KB).
 COPY --from=build /app/worker/models worker/models
+# Fuente de los subtítulos dibujados en el video (Montserrat ExtraBold, licencia OFL).
+COPY --from=build /app/worker/fonts worker/fonts
 RUN mkdir -p /tmp/clipflow && chown node:node /tmp/clipflow
 USER node
 CMD ["node", "worker/dist/main.js"]

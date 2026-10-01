@@ -109,6 +109,8 @@ const TranscriptionResponse = z.object({
       }),
     )
     .default([]),
+  /** Con timestamp_granularities[]=word: cada palabra con su tiempo (del trozo completo). */
+  words: z.array(z.object({ word: z.string(), start: z.number(), end: z.number() })).default([]),
 });
 
 const ChatResponse = z.object({
@@ -315,7 +317,9 @@ export class OpenAIProvider implements AIAnalysisProvider {
           form.append("file", await openAsBlob(chunk.path, { type: "audio/mpeg" }), path.basename(chunk.path));
           form.append("model", this.options.transcribeModel);
           form.append("response_format", "verbose_json");
+          // Frases (para cortar y para subtítulos) y palabras (para resaltar la que suena): mismo precio.
           form.append("timestamp_granularities[]", "segment");
+          form.append("timestamp_granularities[]", "word");
           return { method: "POST", headers: this.headers(), body: form };
         });
         const parsed = TranscriptionResponse.safeParse(raw);
@@ -324,10 +328,19 @@ export class OpenAIProvider implements AIAnalysisProvider {
         for (const s of parsed.data.segments) {
           if (s.text.trim() === "" || !(s.end > s.start)) continue;
           if (isLikelyHallucination(s)) continue;
+          // Palabras de esta frase: las que caen (por su punto medio) dentro de ella.
+          const words = parsed.data.words
+            .filter((w) => w.word.trim() !== "" && w.end >= w.start && (w.start + w.end) / 2 >= s.start && (w.start + w.end) / 2 < s.end)
+            .map((w) => ({
+              startSeconds: chunk.offsetSeconds + w.start,
+              endSeconds: chunk.offsetSeconds + Math.min(w.end, chunk.durationSeconds),
+              text: w.word.trim(),
+            }));
           segments.push({
             startSeconds: chunk.offsetSeconds + s.start,
             endSeconds: chunk.offsetSeconds + Math.min(s.end, chunk.durationSeconds),
             text: s.text.trim(),
+            ...(words.length ? { words } : {}),
           });
         }
         results[index] = { segments, language: parsed.data.language ?? null };

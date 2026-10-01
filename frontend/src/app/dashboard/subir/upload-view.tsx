@@ -1,31 +1,50 @@
 "use client";
 
-import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
-import { DEFAULT_PRODUCT_CONFIG, resolveVideoMimeType, type ProjectDto, type ProjectListResponse, type VideoDto } from "@clipflow/shared";
+import {
+  DEFAULT_PRODUCT_CONFIG,
+  resolveVideoMimeType,
+  type ProjectDto,
+  type ProjectListResponse,
+  type SubtitleStyle,
+  type VideoDto,
+} from "@clipflow/shared";
+import { DEFAULT_DURATION, DurationPicker, SubtitlePicker } from "@/components/clip-options";
+import { CheckIcon, CloseIcon, DownIcon, UploadIcon } from "@/components/icons";
 import { Alert } from "@/components/ui";
 import { apiConfigured, apiFetch, formatBytes, formatDuration } from "@/lib/api";
 import { readVideoDuration, uploadVideo, type UploadProgress } from "@/lib/uploader";
 
 // Límites mostrados al usuario; la API los vuelve a comprobar siempre.
 const LIMITS = DEFAULT_PRODUCT_CONFIG.upload;
+const DEFAULT_PROJECT_NAME = "Mis videos";
 
-type Phase = "idle" | "uploading" | "done" | "error" | "cancelled";
+type Phase = "idle" | "uploading" | "uploaded" | "starting" | "error";
 
+/**
+ * Subir video: el archivo empieza a subirse apenas se elige y, mientras tanto, el usuario elige
+ * la duración de los clips y el estilo de subtítulos. "Crear clips" confirma: si la subida no
+ * terminó, el procesamiento empieza solo en cuanto termine.
+ */
 export function UploadView() {
+  const router = useRouter();
   const params = useSearchParams();
-  const [projects, setProjects] = useState<ProjectDto[]>([]);
+  const [projects, setProjects] = useState<ProjectDto[] | null>(null);
   const [projectId, setProjectId] = useState(params.get("projectId") ?? "");
   const [file, setFile] = useState<File | null>(null);
-  const [duration, setDuration] = useState<number | null>(null);
-  const [fileError, setFileError] = useState("");
+  const [videoSeconds, setVideoSeconds] = useState<number | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [progress, setProgress] = useState<UploadProgress | null>(null);
-  const [message, setMessage] = useState("");
-  const [result, setResult] = useState<VideoDto | null>(null);
+  const [error, setError] = useState("");
+  const [clipSeconds, setClipSeconds] = useState(DEFAULT_DURATION);
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>("highlight");
+  const [confirmed, setConfirmed] = useState(false);
+
   const abortRef = useRef<AbortController | null>(null);
   const videoRef = useRef<VideoDto | null>(null);
+  // "Crear clips" resuelve esta promesa; la subida la espera antes de confirmar.
+  const confirmRef = useRef<((options: { clipDurationSeconds: number; subtitleStyle: SubtitleStyle }) => void) | null>(null);
 
   useEffect(() => {
     if (!apiConfigured) return;
@@ -34,13 +53,14 @@ export function UploadView() {
         setProjects(r.projects);
         setProjectId((current) => current || r.projects[0]?.id || "");
       })
-      .catch((err: Error) => setMessage(err.message));
+      .catch((err: Error) => setError(err.message));
   }, []);
 
   // Durante la subida: avisa antes de cerrar la pestaña y evita que la pantalla se apague
   // (en el celular, con la pantalla bloqueada el navegador pausa la subida).
+  const uploading = phase === "uploading" || phase === "uploaded" || phase === "starting";
   useEffect(() => {
-    if (phase !== "uploading") return;
+    if (!uploading) return;
     const warn = (e: BeforeUnloadEvent) => e.preventDefault();
     window.addEventListener("beforeunload", warn);
     let lock: WakeLockSentinel | null = null;
@@ -52,67 +72,87 @@ export function UploadView() {
       window.removeEventListener("beforeunload", warn);
       void lock?.release().catch(() => undefined);
     };
-  }, [phase]);
+  }, [uploading]);
+
+  async function ensureProject(): Promise<string> {
+    if (projectId) return projectId;
+    const created = await apiFetch<ProjectDto>("/projects", { method: "POST", body: { name: DEFAULT_PROJECT_NAME } });
+    setProjects((list) => [...(list ?? []), created]);
+    setProjectId(created.id);
+    return created.id;
+  }
 
   async function onFile(event: ChangeEvent<HTMLInputElement>) {
     const selected = event.target.files?.[0] ?? null;
-    setFile(null);
-    setDuration(null);
-    setFileError("");
-    setPhase("idle");
-    setResult(null);
+    event.target.value = "";
     if (!selected) return;
+    setError("");
     if (!resolveVideoMimeType(selected.name, selected.type, LIMITS.allowedMimeTypes)) {
-      setFileError("Formato no admitido. Usa MP4, MOV, WEBM o MKV.");
+      setError("Formato no admitido. Usa MP4, MOV, WEBM o MKV.");
       return;
     }
     if (selected.size > LIMITS.maxBytes) {
-      setFileError(`El archivo supera el máximo de ${formatBytes(LIMITS.maxBytes)}.`);
+      setError(`El archivo supera el máximo de ${formatBytes(LIMITS.maxBytes)}.`);
+      return;
+    }
+    const seconds = await readVideoDuration(selected);
+    if (seconds && seconds > LIMITS.maxDurationSeconds) {
+      setError(`El video dura ${formatDuration(seconds)}; el máximo es ${formatDuration(LIMITS.maxDurationSeconds)}.`);
       return;
     }
     setFile(selected);
-    const seconds = await readVideoDuration(selected);
-    if (seconds && seconds > LIMITS.maxDurationSeconds) {
-      setFileError(`El video dura ${formatDuration(seconds)}; el máximo es ${formatDuration(LIMITS.maxDurationSeconds)}.`);
-      setFile(null);
-      return;
-    }
-    setDuration(seconds);
+    setVideoSeconds(seconds);
+    void start(selected, seconds);
   }
 
-  async function onUpload() {
-    if (!file || !projectId) return;
+  async function start(selected: File, seconds: number | null) {
     const controller = new AbortController();
     abortRef.current = controller;
     videoRef.current = null;
+    setConfirmed(false);
     setPhase("uploading");
-    setMessage("");
-    setProgress({ uploadedBytes: 0, totalBytes: file.size });
+    setProgress({ uploadedBytes: 0, totalBytes: selected.size });
+    const confirmation = new Promise<{ clipDurationSeconds: number; subtitleStyle: SubtitleStyle }>((resolve) => {
+      confirmRef.current = resolve;
+    });
     try {
+      const project = await ensureProject();
       const video = await uploadVideo({
-        file,
-        projectId,
-        durationSeconds: duration,
+        file: selected,
+        projectId: project,
+        durationSeconds: seconds,
         signal: controller.signal,
         onProgress: setProgress,
         onCreated: (v) => (videoRef.current = v),
+        onUploaded: () => setPhase((p) => (p === "uploading" ? "uploaded" : p)),
+        completeWith: () => confirmation,
       });
-      setResult(video);
-      setPhase("done");
+      router.push(`/dashboard/videos/${video.id}`);
     } catch (err) {
       if (controller.signal.aborted) return;
-      setMessage((err as Error).message);
+      setError((err as Error).message);
       setPhase("error");
-      // Libera la subida en S3 para no dejar partes huérfanas.
+      // Libera la subida en S3 para no dejar partes huérfanas. (El tipo se fuerza: TS no ve la
+      // asignación que hace onCreated dentro de la subida.)
       const created = videoRef.current as VideoDto | null;
       if (created) await apiFetch(`/videos/${created.id}/abort`, { method: "POST" }).catch(() => undefined);
     }
   }
 
+  function onCreateClips() {
+    setConfirmed(true);
+    setPhase((p) => (p === "uploaded" ? "starting" : p));
+    confirmRef.current?.({ clipDurationSeconds: clipSeconds, subtitleStyle });
+  }
+
   async function onCancel() {
     abortRef.current?.abort();
-    setPhase("cancelled");
-    if (videoRef.current) await apiFetch(`/videos/${videoRef.current.id}/abort`, { method: "POST" }).catch(() => undefined);
+    const created = videoRef.current;
+    setFile(null);
+    setProgress(null);
+    setPhase("idle");
+    setConfirmed(false);
+    if (created) await apiFetch(`/videos/${created.id}/abort`, { method: "POST" }).catch(() => undefined);
   }
 
   if (!apiConfigured) {
@@ -120,98 +160,98 @@ export function UploadView() {
   }
 
   const percent = progress && progress.totalBytes > 0 ? Math.floor((progress.uploadedBytes / progress.totalBytes) * 100) : 0;
-  const busy = phase === "uploading";
+  const project = projects?.find((p) => p.id === projectId);
 
   return (
-    <div className="mx-auto max-w-xl space-y-5">
-      <h1 className="text-2xl font-semibold">Subir video</h1>
-
-      {projects.length === 0 && !message ? (
-        <p className="rounded-2xl border border-dashed border-line p-4 text-sm text-muted">
-          Primero <Link href="/dashboard" className="text-accent underline">crea un proyecto</Link>.
+    <div className="mx-auto max-w-xl space-y-6 pb-24 sm:pb-0">
+      <div className="space-y-1.5">
+        <h1 className="text-[28px] font-bold tracking-tight">Nuevo video</h1>
+        <p className="text-sm text-muted">
+          {file ? "Elige cómo quieres tus clips mientras el video se sube." : "Sube un video largo y te damos sus mejores momentos listos para TikTok, Reels y Shorts."}
         </p>
-      ) : null}
-
-      <label className="block">
-        <span className="mb-1 block text-sm text-muted">Proyecto</span>
-        <select
-          value={projectId}
-          disabled={busy}
-          onChange={(e) => setProjectId(e.target.value)}
-          className="w-full rounded-lg border border-line bg-background px-3 py-2.5"
-        >
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <label className="block rounded-2xl border border-dashed border-line bg-surface p-6 text-center">
-        <span className="block font-medium">Elige un video</span>
-        <span className="mt-1 block text-xs text-muted">
-          MP4, MOV, WEBM o MKV · hasta {formatBytes(LIMITS.maxBytes)} · hasta {formatDuration(LIMITS.maxDurationSeconds)}
-        </span>
-        <input type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska,.mkv" disabled={busy} onChange={onFile} className="mt-4 w-full text-sm" />
-      </label>
-
-      <Alert kind="error">{fileError}</Alert>
+      </div>
 
       {file ? (
-        <dl className="grid grid-cols-3 gap-2 rounded-2xl border border-line p-4 text-sm">
-          <div className="col-span-3 truncate">
-            <dt className="text-muted">Archivo</dt>
-            <dd>{file.name}</dd>
+        <div className="flex items-center gap-3.5 rounded-[18px] border border-line bg-surface p-3">
+          <div className="grid h-[76px] w-14 shrink-0 place-items-center rounded-[10px] bg-[#1d2433] text-accent">
+            {phase === "uploaded" || phase === "starting" ? <CheckIcon size={24} strokeWidth={2.6} /> : <UploadIcon size={22} />}
           </div>
-          <div>
-            <dt className="text-muted">Tamaño</dt>
-            <dd>{formatBytes(file.size)}</dd>
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <p className="truncate text-[15px] font-semibold">{file.name}</p>
+            <p className="text-[13px] text-muted">
+              {formatBytes(file.size)}
+              {videoSeconds ? ` · ${formatDuration(videoSeconds)}` : ""}
+            </p>
+            <div className="h-1.5 overflow-hidden rounded-full bg-line" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label="Avance de la subida">
+              <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${percent}%` }} />
+            </div>
+            <p className="text-xs text-muted">
+              {phase === "uploading" ? `Subiendo… ${percent} %` : phase === "error" ? "La subida se detuvo" : "Video subido"}
+            </p>
           </div>
-          <div>
-            <dt className="text-muted">Duración</dt>
-            <dd>{duration ? formatDuration(duration) : "No disponible"}</dd>
-          </div>
-        </dl>
+          {phase === "uploading" || phase === "uploaded" || phase === "error" ? (
+            <button onClick={onCancel} aria-label="Cancelar la subida" className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-line text-muted hover:text-foreground">
+              <CloseIcon size={18} />
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <label className="flex cursor-pointer flex-col items-center gap-3 rounded-[22px] border-2 border-dashed border-[#2b3140] bg-surface px-6 py-10 text-center transition hover:border-accent">
+          <span className="grid h-14 w-14 place-items-center rounded-[18px] bg-accent text-black">
+            <UploadIcon size={26} strokeWidth={2.4} />
+          </span>
+          <span className="text-base font-semibold">Elegir video</span>
+          <span className="text-xs text-muted">
+            MP4, MOV, WEBM o MKV · hasta {formatBytes(LIMITS.maxBytes)} · hasta {formatDuration(LIMITS.maxDurationSeconds)}
+          </span>
+          <input type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska,.mkv" onChange={onFile} className="sr-only" />
+        </label>
+      )}
+
+      <Alert kind="error">{error}</Alert>
+
+      <DurationPicker value={clipSeconds} onChange={setClipSeconds} disabled={confirmed} />
+      <SubtitlePicker value={subtitleStyle} onChange={setSubtitleStyle} disabled={confirmed} />
+
+      {projects && projects.length > 0 ? (
+        <label className="relative flex min-h-[52px] items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-4">
+          <span className="text-sm text-muted">Proyecto</span>
+          <span className="flex items-center gap-1.5 text-sm font-semibold">
+            {project?.name ?? "Elegir"}
+            <DownIcon size={16} />
+          </span>
+          <select
+            aria-label="Proyecto"
+            value={projectId}
+            disabled={phase !== "idle"}
+            onChange={(e) => setProjectId(e.target.value)}
+            className="absolute inset-0 cursor-pointer opacity-0"
+          >
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
       ) : null}
 
-      {progress && phase !== "idle" ? (
-        <div>
-          <div className="h-2 overflow-hidden rounded-full bg-line" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
-            <div className="h-full bg-accent transition-all" style={{ width: `${percent}%` }} />
-          </div>
-          <p className="mt-2 text-sm text-muted">
-            {percent}% · {formatBytes(progress.uploadedBytes)} de {formatBytes(progress.totalBytes)}
+      {/* Celular: fijo sobre la barra de navegación (el fondo llega hasta abajo para tapar el contenido). */}
+      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-[#1a1e28] bg-background px-5 pb-[104px] pt-3 sm:static sm:border-0 sm:bg-transparent sm:p-0">
+        <div className="mx-auto max-w-xl space-y-2">
+          <button
+            onClick={onCreateClips}
+            disabled={!file || confirmed || phase === "error"}
+            className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-accent text-[17px] font-bold text-black transition hover:brightness-105 disabled:opacity-50"
+          >
+            {confirmed ? (phase === "uploading" ? "Empieza al terminar la subida" : "Empezando…") : "Crear clips"}
+          </button>
+          <p className="text-center text-xs text-muted">
+            {file && phase === "uploading"
+              ? "No bloquees el celular hasta que termine de subir."
+              : "Puedes cerrar la página cuando empiece el procesamiento."}
           </p>
         </div>
-      ) : null}
-
-      {phase === "done" && result ? (
-        <Alert kind="info">
-          Video subido. El procesamiento empezó automáticamente.{" "}
-          <Link href={`/dashboard/videos/${result.id}`} className="underline">Ver progreso</Link>
-        </Alert>
-      ) : null}
-      {busy ? (
-        <p className="text-xs text-muted">No cierres esta pestaña ni bloquees el celular hasta que termine.</p>
-      ) : null}
-      {phase === "cancelled" ? <Alert kind="info">Subida cancelada.</Alert> : null}
-      <Alert kind="error">{message}</Alert>
-
-      <div className="flex gap-3">
-        {busy ? (
-          <button onClick={onCancel} className="flex-1 rounded-lg border border-line px-4 py-2.5">
-            Cancelar
-          </button>
-        ) : (
-          <button
-            onClick={onUpload}
-            disabled={!file || !projectId}
-            className="flex-1 rounded-lg bg-accent px-4 py-2.5 font-medium text-black disabled:opacity-50"
-          >
-            Subir
-          </button>
-        )}
       </div>
     </div>
   );

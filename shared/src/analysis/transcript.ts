@@ -46,11 +46,22 @@ export function snapToSentences(
 export function segmentsForRange(segments: TranscriptSegment[], startSeconds: number, endSeconds: number): TranscriptSegment[] {
   return segments
     .filter((s) => s.endSeconds > startSeconds && s.startSeconds < endSeconds && s.text.trim() !== "")
-    .map((s) => ({
-      startSeconds: round3(Math.max(0, s.startSeconds - startSeconds)),
-      endSeconds: round3(Math.min(endSeconds, s.endSeconds) - startSeconds),
-      text: s.text.trim(),
-    }));
+    .map((s) => {
+      const out: TranscriptSegment = {
+        startSeconds: round3(Math.max(0, s.startSeconds - startSeconds)),
+        endSeconds: round3(Math.min(endSeconds, s.endSeconds) - startSeconds),
+        text: s.text.trim(),
+      };
+      const words = s.words
+        ?.filter((w) => w.endSeconds > startSeconds && w.startSeconds < endSeconds && w.text.trim() !== "")
+        .map((w) => ({
+          startSeconds: round3(Math.max(0, w.startSeconds - startSeconds)),
+          endSeconds: round3(Math.min(endSeconds, w.endSeconds) - startSeconds),
+          text: w.text.trim(),
+        }));
+      if (words?.length) out.words = words;
+      return out;
+    });
 }
 
 function timestamp(seconds: number, separator: "," | "."): string {
