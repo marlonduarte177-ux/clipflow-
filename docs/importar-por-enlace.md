@@ -48,6 +48,14 @@ varios países.
      - TikTok exige la imitación de navegador. Sin `curl-cffi`, en la primera prueba real
        (01/10/2026) TikTok respondió "Unexpected response". Con `curl-cffi` se probó un enlace
        `vt.tiktok.com`: lee título y duración y descarga H.264 + AAC.
+     - **FFmpeg con ruta completa (arreglo del 02/10/2026):** yt-dlp recibía solo el nombre `ffmpeg`,
+       lo buscaba en la carpeta actual y seguía sin FFmpeg (el aviso lo ocultaba `--no-warnings`).
+       - Sin FFmpeg no podía unir video y audio separados, que es como los entregan Instagram y Facebook,
+         y el archivo final nunca existía: la app mostraba "Ocurrió un error temporal al descargar el
+         enlace (ENOENT)".
+       - TikTok funcionaba porque entrega video y audio juntos.
+       - Ahora se pasa la ruta completa, buscada en el PATH. Si aun así faltara el archivo final, se usa
+         el único que quedó, o se avisa "No pudimos unir el video y el audio" y se reintenta.
    - **Otros enlaces:** deben ser un archivo de video directo. Si es una página web, se explica que
      hay que subirlo como archivo.
 3. **Guarda el original** en S3 (`originals/…`; en partes si pesa más de 256 MB) y usa el título
