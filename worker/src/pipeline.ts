@@ -84,7 +84,7 @@ export interface PipelineDeps {
   renderConcurrency?: number;
   /** Encuadre que sigue caras (a quien habla, o al grupo). */
   faceTracking?: boolean;
-  /** yt-dlp, para importar videos de TikTok, Instagram y Facebook. */
+  /** yt-dlp, para importar videos de TikTok, Instagram, Facebook y Kick. */
   ytDlpPath?: string;
   /** Proxy residencial para plataformas que bloquean a AWS (null = sin proxy). */
   downloadProxyUrl?: string | null;

@@ -265,7 +265,7 @@ export function UploadView() {
             Descargar solo el video
           </button>
           <p className="text-xs leading-[17px] text-muted">
-            TikTok, Instagram o Facebook, o un enlace directo a un archivo de video. Lo descargamos nosotros: no gasta tus
+            TikTok, Instagram, Facebook o Kick (clips y videos guardados), o un enlace directo a un archivo de video. Lo descargamos nosotros: no gasta tus
             datos. Hasta {formatDuration(LIMITS.maxDurationSeconds)}. Para YouTube, descarga el video y súbelo como archivo.
           </p>
         </div>
