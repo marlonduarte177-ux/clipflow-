@@ -46,6 +46,8 @@ async function processedVideo(sub: string, projectId?: string) {
     clip: `clips/${userId}/${job.id}/0.mp4`,
     thumb: `thumbnails/${userId}/${job.id}/0.jpg`,
     vtt: `subtitles/${userId}/${job.id}/0.vtt`,
+    // Transcripción guardada del video (para no volver a pagarla): se borra con el video.
+    transcript: `transcripts/${userId}/${video.id}/openai-whisper-1.json`,
     // Archivo huérfano de un reintento anterior: también debe borrarse.
     old: `clips/${userId}/${job.id}/7.mp4`,
   };
@@ -63,14 +65,14 @@ describe("eliminar videos", () => {
     const keep = await processedVideo("alice");
     const target = await processedVideo("alice");
     const before = files();
-    expect(before.filter((k) => k.includes(target.video.id) || k.includes(target.job.id))).toHaveLength(5);
+    expect(before.filter((k) => k.includes(target.video.id) || k.includes(target.job.id))).toHaveLength(6);
 
     const res = await app().inject({ method: "DELETE", url: `/videos/${target.video.id}`, headers: bearer("alice") });
     expect(res.statusCode).toBe(204);
 
     // Ningún archivo del video borrado queda en S3; los del otro video siguen.
     expect(files().filter((k) => k.includes(target.video.id) || k.includes(target.job.id))).toEqual([]);
-    expect(files().filter((k) => k.includes(keep.video.id) || k.includes(keep.job.id))).toHaveLength(5);
+    expect(files().filter((k) => k.includes(keep.video.id) || k.includes(keep.job.id))).toHaveLength(6);
 
     expect((await app().inject({ method: "GET", url: `/videos/${target.video.id}`, headers: bearer("alice") })).statusCode).toBe(404);
     const count = async (table: typeof schema.clips | typeof schema.processingJobs | typeof schema.subtitles) =>
@@ -139,7 +141,7 @@ describe("eliminar proyectos", () => {
     expect(res.statusCode).toBe(204);
     // Solo quedan los archivos del video de otro proyecto.
     expect(files().every((k) => k.includes(other.video.id) || k.includes(other.job.id))).toBe(true);
-    expect(files()).toHaveLength(5);
+    expect(files()).toHaveLength(6);
   });
 
   it("no se borra si uno de sus videos se está procesando", async () => {

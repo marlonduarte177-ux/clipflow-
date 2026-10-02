@@ -61,6 +61,11 @@ export interface FrameScore {
 export interface AIAnalysisProvider {
   /** Nombre para logs y registros de consumo. */
   readonly name: string;
+  /**
+   * Modelo de transcripción (p. ej. "whisper-1"). Si existe, la transcripción de cada video se guarda
+   * y se reutiliza al reintentar o volver a procesar: no se paga dos veces.
+   */
+  readonly transcriptionModel?: string;
   /** Transcribe el audio con tiempos por frase. */
   transcribe(chunks: AudioChunk[]): Promise<{ segments: TranscriptSegment[]; language: string | null; usage: AIUsage }>;
   /** Lee la transcripción y marca los mejores momentos por su contenido. */

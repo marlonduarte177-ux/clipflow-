@@ -172,9 +172,9 @@ describe("API", () => {
       if ([s.Action].flat().includes("s3:ListBucket")) {
         // Listar (para eliminar videos) solo dentro de las carpetas de la app.
         expect(s.Action).toBe("s3:ListBucket");
-        expect(JSON.stringify(s.Condition)).toContain('"s3:prefix":["originals/*","clips/*","thumbnails/*","subtitles/*","exports/*"]');
+        expect(JSON.stringify(s.Condition)).toContain('"s3:prefix":["originals/*","clips/*","thumbnails/*","subtitles/*","exports/*","transcripts/*"]');
       } else {
-        expect(JSON.stringify(s.Resource)).toMatch(/\/(originals|clips|thumbnails|subtitles|exports)\/\*/);
+        expect(JSON.stringify(s.Resource)).toMatch(/\/(originals|clips|thumbnails|subtitles|exports|transcripts)\/\*/);
       }
     }
     t.api.hasResourceProperties("AWS::IAM::Policy", {

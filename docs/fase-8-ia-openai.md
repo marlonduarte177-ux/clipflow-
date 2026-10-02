@@ -222,5 +222,29 @@ despliegue.
 de video.
 - Los modelos `gpt-4o-mini-transcribe` cuestan la mitad, pero no dan los tiempos por frase y palabra
   que necesitan los subtítulos. Por eso se mantiene Whisper.
-- **Pendiente:** hoy, "Reintentar" vuelve a transcribir y a pagar. Guardar la transcripción por video
-  evitaría pagarla dos veces.
+
+## Transcripción guardada por video (02/10/2026)
+
+Antes, "Reintentar" o volver a procesar el mismo video (por ejemplo, con otra duración de clip)
+transcribía de nuevo y se pagaba otra vez.
+
+**Dónde se guarda:** en el mismo bucket privado y cifrado de S3, en `transcripts/<usuario>/<video>/openai-whisper-1.json`.
+Guarda los segmentos con los tiempos de cada palabra, el idioma y el tramo de audio que cubre.
+
+**Por qué no se mezcla con otras:**
+- La ruta lleva el código único del **usuario** y del **video**, y el **proveedor y modelo** en el nombre.
+- Se reutiliza solo si cubre el **mismo tramo de audio** (`OPENAI_MAX_AUDIO_MINUTES`). Si no, se
+  transcribe de nuevo y se reemplaza.
+- Si el archivo no existe o no se puede leer, se transcribe normalmente. Si no se puede guardar, solo se
+  registra en el log y el trabajo sigue.
+- **Se borra con el video,** y también al borrar su proyecto.
+
+**Permisos:**
+- El worker puede leer y escribir en `transcripts/*`.
+- La API puede leer y borrar en `transcripts/*`, para la limpieza al eliminar.
+
+**Costo:**
+- Una transcripción de 2,5 h pesa 1–3 MB; en S3 son ~0,00007 USD al mes.
+- Cada reutilización ahorra la transcripción entera (~0,90 USD en un video de 2,5 h).
+- En el resultado del trabajo, `costs.transcriptionUsd` queda en 0 cuando se reutiliza, y el log dice
+  "transcripción reutilizada (sin costo)".

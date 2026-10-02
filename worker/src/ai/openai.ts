@@ -230,6 +230,10 @@ export function isLikelyHallucination(s: { no_speech_prob?: number; avg_logprob?
  */
 export class OpenAIProvider implements AIAnalysisProvider {
   readonly name = "openai";
+
+  get transcriptionModel(): string {
+    return this.options.transcribeModel;
+  }
   private readonly fetchImpl: typeof fetch;
   private readonly baseUrl: string;
   private readonly maxAttempts: number;

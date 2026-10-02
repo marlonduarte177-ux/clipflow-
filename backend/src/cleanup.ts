@@ -77,6 +77,8 @@ export async function deleteVideoRows(
 
     for (const video of own) {
       files.prefixes.push(`originals/${userId}/${video.id}/`);
+      // Transcripción guardada del video (para no volver a pagarla al reprocesar).
+      files.prefixes.push(`transcripts/${userId}/${video.id}/`);
       if (video.s3UploadId) files.uploads.push({ key: video.s3Key, uploadId: video.s3UploadId });
     }
     for (const job of jobs) {
