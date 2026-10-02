@@ -230,6 +230,14 @@ function VideoState({ video, job }: { video: VideoDto; job: JobDto | undefined }
   if (video.status === "pending_upload") return <span className="text-xs text-yellow-200">Subida sin terminar</span>;
   if (video.status === "rejected") return <span className="text-xs text-red-300">{video.rejectionReason ?? "Video rechazado"}</span>;
   if (job && isActive(job)) return <JobProgress job={job} />;
+  if (job?.status === "completed" && job.result?.downloadOnly) {
+    return (
+      <span className="flex items-center gap-2">
+        <span className="whitespace-nowrap rounded-full border border-accent/60 px-2.5 py-0.5 text-xs font-bold text-accent">Listo para descargar</span>
+        <span className="text-xs text-muted">{formatDuration(video.durationSeconds)}</span>
+      </span>
+    );
+  }
   if (job?.status === "completed") {
     return (
       <span className="flex items-center gap-2">

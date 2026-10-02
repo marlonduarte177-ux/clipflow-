@@ -120,6 +120,16 @@ const IMPORT_STAGES: Record<JobStage, [number, number]> = {
   finalizing: [95, 99],
 };
 
+/** "Solo descargar": la descarga es casi todo el trabajo. */
+const DOWNLOAD_ONLY_STAGES: Record<JobStage, [number, number]> = {
+  downloading: [0, 90],
+  preparing: [90, 99],
+  analyzing: [99, 99],
+  detecting_moments: [99, 99],
+  rendering_clips: [99, 99],
+  finalizing: [99, 99],
+};
+
 const MIME_BY_EXTENSION: Record<string, string> = { ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm", ".mkv": "video/x-matroska" };
 
 /** Título de la plataforma como nombre del archivo (sin caracteres de control). */
@@ -249,7 +259,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       if (retryImport) {
         await deps.db.update(videos).set({ status: "importing", rejectionReason: null }).where(eq(videos.id, video.id));
       }
-      stages = IMPORT_STAGES;
+      stages = (job.params as JobParams).downloadOnly ? DOWNLOAD_ONLY_STAGES : IMPORT_STAGES;
       input = await importFromLink(video, dir);
     } else {
       // 1. Preparar: descargar de S3 y comprobar el contenido real.
@@ -277,6 +287,21 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       .update(videos)
       .set({ status: "ready", durationSeconds: info.durationSeconds, width: info.width, height: info.height, probe: info.raw })
       .where(eq(videos.id, video.id));
+
+    // "Solo descargar": el video ya quedó guardado y revisado. Sin análisis ni clips (si después
+    // quiere clips, la web crea otro trabajo con "Crear clips").
+    if ((job.params as JobParams).downloadOnly) {
+      await progress("preparing", 1, true);
+      const computeUsd = Math.round((((Date.now() - startedAt) / 3_600_000) * deps.costPerHourUsd) * 1_000_000) / 1_000_000;
+      return {
+        clipCount: 0,
+        downloadOnly: true,
+        ai: "disabled",
+        aiReason: "Solo descarga",
+        vision: "disabled",
+        costs: { transcriptionUsd: 0, textUsd: 0, visionUsd: 0, computeUsd, totalUsd: computeUsd },
+      };
+    }
     // Franjas negras "quemadas" en el video (p. ej. horizontal subido como vertical): se quitan.
     const contentBox = await detectContentBox(deps.tools, input, info, controller.signal);
     if (contentBox) deps.log.info({ jobId: job.id, contentBox }, "franjas negras detectadas");

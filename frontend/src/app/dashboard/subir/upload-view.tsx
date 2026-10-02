@@ -13,7 +13,7 @@ import {
   type VideoDto,
 } from "@clipflow/shared";
 import { DEFAULT_DURATION, DurationPicker, SubtitlePicker } from "@/components/clip-options";
-import { CheckIcon, CloseIcon, DownIcon, LinesIcon, UploadIcon } from "@/components/icons";
+import { CheckIcon, CloseIcon, DownIcon, DownloadIcon, LinesIcon, UploadIcon } from "@/components/icons";
 import { RightsDialog } from "@/components/rights-dialog";
 import { Alert } from "@/components/ui";
 import { apiConfigured, apiFetch, formatBytes, formatDuration } from "@/lib/api";
@@ -48,6 +48,8 @@ export function UploadView() {
   const [link, setLink] = useState("");
   const [askRights, setAskRights] = useState(false);
   const [importing, setImporting] = useState(false);
+  /** Por enlace: crear clips o solo bajar el video. */
+  const [importMode, setImportMode] = useState<"clips" | "download">("clips");
 
   const abortRef = useRef<AbortController | null>(null);
   const videoRef = useRef<VideoDto | null>(null);
@@ -147,13 +149,14 @@ export function UploadView() {
     }
   }
 
-  function onImportClick() {
+  function onImportClick(mode: "clips" | "download") {
     const checked = checkImportUrl(link);
     if (!checked.ok) {
       setError(checked.message);
       return;
     }
     setError("");
+    setImportMode(mode);
     setAskRights(true);
   }
 
@@ -163,7 +166,10 @@ export function UploadView() {
       const project = await ensureProject();
       const { video } = await apiFetch<ImportVideoResponse>("/videos/import", {
         method: "POST",
-        body: { projectId: project, url: link.trim(), rightsConfirmed: true, clipDurationSeconds: clipSeconds, subtitleStyle },
+        body:
+          importMode === "download"
+            ? { projectId: project, url: link.trim(), rightsConfirmed: true, downloadOnly: true }
+            : { projectId: project, url: link.trim(), rightsConfirmed: true, clipDurationSeconds: clipSeconds, subtitleStyle },
       });
       router.push(`/dashboard/videos/${video.id}`);
     } catch (err) {
@@ -248,6 +254,16 @@ export function UploadView() {
             placeholder="https://www.tiktok.com/@…/video/…"
             className="h-12 w-full rounded-xl border border-line bg-background px-3.5 text-base outline-none focus:border-accent"
           />
+          {/* Otra acción con el mismo enlace: bajar el video tal cual, sin clips. */}
+          <button
+            type="button"
+            onClick={() => onImportClick("download")}
+            disabled={!link.trim() || importing}
+            className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-accent/50 text-[15px] font-semibold text-accent transition hover:bg-accent/10 disabled:opacity-40"
+          >
+            <DownloadIcon size={18} strokeWidth={2.4} />
+            Descargar solo el video
+          </button>
           <p className="text-xs leading-[17px] text-muted">
             TikTok, Instagram o Facebook, o un enlace directo a un archivo de video. Lo descargamos nosotros: no gasta tus
             datos. Hasta {formatDuration(LIMITS.maxDurationSeconds)}. Para YouTube, descarga el video y súbelo como archivo.
@@ -325,7 +341,7 @@ export function UploadView() {
       <div className="fixed inset-x-0 bottom-0 z-20 border-t border-[#1a1e28] bg-background px-5 pb-[104px] pt-3 sm:static sm:border-0 sm:bg-transparent sm:p-0">
         <div className="mx-auto max-w-xl space-y-2">
           <button
-            onClick={source === "link" && !file ? onImportClick : onCreateClips}
+            onClick={source === "link" && !file ? () => onImportClick("clips") : onCreateClips}
             disabled={source === "link" && !file ? !link.trim() || importing : !file || confirmed || phase === "error"}
             className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-accent text-[17px] font-bold text-black transition hover:brightness-105 disabled:opacity-50"
           >
@@ -341,7 +357,15 @@ export function UploadView() {
         </div>
       </div>
 
-      {askRights ? <RightsDialog url={link} busy={importing} onCancel={() => setAskRights(false)} onConfirm={onConfirmImport} /> : null}
+      {askRights ? (
+        <RightsDialog
+          url={link}
+          busy={importing}
+          action={importMode === "download" ? "descargar" : "importar"}
+          onCancel={() => setAskRights(false)}
+          onConfirm={onConfirmImport}
+        />
+      ) : null}
     </div>
   );
 }

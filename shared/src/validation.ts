@@ -88,6 +88,8 @@ export const ImportVideoSchema = z.object({
   url: z.string().trim().min(1, "Pega el enlace del video").max(2048, "El enlace es demasiado largo"),
   /** El usuario confirma que el video es suyo o que tiene permiso de quien tenga los derechos. */
   rightsConfirmed: z.literal(true, "Debes confirmar que tienes derechos o permiso para usar el video"),
+  /** Solo descargar el video (sin clips): el usuario se lo lleva y puede crear clips después. */
+  downloadOnly: z.boolean().optional(),
   ...ProcessingOptions,
 });
 

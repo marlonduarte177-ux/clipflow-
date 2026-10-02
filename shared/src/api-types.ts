@@ -46,6 +46,12 @@ export interface ImportVideoResponse {
   job: JobDto;
 }
 
+/** URL temporal para bajar el video original. */
+export interface VideoDownloadResponse {
+  url: string;
+  expiresInSeconds: number;
+}
+
 export interface VideoListResponse {
   videos: VideoDto[];
 }
@@ -92,10 +98,14 @@ export type SubtitleStyle = "highlight" | "classic" | "none";
 export interface JobParams {
   clipDurationSeconds?: number;
   subtitleStyle?: SubtitleStyle;
+  /** Importación "solo descargar": se baja el video y no se crean clips. */
+  downloadOnly?: boolean;
 }
 
 export interface JobResult {
   clipCount: number;
+  /** Fue una importación "solo descargar": el video quedó listo para bajarlo, sin clips. */
+  downloadOnly?: boolean;
   /**
    * "used": hubo análisis de IA; "no_speech": se transcribió pero no hay habla (p. ej. gameplay);
    * "disabled": no hay clave; "unavailable": la IA falló; "no_audio": el video no tiene audio.

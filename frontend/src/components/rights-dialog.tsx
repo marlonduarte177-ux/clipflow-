@@ -4,19 +4,23 @@ import { useEffect, useId } from "react";
 
 /**
  * Ventana de aviso de derechos de autor antes de importar un video por enlace.
- * Tocar "Acepto, importar" es la confirmación; la API la vuelve a exigir y guarda cuándo se dio.
+ * Tocar "Acepto, importar" (o "Acepto, descargar") es la confirmación; la API la vuelve a exigir y
+ * guarda cuándo se dio.
  */
 export function RightsDialog({
   url,
   busy,
+  action = "importar",
   onCancel,
   onConfirm,
 }: {
   url: string;
   busy: boolean;
+  action?: "importar" | "descargar";
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const accept = `Acepto, ${action}`;
   const titleId = useId();
   let host = url;
   try {
@@ -53,7 +57,7 @@ export function RightsDialog({
         </ul>
 
         <p className="rounded-2xl border border-line bg-background p-3.5 text-[13px] leading-[18px]">
-          Al tocar <strong>“Acepto, importar”</strong> confirmas que el video es tuyo o que tienes permiso de quien tiene los
+          Al tocar <strong>“{accept}”</strong> confirmas que el video es tuyo o que tienes permiso de quien tiene los
           derechos para usarlo.
         </p>
 
@@ -67,7 +71,7 @@ export function RightsDialog({
             disabled={busy}
             className="h-12 rounded-2xl bg-accent text-[15px] font-bold text-black disabled:opacity-40"
           >
-            {busy ? "Importando…" : "Acepto, importar"}
+            {busy ? (action === "descargar" ? "Descargando…" : "Importando…") : accept}
           </button>
         </div>
       </div>

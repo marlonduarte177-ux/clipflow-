@@ -84,3 +84,43 @@ describe("importar videos por enlace", () => {
     expect(statuses).toEqual([201, 201, 201, 429]);
   });
 });
+
+describe("solo descargar el video (sin clips)", () => {
+  it("crea un trabajo de solo descarga; luego se baja el original con su nombre y se pueden crear clips", async () => {
+    const projectId = await newProject("alice");
+    const res = await importVideo("alice", { projectId, url: "https://www.tiktok.com/@ana/video/9", rightsConfirmed: true, downloadOnly: true });
+    expect(res.statusCode).toBe(201);
+    const { video, job } = res.json();
+    expect(job.params).toEqual({ downloadOnly: true });
+    expect(ctx!.queue.sent).toEqual([job.id]);
+
+    // Mientras se descarga, todavía no hay nada que bajar.
+    const early = await app().inject({ method: "GET", url: `/videos/${video.id}/download`, headers: bearer("alice") });
+    expect(early.statusCode).toBe(409);
+
+    // El worker lo dejó listo (con su título como nombre).
+    await ctx!.database.db
+      .update(schema.videos)
+      .set({ status: "ready", sizeBytes: 1234, originalFilename: "Canción de prueba: ¡hola! 🎵.mp4" })
+      .where(eq(schema.videos.id, video.id));
+    await ctx!.database.db.update(schema.processingJobs).set({ status: "completed" }).where(eq(schema.processingJobs.id, job.id));
+
+    const dl = await app().inject({ method: "GET", url: `/videos/${video.id}/download`, headers: bearer("alice") });
+    expect(dl.statusCode).toBe(200);
+    expect(dl.json().url).toContain(`originals/`);
+    expect(dl.json().url).toContain("Cancion-de-prueba-hola.mp4");
+    // Otro usuario no puede bajarlo.
+    expect((await app().inject({ method: "GET", url: `/videos/${video.id}/download`, headers: bearer("bob") })).statusCode).toBe(404);
+
+    // Después puede crear clips del mismo video (otro trabajo, con sus opciones).
+    const processed = await app().inject({
+      method: "POST",
+      url: `/videos/${video.id}/process`,
+      headers: bearer("alice"),
+      payload: { clipDurationSeconds: 30, subtitleStyle: "highlight" },
+    });
+    expect(processed.statusCode).toBe(201);
+    expect(processed.json().params).toMatchObject({ clipDurationSeconds: 30 });
+    expect(processed.json().id).not.toBe(job.id);
+  });
+});

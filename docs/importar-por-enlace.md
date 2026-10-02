@@ -14,6 +14,27 @@ se quitó; se retomará más adelante.
 - **Si se retoma:** el generador de tokens está en el historial de git (PR #21). Se quitó de la
   imagen para no mantenerlo sin uso.
 
+## Descargar solo el video (02/10/2026)
+
+Debajo del campo del enlace hay un botón **"Descargar solo el video"**: baja el video tal cual,
+sin crear clips.
+- **Misma ventana de derechos de autor;** el botón dice "Acepto, descargar".
+- **El procesador** descarga el video, lo revisa con ffprobe y lo guarda en S3. No hay análisis, IA
+  ni clips, así que es rápido y no gasta OpenAI. La barra muestra "Descargando el video" →
+  "Preparando tu descarga".
+- **Cuando termina,** el video muestra "Tu video está listo" con dos botones:
+  - **Descargar:** pide `GET /videos/:id/download`, una URL firmada de 15 min con el título como nombre
+    de archivo.
+  - **Compartir:** el menú del celular, que en iPhone incluye "Guardar video" en Fotos. Solo aparece en
+    videos de hasta 200 MB, porque baja el archivo entero al celular.
+- **Debajo,** "¿Quieres clips de este video?" permite elegir duración y subtítulos y crear clips con
+  el video ya descargado, sin pegar el enlace otra vez.
+  - Por eso el trabajo de "solo descarga" usa otra clave interna (`download:`): crear clips después
+    abre un trabajo nuevo (`analyze:`).
+- **En "Mis videos"** aparece la etiqueta "Listo para descargar".
+- **API:** `POST /videos/import` con `downloadOnly: true`, sin opciones de clips. El trabajo guarda
+  `params.downloadOnly` y el resultado, `result.downloadOnly`.
+
 ## Aviso de derechos de autor
 
 Antes de importar se abre una ventana obligatoria:
