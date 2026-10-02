@@ -108,7 +108,7 @@ describe("plataformas (yt-dlp)", () => {
   });
 
   it("reconoce los enlaces de plataformas", () => {
-    for (const u of ["https://vm.tiktok.com/x", "https://www.instagram.com/reel/x", "https://www.facebook.com/watch?v=1", "https://fb.watch/x"]) {
+    for (const u of ["https://vm.tiktok.com/x", "https://www.instagram.com/reel/x", "https://www.facebook.com/watch?v=1", "https://fb.watch/x", "https://kick.com/spreen/clips/clip_1"]) {
       expect(isPlatformUrl(u), u).toBe(true);
     }
     for (const u of ["https://example.com/v.mp4", "https://youtu.be/x", "https://vimeo.com/1", "https://tiktok.com.evil.com/x"]) {
@@ -125,6 +125,8 @@ describe("plataformas (yt-dlp)", () => {
     expect(ytDlpErrorMessage("ERROR: unable to download video data: HTTP Error 403: Forbidden").message).toMatch(/bloqueó la descarga/);
     expect(ytDlpErrorMessage("ERROR: [vimeo] 1: The web client only works when logged-in.").message).toMatch(/iniciar sesión/);
     expect(ytDlpErrorMessage("ERROR: [TikTok] 1: Unexpected response from webpage request; please report this issue").message).toMatch(/no permitió descargar/);
+    // Canal de Kick sin transmitir: se explica qué enlace pegar.
+    expect(ytDlpErrorMessage("ERROR: [kick:live] a-log-burner: The channel is not currently live").message).toMatch(/enlace de un clip o de un video guardado/);
     // "page" o "message" no se confunden con "edad".
     expect(ytDlpErrorMessage("ERROR: something about the page message").message).toBe("No pudimos descargar el video de ese enlace.");
   });

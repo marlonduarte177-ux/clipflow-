@@ -12,7 +12,7 @@ import { checkImportUrl, isImportPlatformUrl, isPrivateAddress } from "@clipflow
 
 /**
  * Descarga de videos importados por enlace.
- * - TikTok, Instagram y Facebook: yt-dlp. YouTube y otras plataformas por ahora no (las rechaza
+ * - TikTok, Instagram, Facebook y Kick: yt-dlp. YouTube y otras plataformas por ahora no (las rechaza
  *   `checkImportUrl`: bloquean la descarga desde servidores).
  * - Cualquier otro enlace: debe ser un archivo de video directo. Se descarga con protección
  *   contra SSRF: en cada paso (también en redirecciones) se comprueba la IP REAL a la que se
@@ -35,7 +35,7 @@ export class DownloadError extends Error {
   }
 }
 
-/** true si el enlace es de una plataforma que se descarga con yt-dlp (TikTok, Instagram, Facebook). */
+/** true si el enlace es de una plataforma que se descarga con yt-dlp (TikTok, Instagram, Facebook, Kick). */
 export const isPlatformUrl = isImportPlatformUrl;
 
 export interface DownloadOptions {
@@ -128,6 +128,10 @@ export function ytDlpErrorMessage(stderr: string): { message: string; retryable:
     // Instagram y Facebook piden "iniciar sesión" a los servidores de nube aunque el video sea
     // público: con el proxy se reintenta (si de verdad es privado, falla igual y casi sin costo).
     return { message: "Este video es privado o pide iniciar sesión, así que no se puede descargar.", retryable: false, blocked: true };
+  }
+  // Enlace de un canal (p. ej. kick.com/canal) que no está transmitiendo: no hay un video que bajar.
+  if (s.includes("not currently live")) {
+    return { message: "Ese enlace es de un canal, no de un video. Pega el enlace de un clip o de un video guardado.", retryable: false };
   }
   // yt-dlp no dice cuál de los dos filtros falló (duración o en vivo).
   if (s.includes("does not pass filter")) {

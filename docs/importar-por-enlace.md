@@ -1,7 +1,7 @@
 # Importar videos por enlace
 
-Fecha: 01/10/2026. En **Subir video → Enlace** se pega el enlace de un video de **TikTok, Instagram o
-Facebook**, o un enlace directo a un archivo `.mp4`/`.mov`/`.webm`/`.mkv`. ClipFlow lo descarga y lo
+Fecha: 01/10/2026. En **Subir video → Enlace** se pega el enlace de un video de **TikTok, Instagram,
+Facebook o Kick**, o un enlace directo a un archivo `.mp4`/`.mov`/`.webm`/`.mkv`. ClipFlow lo descarga y lo
 procesa igual que un video subido.
 
 **YouTube, por ahora no (02/10/2026).** Se probó con proxy residencial (Evomi) y con el generador
@@ -9,7 +9,15 @@ de tokens de YouTube, y YouTube siguió bloqueando la descarga (403). A pedido d
 se quitó; se retomará más adelante.
 - La API y la web avisan al pegar el enlace: "Por ahora no se pueden importar videos de YouTube.
   Descárgalo y súbelo como archivo. Por enlace funcionan TikTok, Instagram y Facebook".
-- Lo mismo con Vimeo, X, Twitch, Dailymotion, Reddit y Kick.
+- Lo mismo con Vimeo, X, Twitch, Dailymotion y Reddit.
+
+**Kick (02/10/2026):** se importan **clips** (`kick.com/canal/clips/clip_…` o `kick.com/canal?clip=clip_…`)
+y **videos guardados** (`kick.com/canal/videos/…`), para crear clips o para "Descargar solo el video".
+- Probado: dos clips reales bajaron en 1080p H.264 + AAC, que se ve en el iPhone sin convertir.
+- **Canal en vivo:** se rechaza con "es una transmisión en vivo".
+- **Canal sin transmitir:** "Ese enlace es de un canal, no de un video. Pega el enlace de un clip o de un
+  video guardado".
+- **Videos guardados de más de 3 h:** se rechazan por el límite de duración.
 - El worker también lo rechaza, por si llega un enlace guardado antes del cambio.
 - **Si se retoma:** el generador de tokens está en el historial de git (PR #21). Se quitó de la
   imagen para no mantenerlo sin uso.

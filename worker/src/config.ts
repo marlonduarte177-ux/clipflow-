@@ -13,7 +13,7 @@ const EnvSchema = z.object({
   WORKER_TMP_DIR: z.string().default("/tmp/clipflow"),
   FFMPEG_PATH: z.string().default("ffmpeg"),
   FFPROBE_PATH: z.string().default("ffprobe"),
-  /** yt-dlp para importar videos por enlace (TikTok, Instagram, Facebook). */
+  /** yt-dlp para importar videos por enlace (TikTok, Instagram, Facebook, Kick). */
   YTDLP_PATH: z.string().default("yt-dlp"),
   /**
    * Proxy residencial para plataformas que bloquean a AWS (Instagram, Facebook…). Viene de Secrets Manager;

@@ -11,18 +11,26 @@ describe("enlaces para importar videos", () => {
     for (const link of ["https://www.youtube.com/watch?v=abc", "https://youtu.be/abc", "https://m.youtube.com/shorts/abc"]) {
       const r = checkImportUrl(link);
       expect(r.ok, link).toBe(false);
-      if (!r.ok) expect(r.message).toBe("Por ahora no se pueden importar videos de YouTube. Descárgalo y súbelo como archivo. Por enlace funcionan TikTok, Instagram y Facebook.");
+      if (!r.ok) expect(r.message).toBe("Por ahora no se pueden importar videos de YouTube. Descárgalo y súbelo como archivo. Por enlace funcionan TikTok, Instagram, Facebook y Kick.");
     }
     expect(checkImportUrl("https://vimeo.com/1")).toMatchObject({ ok: false });
     // Un dominio que solo se parece no se confunde.
     expect(checkImportUrl("https://notyoutube.com/v.mp4")).toMatchObject({ ok: true });
   });
 
-  it("reconoce TikTok, Instagram y Facebook sin dejarse engañar", () => {
-    for (const u of ["https://vm.tiktok.com/x", "https://www.instagram.com/reel/x", "https://www.facebook.com/watch?v=1", "https://fb.watch/x"]) {
+  it("reconoce TikTok, Instagram, Facebook y Kick sin dejarse engañar", () => {
+    for (const u of [
+      "https://vm.tiktok.com/x",
+      "https://www.instagram.com/reel/x",
+      "https://www.facebook.com/watch?v=1",
+      "https://fb.watch/x",
+      "https://kick.com/spreen/clips/clip_01J8RGZRKHXHXXKJEHGRM932A5",
+      "https://kick.com/destiny?clip=clip_01H9SKET879NE7N9RJRRDS98J3",
+      "https://kick.com/xqc/videos/5c697a87-afce-4256-b01f-3c8fe71ef5cb",
+    ]) {
       expect(isImportPlatformUrl(u), u).toBe(true);
     }
-    for (const u of ["https://youtu.be/x", "https://example.com/v.mp4", "https://tiktok.com.evil.com/x", "no es un enlace"]) {
+    for (const u of ["https://youtu.be/x", "https://example.com/v.mp4", "https://tiktok.com.evil.com/x", "https://kick.com.evil.com/x", "no es un enlace"]) {
       expect(isImportPlatformUrl(u), u).toBe(false);
     }
   });
