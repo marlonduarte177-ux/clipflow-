@@ -72,6 +72,8 @@ export interface DownloadOptions {
    * los servidores de nube. Se usa solo cuando hace falta (ver `downloadWithYtDlp`).
    */
   proxyUrl?: string | null;
+  /** Sin proxy: por qué ("mal escrito", "sin configurar"). Se agrega al mensaje si nos bloquean. */
+  proxyProblem?: string | null;
 }
 
 export interface Downloaded {
@@ -102,6 +104,29 @@ export function ytDlpErrorMessage(stderr: string): { message: string; retryable:
     const { reason, retryable } = proxyFailure(s);
     return { message: `Nuestro servicio de descarga no respondió (proxy: ${reason}). Lo intentaremos de nuevo.`, retryable };
   }
+  // Restricción de edad: YouTube exige una cuenta; un proxy no lo arregla.
+  if (s.includes("confirm your age") || s.includes("age-restricted") || s.includes("inappropriate for some users")) {
+    return {
+      message: "Este video tiene restricción de edad y la plataforma pide iniciar sesión para verlo. Descárgalo y súbelo como archivo.",
+      retryable: false,
+    };
+  }
+  // Bloqueo por país (el del servidor o el del proxy): por el proxy se intenta desde EE. UU.
+  if (s.includes("in your country") || s.includes("geo restrict") || s.includes("geo-restrict")) {
+    return {
+      message: "Este video no está disponible desde el país de nuestros servidores. Descárgalo y súbelo como archivo.",
+      retryable: false,
+      blocked: true,
+    };
+  }
+  // "This content isn't available, try again later": así responde YouTube a IPs que marcó.
+  if (s.includes("content isn't available") || s.includes("content isn\u2019t available") || s.includes("try again later")) {
+    return {
+      message: "La plataforma bloqueó la descarga desde nuestros servidores. Descarga el video y súbelo como archivo.",
+      retryable: false,
+      blocked: true,
+    };
+  }
   if ((s.includes("confirm you") && s.includes("bot")) || s.includes("http error 403")) {
     return {
       message: "La plataforma bloqueó la descarga desde nuestros servidores. Descarga el video y súbelo como archivo.",
@@ -115,9 +140,7 @@ export function ytDlpErrorMessage(stderr: string): { message: string; retryable:
     s.includes("login required") ||
     s.includes("log in") ||
     s.includes("logged-in") ||
-    s.includes("logged in") ||
-    s.includes("age-restricted") ||
-    s.includes("confirm your age")
+    s.includes("logged in")
   ) {
     // Instagram, Vimeo y otras piden "iniciar sesión" a los servidores de nube aunque el video sea
     // público: con el proxy se reintenta (si de verdad es privado, falla igual y casi sin costo).
@@ -177,7 +200,17 @@ const PROXY_FIRST_DOMAINS = ["youtube.com", "youtu.be"];
  */
 export async function downloadWithYtDlp(url: string, dir: string, options: DownloadOptions): Promise<Omit<Downloaded, "sizeBytes">> {
   const proxy = options.proxyUrl ? withStickySession(options.proxyUrl) : null;
-  if (!proxy) return runYtDlp(url, dir, options, null);
+  if (!proxy) {
+    try {
+      return await runYtDlp(url, dir, options, null);
+    } catch (err) {
+      // Bloqueado y sin proxy utilizable: se dice por qué, para no tener que buscarlo en CloudWatch.
+      if (err instanceof DownloadError && err.blocked && options.proxyProblem) {
+        throw new DownloadError(`${err.message} (proxy: ${options.proxyProblem})`, err.retryable, true, err.detail);
+      }
+      throw err;
+    }
+  }
   const host = new URL(url).hostname.toLowerCase();
   if (PROXY_FIRST_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`))) return runYtDlp(url, dir, options, proxy);
   try {
@@ -192,16 +225,25 @@ export async function downloadWithYtDlp(url: string, dir: string, options: Downl
 }
 
 /**
- * Misma IP durante toda la descarga: YouTube ata el enlace del video a la IP que lo pidió, y un
- * proxy que rota la IP en cada petición lo rompería. En Evomi la sesión fija se pide agregando
- * `_session-<8 caracteres>` a la contraseña (dura 60 min). Otros proveedores: pegar la URL ya
- * con su sesión fija.
+ * Opciones de Evomi, que van agregadas a la contraseña:
+ * - **País fijo** (`_country-US`, salvo que la contraseña ya traiga uno). Con "Mundial", cada
+ *   descarga salía de un país al azar y YouTube respondía "no disponible en tu país" para videos
+ *   con licencia. EE. UU. es donde YouTube tiene más catálogo disponible.
+ * - **Misma IP durante toda la descarga** (`_session-<8 caracteres>`, 60 min): YouTube ata el
+ *   enlace del video a la IP que lo pidió, y un proxy que rota la IP en cada petición lo rompería.
+ * Otros proveedores: pegar la URL ya con su país y su sesión fija.
  */
 export function withStickySession(proxyUrl: string): string {
   const url = new URL(proxyUrl);
-  if (url.hostname.endsWith("evomi.com") && url.password && !decodeURIComponent(url.password).includes("_session-")) {
-    const session = randomBytes(6).toString("base64url").replace(/[^A-Za-z0-9]/g, "x").slice(0, 8);
-    url.password = `${url.password}_session-${session}_lifetime-60`;
+  if (url.hostname.endsWith("evomi.com") && url.password) {
+    const password = decodeURIComponent(url.password);
+    let extra = "";
+    if (!password.includes("_country-")) extra += "_country-US";
+    if (!password.includes("_session-")) {
+      const session = randomBytes(6).toString("base64url").replace(/[^A-Za-z0-9]/g, "x").slice(0, 8);
+      extra += `_session-${session}_lifetime-60`;
+    }
+    if (extra) url.password = `${url.password}${extra}`;
   }
   return url.toString();
 }

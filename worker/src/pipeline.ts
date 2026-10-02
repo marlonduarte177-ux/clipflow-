@@ -86,6 +86,8 @@ export interface PipelineDeps {
   ytDlpPath?: string;
   /** Proxy residencial para plataformas que bloquean a AWS (null = sin proxy). */
   downloadProxyUrl?: string | null;
+  /** Sin proxy: por qué ("mal escrito", "sin configurar"). */
+  downloadProxyProblem?: string | null;
   /** Descarga de enlaces (se reemplaza en tests). */
   download?: typeof downloadFromUrl;
   /** Análisis de imágenes con IA (experimental, tiene costo por imagen). */
@@ -187,6 +189,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       downloaded = await (deps.download ?? downloadFromUrl)(video.sourceUrl, workDir, {
         ytDlpPath: deps.ytDlpPath ?? "yt-dlp",
         proxyUrl: deps.downloadProxyUrl ?? null,
+        proxyProblem: deps.downloadProxyProblem ?? null,
         ffmpegPath: deps.tools.ffmpegPath,
         maxBytes: deps.product.upload.maxBytes,
         maxDurationSeconds: deps.product.upload.maxDurationSeconds,

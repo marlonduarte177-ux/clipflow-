@@ -4,7 +4,7 @@ import pino from "pino";
 import { loadProductConfig } from "@clipflow/shared";
 import { createDb, databaseUrlFromEnv } from "@clipflow/shared/db";
 import { OpenAIProvider } from "./ai/openai.js";
-import { loadWorkerConfig, looksLikeOpenAIKey, parseProxyUrl } from "./config.js";
+import { describeProxyValue, loadWorkerConfig, looksLikeOpenAIKey, parseProxyUrl } from "./config.js";
 import { runConsumer } from "./consumer.js";
 import { createS3WorkerStorage } from "./storage.js";
 
@@ -48,7 +48,7 @@ log.info(
     vision: config.AI_VISION_ENABLED,
     faces: config.FACE_TRACKING_ENABLED,
     // Solo el host del proxy: nunca el usuario ni la contraseña.
-    downloadProxy: downloadProxyUrl ? new URL(downloadProxyUrl).hostname : "desactivado",
+    downloadProxy: downloadProxyUrl ? new URL(downloadProxyUrl).hostname : describeProxyValue(config.DOWNLOAD_PROXY_URL),
   },
   "worker iniciado",
 );
@@ -73,6 +73,7 @@ try {
       faceTracking: config.FACE_TRACKING_ENABLED,
       ytDlpPath: config.YTDLP_PATH,
       downloadProxyUrl,
+      downloadProxyProblem: downloadProxyUrl ? null : describeProxyValue(config.DOWNLOAD_PROXY_URL),
       vision: {
         enabled: config.AI_VISION_ENABLED,
         intervalSeconds: config.AI_VISION_INTERVAL_SECONDS,

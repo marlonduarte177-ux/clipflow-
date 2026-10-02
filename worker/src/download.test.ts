@@ -173,7 +173,7 @@ describe("proxy residencial para plataformas que bloquean a AWS", () => {
     expect(result).toMatchObject({ title: "Video de prueba", sizeBytes: 5 });
     const calls = yt.calls();
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatch(/proxy=http:\/\/user:secreto_session-[A-Za-z0-9]{8}_lifetime-60@rp\.evomi\.com:1000/);
+    expect(calls[0]).toMatch(/proxy=http:\/\/user:secreto_country-US_session-[A-Za-z0-9]{8}_lifetime-60@rp\.evomi\.com:1000/);
     expect(calls[0]).toContain("sort=res:720,");
   });
 
@@ -188,7 +188,17 @@ describe("proxy residencial para plataformas que bloquean a AWS", () => {
     const calls = yt.calls();
     expect(calls).toHaveLength(2);
     expect(calls[0]).toBe("call proxy= sort=res:1080,vcodec:h264,acodec:aac");
-    expect(calls[1]).toMatch(/proxy=http:\/\/user:secreto_session-/);
+    expect(calls[1]).toMatch(/proxy=http:\/\/user:secreto_country-US_session-/);
+  });
+
+  it("si el proxy está mal escrito y nos bloquean, el mensaje lo dice", async () => {
+    const yt = fakeYtDlp("proxy-bad");
+    const error = await downloadFromUrl("https://youtu.be/abc", yt.work, {
+      ...options(),
+      ytDlpPath: yt.script,
+      proxyProblem: "mal escrito",
+    }).catch((e) => e);
+    expect(error.message).toMatch(/bloqueó la descarga.*\(proxy: mal escrito\)$/);
   });
 
   it("sin proxy configurado se comporta como antes, y el detalle del error no lleva contraseñas", async () => {
@@ -201,9 +211,11 @@ describe("proxy residencial para plataformas que bloquean a AWS", () => {
     expect(yt.calls()).toHaveLength(1);
   });
 
-  it("sesión fija solo para Evomi y sin duplicarla", () => {
-    expect(withStickySession("http://u:p@rp.evomi.com:1000")).toMatch(/^http:\/\/u:p_session-[A-Za-z0-9]{8}_lifetime-60@rp\.evomi\.com:1000\/?$/);
-    expect(withStickySession("http://u:p_session-abcdefgh@rp.evomi.com:1000")).not.toMatch(/_lifetime/);
+  it("Evomi: país fijo y sesión fija, sin duplicar lo que ya trae la contraseña", () => {
+    expect(withStickySession("http://u:p@rp.evomi.com:1000")).toMatch(
+      /^http:\/\/u:p_country-US_session-[A-Za-z0-9]{8}_lifetime-60@rp\.evomi\.com:1000\/?$/,
+    );
+    expect(withStickySession("http://u:p_country-MX_session-abcdefgh@rp.evomi.com:1000")).toBe("http://u:p_country-MX_session-abcdefgh@rp.evomi.com:1000/");
     expect(withStickySession("http://u:p@proxy.example.com:8080")).toBe("http://u:p@proxy.example.com:8080/");
   });
 
@@ -226,5 +238,20 @@ describe("proxy residencial para plataformas que bloquean a AWS", () => {
     expect(down).toMatchObject({ retryable: true });
     expect(down.message).toContain("tiempo de espera agotado");
     expect(ytDlpErrorMessage("ERROR: [instagram] x: Requested content is not available, rate-limit reached or login required").blocked).toBe(true);
+  });
+
+  it("YouTube: restricción de edad, bloqueo por país e IP marcada tienen su propio mensaje", () => {
+    // Visto con youtu.be/3nVF2EY_iHg (02/10/2026): el proxy no lo arregla, no se reintenta por él.
+    const age = ytDlpErrorMessage("ERROR: [youtube] 3nVF2EY_iHg: Sign in to confirm your age. Use --cookies-from-browser or --cookies");
+    expect(age.message).toMatch(/restricción de edad/);
+    expect(age.blocked).toBeFalsy();
+    const geo = ytDlpErrorMessage("ERROR: [youtube] x: Video unavailable. The uploader has not made this video available in your country");
+    expect(geo).toMatchObject({ blocked: true });
+    expect(geo.message).toMatch(/país/);
+    const flagged = ytDlpErrorMessage("ERROR: [youtube] x: Video unavailable. This content isn’t available, try again later.");
+    expect(flagged).toMatchObject({ blocked: true });
+    expect(flagged.message).toMatch(/bloqueó la descarga/);
+    // Un video borrado de verdad sigue diciendo que no existe.
+    expect(ytDlpErrorMessage("ERROR: [youtube] x: Video unavailable. This video has been removed by the uploader").message).toMatch(/No encontramos/);
   });
 });
