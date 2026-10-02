@@ -106,9 +106,15 @@ Desde el 02/10/2026 el procesador puede descargar a través de un proxy residenc
   - **TikTok:** ya funciona sin proxy, así que normalmente no gasta nada.
 - **Por el proxy se descarga hasta 720p:** se paga por GB y para clips verticales alcanza.
   - Un video de 10 min pesa ~50–100 MB, unos 0,03–0,05 USD.
-- **Sesión fija:** YouTube ata el enlace del video a la IP que lo pidió. Con Evomi el procesador
-  agrega solo `_session-XXXXXXXX_lifetime-60` a la contraseña, para mantener la misma IP durante toda la descarga.
-  - Con otro proveedor hay que pegar la URL ya con su sesión fija.
+- **Opciones de Evomi:** el procesador las agrega solo a la contraseña.
+  - **País fijo, EE. UU.** (`_country-US`). Con "Mundial", cada descarga salía de un país al azar
+    y YouTube respondía "no disponible en tu país" para videos con licencia (visto el 02/10/2026).
+    Si la contraseña ya trae `_country-XX`, se respeta.
+  - **Sesión fija** (`_session-XXXXXXXX_lifetime-60`): YouTube ata el enlace del video a la IP que
+    lo pidió, así que se mantiene la misma IP durante toda la descarga.
+  - Con otro proveedor hay que pegar la URL ya con su país y su sesión fija.
+- **Restricción de edad:** YouTube exige una cuenta y el proxy no lo arregla. La app lo dice con su
+  propio mensaje.
 - **Seguridad:**
   - El usuario y la contraseña del proxy viven solo en Secrets Manager. Nunca están en GitHub ni en
     el código.
@@ -121,28 +127,33 @@ Desde el 02/10/2026 el procesador puede descargar a través de un proxy residenc
   - Estos tres no se reintentan, porque no se arreglan solos. Un corte de conexión sí se reintenta.
   - En CloudWatch el detalle completo empieza con `[proxy]`.
 - **Sin proxy configurado** todo funciona igual que antes.
-- **Configuración:** el procesador lee la variable `DOWNLOAD_PROXY_URL`, con el formato
-  `http://USUARIO:CONTRASEÑA@rp.evomi.com:1000`. Si no es una URL válida, el proxy queda apagado.
+  - Si una plataforma bloquea y el proxy no se puede usar, el mensaje lo dice al final: `(proxy: sin
+    configurar)` o `(proxy: mal escrito)`.
+- **Configuración:** el procesador lee la variable `DOWNLOAD_PROXY_URL`. Acepta estos formatos:
+  - `http://USUARIO:CONTRASEÑA@rp.evomi.com:1000`;
+  - el que copia Evomi: `rp.evomi.com:1000:USUARIO:CONTRASEÑA`, con o sin `http://` delante. Los
+    símbolos de la contraseña se codifican solos.
   - La infraestructura crea el secreto `clipflow-<etapa>/download-proxy` con un valor de relleno, y ECS
     se lo entrega solo al procesador.
 
 ### Cómo activarlo (una sola vez)
 
 1. Despliega (Actions → Deploy → staging).
-2. En Evomi, en la pantalla del proxy residencial, elige **HTTP**, **puerto 1000** y país **Mundial**.
-   Copia tu usuario y tu contraseña.
+2. En Evomi, en la pantalla del proxy residencial, elige **HTTP** y **puerto 1000**. El país no
+   importa: el procesador fija EE. UU. Copia el proxy tal cual lo muestra Evomi.
 3. En AWS → **Secrets Manager**, abre `clipflow-staging/download-proxy`.
 4. Toca **Recuperar el valor del secreto → Editar** y pestaña **Texto sin formato**.
-5. Borra lo que hay y pega:
-   `http://TU_USUARIO:TU_CONTRASEÑA@rp.evomi.com:1000`
+5. Borra lo que hay y pega el proxy de Evomi tal cual, por ejemplo
+   `rp.evomi.com:1000:TU_USUARIO:TU_CONTRASEÑA`.
 6. Guarda.
    - El procesador se apaga cuando no hay trabajo, así que el siguiente video ya usa el proxy.
    - Si hay un video procesándose en ese momento, el proxy empieza a usarse cuando el procesador vuelva a arrancar.
 7. Para comprobarlo, busca `worker iniciado` en CloudWatch (`/clipflow/staging/worker`): debe decir
    `downloadProxy: "rp.evomi.com"`.
 
-Si el usuario o la contraseña tienen símbolos como `@`, `:` o `/`, hay que escribirlos codificados:
-`@` → `%40`, `:` → `%3A`, `/` → `%2F`.
+Con el formato `http://USUARIO:CONTRASEÑA@…`, los símbolos `@`, `:` o `/` del usuario o la contraseña
+hay que escribirlos codificados: `@` → `%40`, `:` → `%3A`, `/` → `%2F`. Con el formato de Evomi no hace falta.
+
 - **Videos privados o con restricción de edad:** no se pueden importar.
 - **yt-dlp hay que actualizarlo seguido** (las plataformas cambian): se cambia `YTDLP_VERSION` en el
   Dockerfile y se vuelve a desplegar.
