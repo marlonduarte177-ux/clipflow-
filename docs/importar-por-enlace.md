@@ -113,8 +113,13 @@ Desde el 02/10/2026 el procesador puede descargar a través de un proxy residenc
   - El usuario y la contraseña del proxy viven solo en Secrets Manager. Nunca están en GitHub ni en
     el código.
   - En los registros solo aparece el host del proxy; las contraseñas se borran de cualquier mensaje de error.
-- **Si el proxy falla** (credenciales mal puestas o saldo agotado): el usuario ve "Nuestro servicio
-  de descarga no respondió" y se reintenta. En CloudWatch el detalle empieza con `[proxy]`.
+- **Si el proxy falla**, la app dice el motivo entre paréntesis. Ejemplo: "Nuestro servicio de
+  descarga no respondió (proxy: usuario o contraseña incorrectos, 407)".
+  - **407:** el usuario o la contraseña del secreto están mal. Revisa también los símbolos codificados.
+  - **402:** la cuenta no tiene saldo.
+  - **403:** el proveedor no permite ese sitio; puede pedir verificar la identidad (KYC).
+  - Estos tres no se reintentan, porque no se arreglan solos. Un corte de conexión sí se reintenta.
+  - En CloudWatch el detalle completo empieza con `[proxy]`.
 - **Sin proxy configurado** todo funciona igual que antes.
 - **Configuración:** el procesador lee la variable `DOWNLOAD_PROXY_URL`, con el formato
   `http://USUARIO:CONTRASEÑA@rp.evomi.com:1000`. Si no es una URL válida, el proxy queda apagado.

@@ -214,9 +214,17 @@ describe("proxy residencial para plataformas que bloquean a AWS", () => {
   });
 
   it("los fallos del propio proxy se reintentan y no se confunden con un bloqueo", () => {
-    const proxyDown = ytDlpErrorMessage("ERROR: Unable to download webpage: ('Unable to connect to proxy', OSError('Tunnel connection failed: 407'))");
-    expect(proxyDown).toMatchObject({ retryable: true });
-    expect(proxyDown.blocked).toBeFalsy();
+    // Credenciales mal puestas: la app dice el motivo y no se reintenta en vano.
+    const badAuth = ytDlpErrorMessage("ERROR: Unable to download webpage: ('Unable to connect to proxy', OSError('Tunnel connection failed: 407 Proxy Authentication Required'))");
+    expect(badAuth).toMatchObject({ retryable: false });
+    expect(badAuth.message).toContain("(proxy: usuario o contraseña incorrectos, 407)");
+    expect(badAuth.blocked).toBeFalsy();
+    // Mismo error con curl (el modo que imita a un navegador).
+    expect(ytDlpErrorMessage("ERROR: [youtube] x: curl: (56) CONNECT tunnel failed, response 407").message).toContain("407");
+    expect(ytDlpErrorMessage("ERROR: curl: (56) CONNECT tunnel failed, response 402").message).toContain("sin saldo");
+    const down = ytDlpErrorMessage("ERROR: curl: (7) Failed to connect to proxy rp.evomi.com port 1000 after 30001 ms: Timeout was reached");
+    expect(down).toMatchObject({ retryable: true });
+    expect(down.message).toContain("tiempo de espera agotado");
     expect(ytDlpErrorMessage("ERROR: [instagram] x: Requested content is not available, rate-limit reached or login required").blocked).toBe(true);
   });
 });
