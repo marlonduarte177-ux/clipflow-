@@ -14,6 +14,23 @@ se quitó; se retomará más adelante.
 **Kick (02/10/2026):** se importan **clips** (`kick.com/canal/clips/clip_…` o `kick.com/canal?clip=clip_…`)
 y **videos guardados** (`kick.com/canal/videos/…`), para crear clips o para "Descargar solo el video".
 - Probado: dos clips reales bajaron en 1080p H.264 + AAC, que se ve en el iPhone sin convertir.
+- **Códigos nuevos de Kick (arreglo del 02/10/2026):**
+  - **Qué cambió:** desde septiembre de 2026 los enlaces de videos guardados usan otro código
+    (`kick.com/canal/videos/01a0b24f-2b40-7d20-…`, un UUIDv7). La API que usa yt-dlp solo conoce el código
+    antiguo y responde 404, así que la app decía "No encontramos un video" con videos de ayer.
+  - **Solución:** un complemento propio de yt-dlp,
+    `worker/ytdlp-plugins/clipflow/yt_dlp_plugins/extractor/kick_video_page.py`.
+    - Lee la página del video, imitando a un navegador, y toma de su registro la dirección del video
+      (`recording_url`), el título y la duración.
+    - Solo actúa con los códigos nuevos; los antiguos los sigue resolviendo yt-dlp.
+    - El procesador lo carga con `--plugin-dirs` y la imagen lo copia.
+  - **Probado:** con un video de punicher de 2 h se leyeron el título y la duración, se bajaron 20 s en
+    720p H.264 + AAC, y la descarga completa arrancó a ~35 MB/s.
+  - Si yt-dlp lo resuelve en una versión futura, se puede borrar el complemento.
+- **Kick se baja hasta 720p:** los videos guardados duran horas, y en 1080p60 pesan ~2,8 GB por hora; en
+  720p, la mitad. Para clips verticales alcanza.
+  - En los videos de Kick (HLS), yt-dlp no aplica el tope de tamaño antes de bajar. Sí se aplican el
+    límite de 3 h y la revisión de tamaño después.
 - **Canal en vivo:** se rechaza con "es una transmisión en vivo".
 - **Canal sin transmitir:** "Ese enlace es de un canal, no de un video. Pega el enlace de un clip o de un
   video guardado".

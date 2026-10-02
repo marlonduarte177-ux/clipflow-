@@ -7,6 +7,7 @@ import http, { type IncomingMessage } from "node:http";
 import https from "node:https";
 import { isIP } from "node:net";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { pipeline } from "node:stream/promises";
 import { checkImportUrl, isImportPlatformUrl, isPrivateAddress } from "@clipflow/shared";
 
@@ -231,6 +232,8 @@ async function runYtDlp(url: string, dir: string, options: DownloadOptions, prox
     "--no-playlist",
     "--no-warnings",
     "--no-cache-dir",
+    // Complementos propios de yt-dlp (p. ej. Kick con los códigos de video nuevos).
+    ...(existsSync(YTDLP_PLUGINS_DIR) ? ["--plugin-dirs", YTDLP_PLUGINS_DIR] : []),
     "--newline",
     "--no-simulate",
     // --print deja a yt-dlp en modo silencioso: esto vuelve a mostrar el avance.
@@ -243,7 +246,9 @@ async function runYtDlp(url: string, dir: string, options: DownloadOptions, prox
     "-f",
     "bv*+ba/b",
     "-S",
-    proxy ? "res:720,vcodec:h264,acodec:aac" : "res:1080,vcodec:h264,acodec:aac",
+    // Hasta 720p por el proxy (se paga por GB) y en Kick: sus videos guardados duran horas y en
+    // 1080p60 pesan ~2,8 GB por hora (en 720p, la mitad; para clips verticales alcanza).
+    proxy || isKickUrl(url) ? "res:720,vcodec:h264,acodec:aac" : "res:1080,vcodec:h264,acodec:aac",
     ...(proxy ? ["--proxy", proxy] : []),
     "--merge-output-format",
     "mp4",
@@ -315,6 +320,14 @@ async function runYtDlp(url: string, dir: string, options: DownloadOptions, prox
   }
   return { file, title };
 }
+
+/**
+ * Complementos propios de yt-dlp (ver `worker/ytdlp-plugins`). Hoy: Kick con los códigos de video
+ * nuevos (UUIDv7), que la API que usa yt-dlp ya no reconoce.
+ */
+export const YTDLP_PLUGINS_DIR = fileURLToPath(new URL("../ytdlp-plugins/", import.meta.url));
+
+const isKickUrl = (url: string) => /(^|\.)kick\.com$/i.test(new URL(url).hostname);
 
 /** `--ffmpeg-location` con ruta completa (buscada en el PATH si viene solo el nombre); si no está, nada. */
 export function ffmpegLocationArgs(ffmpegPath: string): string[] {
