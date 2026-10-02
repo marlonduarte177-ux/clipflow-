@@ -24,14 +24,14 @@ describe("importar videos por enlace", () => {
     const projectId = await newProject("alice");
     const res = await importVideo("alice", {
       projectId,
-      url: "https://www.youtube.com/watch?v=abc123#t=5",
+      url: "https://www.tiktok.com/@ana/video/123#t=5",
       rightsConfirmed: true,
       clipDurationSeconds: 45,
       subtitleStyle: "classic",
     });
     expect(res.statusCode).toBe(201);
     const { video, job } = res.json();
-    expect(video).toMatchObject({ status: "importing", originalFilename: "youtube.com/watch", sourceUrl: "https://www.youtube.com/watch?v=abc123" });
+    expect(video).toMatchObject({ status: "importing", originalFilename: "tiktok.com/@ana/video/123", sourceUrl: "https://www.tiktok.com/@ana/video/123" });
     expect(job).toMatchObject({ status: "queued", params: { clipDurationSeconds: 45, subtitleStyle: "classic" } });
     expect(ctx!.queue.sent).toEqual([job.id]);
 
@@ -49,6 +49,14 @@ describe("importar videos por enlace", () => {
       const res = await importVideo("alice", { projectId, url: "https://example.com/v.mp4", rightsConfirmed });
       expect(res.statusCode).toBe(400);
     }
+    expect(ctx!.queue.sent).toEqual([]);
+  });
+
+  it("YouTube por ahora no se importa: responde con un mensaje claro y no crea nada", async () => {
+    const projectId = await newProject("alice");
+    const res = await importVideo("alice", { projectId, url: "https://youtu.be/abc", rightsConfirmed: true });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatchObject({ code: "invalid_url", message: expect.stringContaining("no se pueden importar videos de YouTube") });
     expect(ctx!.queue.sent).toEqual([]);
   });
 

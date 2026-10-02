@@ -1,8 +1,18 @@
 # Importar videos por enlace
 
-Fecha: 01/10/2026. En **Subir video → Enlace** se pega el enlace de un video (YouTube, TikTok,
-Instagram, Facebook, X, Vimeo y otros, o un enlace directo a un archivo `.mp4`/`.mov`/`.webm`/`.mkv`).
-ClipFlow lo descarga y lo procesa igual que un video subido.
+Fecha: 01/10/2026. En **Subir video → Enlace** se pega el enlace de un video de **TikTok, Instagram o
+Facebook**, o un enlace directo a un archivo `.mp4`/`.mov`/`.webm`/`.mkv`. ClipFlow lo descarga y lo
+procesa igual que un video subido.
+
+**YouTube, por ahora no (02/10/2026).** Se probó con proxy residencial (Evomi) y con el generador
+de tokens de YouTube, y YouTube siguió bloqueando la descarga (403). A pedido del dueño del producto
+se quitó; se retomará más adelante.
+- La API y la web avisan al pegar el enlace: "Por ahora no se pueden importar videos de YouTube.
+  Descárgalo y súbelo como archivo. Por enlace funcionan TikTok, Instagram y Facebook".
+- Lo mismo con Vimeo, X, Twitch, Dailymotion, Reddit y Kick.
+- El worker también lo rechaza, por si llega un enlace guardado antes del cambio.
+- **Si se retoma:** el generador de tokens está en el historial de git (PR #21). Se quitó de la
+  imagen para no mantenerlo sin uso.
 
 ## Aviso de derechos de autor
 
@@ -31,11 +41,10 @@ varios países.
    curso (3, sumando subidas e importaciones). Crea el video en estado `importing` y su trabajo. La
    API **nunca descarga nada**.
 2. **El worker descarga** (nueva etapa `downloading`; la barra muestra "Descargando el video"):
-   - **Plataformas conocidas:** con **yt-dlp** (versión fijada `2026.8.19` en `worker/Dockerfile`),
+   - **TikTok, Instagram y Facebook:** con **yt-dlp** (versión fijada `2026.8.19` en `worker/Dockerfile`),
      con `curl-cffi` para "parecerse" a un navegador real.
      - Hasta 1080p, prefiriendo H.264/AAC; todo en un `.mp4`.
      - Rechaza transmisiones en vivo y videos de más de 3 h.
-     - Usa Node (ya en la imagen) como intérprete de JavaScript, que YouTube exige.
      - TikTok exige la imitación de navegador. Sin `curl-cffi`, en la primera prueba real
        (01/10/2026) TikTok respondió "Unexpected response". Con `curl-cffi` se probó un enlace
        `vt.tiktok.com`: lee título y duración y descarga H.264 + AAC.
@@ -79,7 +88,7 @@ de AWS en `169.254.170.2`. Para evitarlo:
     hexadecimal o como IPv6 (`::ffff:7f00:1`).
 - **En descargas directas, el worker** comprueba la **IP real al conectar**, en cada redirección.
   Así no hay carrera con el DNS: un dominio que resuelve a una IP interna también se bloquea.
-- **yt-dlp** solo se usa con dominios de plataformas conocidas.
+- **yt-dlp** solo se usa con los dominios de TikTok, Instagram y Facebook.
 - **El enlace completo no se escribe en los registros**, solo el dominio: puede llevar datos
   privados.
 - **IAM:** el worker puede **agregar** originales (`PutObject` y `AbortMultipartUpload` en
@@ -87,48 +96,31 @@ de AWS en `169.254.170.2`. Para evitarlo:
 
 ## Límites honestos
 
-- **Bloqueos de las plataformas:** YouTube, Vimeo, Instagram y otras bloquean a menudo las descargas
-  desde servidores de nube (AWS). Piden iniciar sesión o responden "403".
-  - En las pruebas de desarrollo, YouTube leyó el video pero bloqueó la descarga (403), y Vimeo
-    pidió iniciar sesión.
-  - Cuando pasa, el usuario ve: "La plataforma bloqueó la descarga desde nuestros servidores.
-    Descarga el video y súbelo como archivo".
-  - Para YouTube y compañía hay un **proxy residencial** opcional (ver abajo).
+- **Bloqueos de las plataformas:** Instagram y Facebook a veces bloquean las descargas desde
+  servidores de nube (AWS): piden iniciar sesión o responden "403".
+  - Cuando pasa, primero se reintenta por el **proxy residencial** (ver abajo).
+  - Si aun así falla, el usuario ve el motivo y la sugerencia de subirlo como archivo.
 
-## Proxy residencial (YouTube y plataformas que bloquean a AWS)
+## Proxy residencial (plataformas que bloquean a AWS)
 
 Desde el 02/10/2026 el procesador puede descargar a través de un proxy residencial (probado con
 **Evomi**, ~0,49 USD/GB). Así la descarga sale desde IPs "de casa" en lugar de AWS.
-- **Cuándo se usa:**
-  - **YouTube y youtu.be:** siempre por el proxy, porque desde AWS siempre bloquean.
-  - **El resto** (Instagram, Facebook, Vimeo…): primero sin proxy, que es gratis. Solo si la
-    plataforma bloquea, se reintenta una vez por el proxy.
-  - **TikTok:** ya funciona sin proxy, así que normalmente no gasta nada.
+- **Cuándo se usa:** siempre se intenta primero sin proxy, que es gratis. Solo si la plataforma
+  bloquea, se reintenta una vez por el proxy.
+  - **TikTok** funciona sin proxy, así que normalmente no gasta nada.
+  - **Instagram y Facebook** usan el proxy solo cuando bloquean a AWS.
+  - **Sin uso no hay costo:** Evomi cobra por GB usado, no por mes.
 - **Por el proxy se descarga hasta 720p:** se paga por GB y para clips verticales alcanza.
   - Un video de 10 min pesa ~50–100 MB, unos 0,03–0,05 USD.
 - **Opciones de Evomi:** el procesador las agrega solo a la contraseña.
   - **País fijo, EE. UU.** (`_country-US`). Con "Mundial", cada descarga salía de un país al azar
-    y YouTube respondía "no disponible en tu país" para videos con licencia (visto el 02/10/2026).
+    y algunos videos volvían "no disponible en tu país" (visto el 02/10/2026).
     Si la contraseña ya trae `_country-XX`, se respeta.
-  - **Sesión fija** (`_session-XXXXXXXX_lifetime-60`): YouTube ata el enlace del video a la IP que
-    lo pidió, así que se mantiene la misma IP durante toda la descarga.
+  - **Sesión fija** (`_session-XXXXXXXX_lifetime-60`): las plataformas atan el enlace del video a la
+    IP que lo pidió, así que se mantiene la misma IP durante toda la descarga.
   - Con otro proveedor hay que pegar la URL ya con su país y su sesión fija.
-- **Token de origen de YouTube (PO token), desde el 02/10/2026:** YouTube exige un comprobante de
-  que la petición viene de un reproductor real. Sin él responde **403** al descargar, aunque la IP
-  sea residencial. Eso pasó en staging con Evomi ya funcionando.
-  - Lo genera **bgutil-ytdlp-pot-provider** (versión fijada `2.0.1` en `worker/Dockerfile`,
-    licencia GPL-3.0). Corre como programa aparte: yt-dlp lo llama solo cuando hace falta, a
-    través del mismo proxy.
-  - yt-dlp usa los clientes `mweb` y `web_safari` de YouTube, que son los que aceptan el token
-    según la guía oficial.
-  - **Probado en desarrollo:** el token se genera en la misma base de la imagen (Debian bookworm).
-    La descarga no se pudo probar ahí porque esa IP es de centro de datos y YouTube la bloquea
-    siempre. Falta probar en staging con Evomi.
-  - **Si falla el generador,** yt-dlp sigue sin token, igual que antes.
-  - **Hay que actualizarlo** junto con yt-dlp cuando YouTube cambie algo: cambiar `BGUTIL_VERSION` en
-    el Dockerfile y desplegar.
-- **Restricción de edad:** YouTube exige una cuenta y el proxy no lo arregla. La app lo dice con su
-  propio mensaje.
+- **Restricción de edad:** la plataforma exige una cuenta y el proxy no lo arregla. La app lo dice
+  con su propio mensaje.
 - **Seguridad:**
   - El usuario y la contraseña del proxy viven solo en Secrets Manager. Nunca están en GitHub ni en
     el código.
@@ -193,7 +185,7 @@ El original ocupa S3 igual que un video subido y se borra al eliminar el video.
   - una página que no es video;
   - un archivo demasiado grande;
   - un 404.
-- **yt-dlp:** reconoce plataformas sin dejarse engañar (`youtube.com.evil.com`), traduce sus
+- **yt-dlp:** reconoce TikTok, Instagram y Facebook sin dejarse engañar (`tiktok.com.evil.com`), rechaza YouTube con su aviso, traduce sus
   errores, y se probó de verdad descargando con yt-dlp, si está instalado.
 - **Procesador:**
   - un video importado se descarga, queda como original con su título y genera clips;

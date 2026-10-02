@@ -13,12 +13,10 @@ const EnvSchema = z.object({
   WORKER_TMP_DIR: z.string().default("/tmp/clipflow"),
   FFMPEG_PATH: z.string().default("ffmpeg"),
   FFPROBE_PATH: z.string().default("ffprobe"),
-  /** yt-dlp para importar videos por enlace (YouTube, TikTok…). */
+  /** yt-dlp para importar videos por enlace (TikTok, Instagram, Facebook). */
   YTDLP_PATH: z.string().default("yt-dlp"),
-  /** Carpeta del generador de tokens de YouTube (bgutil). Sin ella, yt-dlp no pide tokens. */
-  YTDLP_POT_HOME: z.string().optional(),
   /**
-   * Proxy residencial para plataformas que bloquean a AWS (YouTube…). Viene de Secrets Manager;
+   * Proxy residencial para plataformas que bloquean a AWS (Instagram, Facebook…). Viene de Secrets Manager;
    * mientras tenga el valor de relleno (no es una URL), el proxy queda apagado.
    */
   DOWNLOAD_PROXY_URL: z.string().optional(),

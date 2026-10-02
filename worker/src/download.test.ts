@@ -94,11 +94,15 @@ describe("descarga por enlace directo", () => {
 });
 
 describe("plataformas (yt-dlp)", () => {
+  it("rechaza YouTube con un mensaje claro aunque llegue un enlace guardado antes", async () => {
+    await expect(downloadFromUrl("https://youtu.be/abc", target("yt"), options())).rejects.toThrow(/no se pueden importar videos de YouTube/);
+  });
+
   it("reconoce los enlaces de plataformas", () => {
-    for (const u of ["https://www.youtube.com/watch?v=x", "https://youtu.be/x", "https://vm.tiktok.com/x", "https://www.instagram.com/reel/x", "https://x.com/a/status/1", "https://vimeo.com/1"]) {
+    for (const u of ["https://vm.tiktok.com/x", "https://www.instagram.com/reel/x", "https://www.facebook.com/watch?v=1", "https://fb.watch/x"]) {
       expect(isPlatformUrl(u), u).toBe(true);
     }
-    for (const u of ["https://example.com/v.mp4", "https://notyoutube.com/x", "https://youtube.com.evil.com/x"]) {
+    for (const u of ["https://example.com/v.mp4", "https://youtu.be/x", "https://vimeo.com/1", "https://tiktok.com.evil.com/x"]) {
       expect(isPlatformUrl(u), u).toBe(false);
     }
   });
@@ -151,7 +155,7 @@ describe("proxy residencial para plataformas que bloquean a AWS", () => {
         '  prev="$a"',
         "done",
         'echo "call proxy=$proxy sort=$sort$xargs" >> "$(dirname "$0")/calls.log"',
-        'if [ -z "$proxy" ]; then echo "ERROR: [youtube] x: Sign in to confirm you are not a bot" >&2; exit 1; fi',
+        'if [ -z "$proxy" ]; then echo "ERROR: [Instagram] x: Requested content is not available, rate-limit reached or login required" >&2; exit 1; fi',
         'file=$(echo "$out" | sed "s/%(ext)s/mp4/")',
         'echo data > "$file"',
         'echo "TITLE Video de prueba"',
@@ -164,21 +168,7 @@ describe("proxy residencial para plataformas que bloquean a AWS", () => {
     return { script, work, calls };
   }
 
-  it("YouTube va directo por el proxy, con sesión fija y hasta 720p", async () => {
-    const yt = fakeYtDlp("proxy-youtube");
-    const result = await downloadFromUrl("https://youtu.be/abc", yt.work, {
-      ...options(),
-      ytDlpPath: yt.script,
-      proxyUrl: "http://user:secreto@rp.evomi.com:1000",
-    });
-    expect(result).toMatchObject({ title: "Video de prueba", sizeBytes: 5 });
-    const calls = yt.calls();
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatch(/proxy=http:\/\/user:secreto_country-US_session-[A-Za-z0-9]{8}_lifetime-60@rp\.evomi\.com:1000/);
-    expect(calls[0]).toContain("sort=res:720,");
-  });
-
-  it("otras plataformas: primero sin proxy (gratis) y, si las bloquean, una vez por el proxy", async () => {
+  it("primero sin proxy (gratis) y, si la plataforma bloquea, una vez por el proxy: país y sesión fijos, hasta 720p", async () => {
     const yt = fakeYtDlp("proxy-fallback");
     const result = await downloadFromUrl("https://www.instagram.com/reel/abc/", yt.work, {
       ...options(),
@@ -189,37 +179,27 @@ describe("proxy residencial para plataformas que bloquean a AWS", () => {
     const calls = yt.calls();
     expect(calls).toHaveLength(2);
     expect(calls[0]).toBe("call proxy= sort=res:1080,vcodec:h264,acodec:aac");
-    expect(calls[1]).toMatch(/proxy=http:\/\/user:secreto_country-US_session-/);
-  });
-
-  it("con el generador de tokens configurado, yt-dlp lo usa con los clientes de YouTube que lo piden", async () => {
-    const yt = fakeYtDlp("pot-token");
-    await downloadFromUrl("https://youtu.be/abc", yt.work, {
-      ...options(),
-      ytDlpPath: yt.script,
-      proxyUrl: "http://user:secreto@rp.evomi.com:1000",
-      potHome: "/opt/bgutil-pot",
-    });
-    expect(yt.calls()[0]).toContain(" youtubepot-bgutilscript:server_home=/opt/bgutil-pot youtube:player_client=mweb,web_safari");
+    expect(calls[1]).toMatch(/proxy=http:\/\/user:secreto_country-US_session-[A-Za-z0-9]{8}_lifetime-60@rp\.evomi\.com:1000/);
+    expect(calls[1]).toContain("sort=res:720,");
   });
 
   it("si el proxy está mal escrito y nos bloquean, el mensaje lo dice", async () => {
     const yt = fakeYtDlp("proxy-bad");
-    const error = await downloadFromUrl("https://youtu.be/abc", yt.work, {
+    const error = await downloadFromUrl("https://www.instagram.com/reel/abc/", yt.work, {
       ...options(),
       ytDlpPath: yt.script,
       proxyProblem: "mal escrito",
     }).catch((e) => e);
-    expect(error.message).toMatch(/bloqueó la descarga.*\(proxy: mal escrito\)$/);
+    expect(error.message).toMatch(/pide iniciar sesión.*\(proxy: mal escrito\)$/);
   });
 
   it("sin proxy configurado se comporta como antes, y el detalle del error no lleva contraseñas", async () => {
     const yt = fakeYtDlp("proxy-off");
-    const error = await downloadFromUrl("https://youtu.be/abc", yt.work, { ...options(), ytDlpPath: yt.script }).catch((e) => e);
+    const error = await downloadFromUrl("https://www.instagram.com/reel/abc/", yt.work, { ...options(), ytDlpPath: yt.script }).catch((e) => e);
     expect(error).toBeInstanceOf(DownloadError);
     expect(error).toMatchObject({ retryable: false, blocked: true });
-    expect(error.message).toMatch(/bloqueó la descarga/);
-    expect(error.detail).toMatch(/not a bot/);
+    expect(error.message).toMatch(/pide iniciar sesión/);
+    expect(error.detail).toMatch(/login required/);
     expect(yt.calls()).toHaveLength(1);
   });
 
@@ -252,7 +232,7 @@ describe("proxy residencial para plataformas que bloquean a AWS", () => {
     expect(ytDlpErrorMessage("ERROR: [instagram] x: Requested content is not available, rate-limit reached or login required").blocked).toBe(true);
   });
 
-  it("YouTube: restricción de edad, bloqueo por país e IP marcada tienen su propio mensaje", () => {
+  it("restricción de edad, bloqueo por país e IP marcada tienen su propio mensaje", () => {
     // Visto con youtu.be/3nVF2EY_iHg (02/10/2026): el proxy no lo arregla, no se reintenta por él.
     const age = ytDlpErrorMessage("ERROR: [youtube] 3nVF2EY_iHg: Sign in to confirm your age. Use --cookies-from-browser or --cookies");
     expect(age.message).toMatch(/restricción de edad/);

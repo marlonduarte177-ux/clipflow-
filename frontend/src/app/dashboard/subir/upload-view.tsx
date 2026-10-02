@@ -245,12 +245,12 @@ export function UploadView() {
               setLink(e.target.value);
               setError("");
             }}
-            placeholder="https://www.youtube.com/watch?v=…"
+            placeholder="https://www.tiktok.com/@…/video/…"
             className="h-12 w-full rounded-xl border border-line bg-background px-3.5 text-base outline-none focus:border-accent"
           />
           <p className="text-xs leading-[17px] text-muted">
-            YouTube, TikTok, Instagram, Facebook, X, Vimeo y más, o un enlace directo a un archivo de video. Lo descargamos
-            nosotros: no gasta tus datos. Hasta {formatDuration(LIMITS.maxDurationSeconds)}.
+            TikTok, Instagram o Facebook, o un enlace directo a un archivo de video. Lo descargamos nosotros: no gasta tus
+            datos. Hasta {formatDuration(LIMITS.maxDurationSeconds)}. Para YouTube, descarga el video y súbelo como archivo.
           </p>
         </div>
       ) : file ? (

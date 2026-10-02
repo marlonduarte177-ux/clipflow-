@@ -82,10 +82,8 @@ export interface PipelineDeps {
   renderConcurrency?: number;
   /** Encuadre que sigue caras (a quien habla, o al grupo). */
   faceTracking?: boolean;
-  /** yt-dlp, para importar videos de plataformas (YouTube, TikTok…). */
+  /** yt-dlp, para importar videos de TikTok, Instagram y Facebook. */
   ytDlpPath?: string;
-  /** Generador de tokens de YouTube (bgutil); null = sin tokens. */
-  ytDlpPotHome?: string | null;
   /** Proxy residencial para plataformas que bloquean a AWS (null = sin proxy). */
   downloadProxyUrl?: string | null;
   /** Sin proxy: por qué ("mal escrito", "sin configurar"). */
@@ -190,7 +188,6 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     try {
       downloaded = await (deps.download ?? downloadFromUrl)(video.sourceUrl, workDir, {
         ytDlpPath: deps.ytDlpPath ?? "yt-dlp",
-        potHome: deps.ytDlpPotHome ?? null,
         proxyUrl: deps.downloadProxyUrl ?? null,
         proxyProblem: deps.downloadProxyProblem ?? null,
         ffmpegPath: deps.tools.ffmpegPath,
