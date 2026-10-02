@@ -102,6 +102,10 @@ export interface ProbeResult {
   height: number;
   hasAudio: boolean;
   videoCodec: string;
+  /** Códec del primer audio, o null si no tiene. */
+  audioCodec: string | null;
+  /** Formato de píxeles del video (p. ej. "yuv420p"). */
+  pixelFormat: string | null;
   raw: unknown;
 }
 
@@ -113,6 +117,7 @@ export async function probe(tools: FfmpegTools, file: string): Promise<ProbeResu
     streams?: {
       codec_type?: string;
       codec_name?: string;
+      pix_fmt?: string;
       width?: number;
       height?: number;
       duration?: string;
@@ -135,8 +140,52 @@ export async function probe(tools: FfmpegTools, file: string): Promise<ProbeResu
     height: turned ? video.width! : video.height!,
     hasAudio: data.streams?.some((s) => s.codec_type === "audio") ?? false,
     videoCodec: video.codec_name ?? "desconocido",
+    audioCodec: data.streams?.find((s) => s.codec_type === "audio")?.codec_name ?? null,
+    pixelFormat: video.pix_fmt ?? null,
     raw: { format: data.format, streams: data.streams },
   };
+}
+
+/**
+ * Deja el video listo para cualquier celular: MP4 con H.264 (8 bits, 4:2:0) y AAC, con el índice al
+ * principio (`faststart`, se reproduce sin bajarlo entero). Instagram y Facebook entregan a menudo VP9
+ * o AV1 dentro de un .mp4: el iPhone solo reproduce el AUDIO. Lo que ya es compatible se copia sin
+ * recomprimir (rápido y sin perder calidad). Devuelve qué se convirtió.
+ */
+export async function makePhoneCompatible(
+  tools: FfmpegTools,
+  input: string,
+  output: string,
+  info: ProbeResult,
+  options: { signal?: AbortSignal; onProgress?: (processedSeconds: number) => void } = {},
+): Promise<{ video: boolean; audio: boolean }> {
+  const copyVideo = info.videoCodec === "h264" && (info.pixelFormat === null || info.pixelFormat === "yuv420p" || info.pixelFormat === "yuvj420p");
+  const copyAudio = !info.hasAudio || info.audioCodec === "aac";
+  await run(
+    tools.ffmpegPath,
+    [
+      "-hide_banner",
+      "-nostats",
+      "-loglevel",
+      "error",
+      "-y",
+      "-i",
+      input,
+      "-map",
+      "0:v:0",
+      "-map",
+      "0:a:0?",
+      ...(copyVideo ? ["-c:v", "copy"] : ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"]),
+      ...(copyAudio ? ["-c:a", "copy"] : ["-c:a", "aac", "-b:a", "160k"]),
+      "-movflags",
+      "+faststart",
+      "-progress",
+      "pipe:1",
+      output,
+    ],
+    { signal: options.signal, onProgress: options.onProgress },
+  );
+  return { video: !copyVideo, audio: !copyAudio };
 }
 
 /**

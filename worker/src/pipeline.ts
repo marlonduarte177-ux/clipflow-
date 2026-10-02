@@ -1,4 +1,4 @@
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { and, eq } from "drizzle-orm";
 import { writeFile } from "node:fs/promises";
@@ -31,10 +31,12 @@ import {
   detectContentBox,
   extractAudioChunks,
   FfmpegError,
+  makePhoneCompatible,
   probe,
   renderThumbnail,
   renderVerticalClip,
   type FfmpegTools,
+  type ProbeResult,
 } from "./ffmpeg.js";
 import type { WorkerStorage } from "./storage.js";
 import { AIProviderError } from "./ai/openai.js";
@@ -120,10 +122,10 @@ const IMPORT_STAGES: Record<JobStage, [number, number]> = {
   finalizing: [95, 99],
 };
 
-/** "Solo descargar": la descarga es casi todo el trabajo. */
+/** "Solo descargar": bajar el video y dejarlo listo para el celular (puede requerir convertirlo). */
 const DOWNLOAD_ONLY_STAGES: Record<JobStage, [number, number]> = {
-  downloading: [0, 90],
-  preparing: [90, 99],
+  downloading: [0, 60],
+  preparing: [60, 99],
   analyzing: [99, 99],
   detecting_moments: [99, 99],
   rendering_clips: [99, 99],
@@ -291,6 +293,24 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     // "Solo descargar": el video ya quedó guardado y revisado. Sin análisis ni clips (si después
     // quiere clips, la web crea otro trabajo con "Crear clips").
     if ((job.params as JobParams).downloadOnly) {
+      // Que se vea en cualquier celular: Instagram y Facebook entregan a menudo VP9/AV1 y el iPhone
+      // solo reproducía el audio. Se convierte a H.264 + AAC (lo compatible se copia tal cual).
+      step = "preparar el video para el celular";
+      const phoneFile = path.join(dir, "download.mp4");
+      const converted = await makePhoneCompatible(deps.tools, input, phoneFile, info, {
+        signal: controller.signal,
+        onProgress: (sec) => void progress("preparing", sec / info.durationSeconds).catch(() => undefined),
+      });
+      check();
+      step = "guardar el video";
+      await deps.storage.upload(phoneFile, video.s3Key, "video/mp4");
+      const sizeBytes = (await stat(phoneFile)).size;
+      const [current] = await deps.db.select({ name: videos.originalFilename }).from(videos).where(eq(videos.id, video.id));
+      await deps.db
+        .update(videos)
+        .set({ sizeBytes, mimeType: "video/mp4", originalFilename: (current?.name ?? video.originalFilename).replace(/\.[a-z0-9]{2,4}$/i, ".mp4") })
+        .where(eq(videos.id, video.id));
+      deps.log.info({ jobId: job.id, videoCodec: info.videoCodec, audioCodec: info.audioCodec, converted }, "video listo para descargar");
       await progress("preparing", 1, true);
       const computeUsd = Math.round((((Date.now() - startedAt) / 3_600_000) * deps.costPerHourUsd) * 1_000_000) / 1_000_000;
       return {
@@ -694,7 +714,7 @@ interface VisionOutcome {
 /** Análisis de imágenes (experimental). Nunca hace fallar el trabajo. */
 async function runVision(
   deps: PipelineDeps,
-  info: { durationSeconds: number; width: number; height: number; hasAudio: boolean; videoCodec: string; raw: unknown },
+  info: ProbeResult,
   input: string,
   dir: string,
   box: import("./ffmpeg.js").ContentBox | null,
