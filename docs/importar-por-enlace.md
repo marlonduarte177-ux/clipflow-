@@ -22,6 +22,13 @@ sin crear clips.
 - **El procesador** descarga el video, lo revisa con ffprobe y lo guarda en S3. No hay análisis, IA
   ni clips, así que es rápido y no gasta OpenAI. La barra muestra "Descargando el video" →
   "Preparando tu descarga".
+- **Formato para el celular (arreglo del 02/10/2026):** Instagram y Facebook entregan a menudo la
+  imagen en **VP9 o AV1** dentro de un `.mp4`. El iPhone solo reproducía el **audio**, y en la vista
+  previa aparecía solo el nombre del archivo.
+  - Ahora, antes de guardarlo, el procesador lo deja en **H.264 + AAC** con `faststart`.
+  - Lo que ya es compatible se copia sin recomprimir; solo se convierte lo que haga falta.
+  - En el registro, la línea "video listo para descargar" dice qué se convirtió.
+  - Los videos descargados antes del arreglo hay que importarlos otra vez.
 - **Cuando termina,** el video muestra "Tu video está listo" con dos botones:
   - **Descargar:** pide `GET /videos/:id/download`, una URL firmada de 15 min con el título como nombre
     de archivo.

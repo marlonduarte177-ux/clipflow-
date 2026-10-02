@@ -209,6 +209,34 @@ describe("videos importados por enlace", () => {
     expect(await db.select().from(schema.clips).where(eq(schema.clips.videoId, video.id))).toHaveLength(0);
   });
 
+  it("solo descargar: un video VP9 (como los de Instagram/Facebook) se convierte a H.264 + AAC para el iPhone", async () => {
+    const db = h!.db;
+    // VP9 + Opus dentro de un .mp4: el iPhone solo reproducía el audio.
+    const vp9 = path.join(root, "vp9.mp4");
+    execFileSync("ffmpeg", [
+      "-loglevel", "error", "-y",
+      "-f", "lavfi", "-i", "testsrc2=size=320x568:rate=25:duration=4",
+      "-f", "lavfi", "-i", "sine=frequency=440:duration=4",
+      "-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "8", "-c:a", "libopus", "-shortest", vp9,
+    ]);
+    const { job, video } = await seedVideoJob(db, root, { sample, importUrl: "https://www.facebook.com/watch?v=1", params: { downloadOnly: true } });
+    const deps = {
+      ...makeDeps(db, root, path.join(root, "work")),
+      download: async (_url: string, dir: string) => {
+        const file = path.join(dir, "source.mp4");
+        execFileSync("cp", [vp9, file]);
+        return { file, sizeBytes: statSync(file).size, title: "Reel" };
+      },
+    };
+    await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+
+    const stored = path.join(root, video.s3Key);
+    const codecs = execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_name", "-of", "csv=p=0", stored]).toString().trim().split("\n");
+    expect(codecs).toEqual(["h264", "aac"]);
+    const [row] = await db.select().from(schema.videos).where(eq(schema.videos.id, video.id));
+    expect(row).toMatchObject({ status: "ready", mimeType: "video/mp4", originalFilename: "Reel.mp4", sizeBytes: statSync(stored).size });
+  });
+
   it("si el enlace no se puede descargar, el video queda rechazado con un mensaje claro", async () => {
     const db = h!.db;
     const { job, video } = await seedVideoJob(db, root, { sample, importUrl: "https://www.instagram.com/reel/privado/" });
