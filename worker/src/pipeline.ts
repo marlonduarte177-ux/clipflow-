@@ -1,6 +1,6 @@
 import { mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 import { readFile, writeFile } from "node:fs/promises";
 import {
@@ -347,6 +347,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       userId: job.userId,
       videoId: video.id,
       jobId: job.id,
+      sourceUrl: video.sourceUrl,
     });
     const [raw, ai, vision] = await Promise.all([
       analyzeSignals(deps.tools, input, info, dir, {
@@ -709,7 +710,7 @@ async function runAI(
   dir: string,
   signal: AbortSignal,
   onProgress: (fraction: number) => Promise<void>,
-  ids: { userId: string; videoId: string; jobId: string },
+  ids: { userId: string; videoId: string; jobId: string; sourceUrl?: string | null },
 ): Promise<AIOutcome> {
   const empty = { segments: [], language: null, usage: {}, transcribeCostUsd: 0 };
   if (!deps.ai) return { ...empty, status: "disabled", reason: deps.aiDisabledReason ?? "IA no configurada" };
@@ -724,7 +725,32 @@ async function runAI(
     const cacheKey = deps.ai.transcriptionModel
       ? transcriptCacheKey(ids.userId, ids.videoId, deps.ai.name, deps.ai.transcriptionModel)
       : null;
-    const cached = cacheKey ? await loadTranscript(deps, cacheKey, coveredSeconds, path.join(dir, "transcript-cache.json")) : null;
+    const cacheFile = path.join(dir, "transcript-cache.json");
+    let cached = cacheKey ? await loadTranscript(deps, cacheKey, coveredSeconds, cacheFile) : null;
+    // El MISMO enlace importado otra vez es otro video en ClipFlow: se busca la transcripción de los
+    // videos anteriores de ESTE usuario con ese enlace (nunca de otros usuarios).
+    if (!cached && cacheKey && ids.sourceUrl && deps.ai.transcriptionModel) {
+      const earlier = await deps.db
+        .select({ id: videos.id })
+        .from(videos)
+        .where(and(eq(videos.userId, ids.userId), eq(videos.sourceUrl, ids.sourceUrl), ne(videos.id, ids.videoId)))
+        .orderBy(desc(videos.createdAt))
+        .limit(5);
+      for (const other of earlier) {
+        const otherKey = transcriptCacheKey(ids.userId, other.id, deps.ai.name, deps.ai.transcriptionModel);
+        cached = await loadTranscript(deps, otherKey, coveredSeconds, cacheFile);
+        if (cached) {
+          // Copia propia para este video (se borra con él, igual que la original con el suyo).
+          await saveTranscript(deps, cacheKey, cacheFile, {
+            coveredSeconds: cached.coveredSeconds,
+            analyzedSeconds: cached.analyzedSeconds,
+            language: cached.language,
+            segments: cached.segments,
+          });
+          break;
+        }
+      }
+    }
     let transcript: Transcribed;
     let analyzedSeconds: number;
     if (cached) {
