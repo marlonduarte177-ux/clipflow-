@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { lookup as dnsLookup, type LookupAddress } from "node:dns";
-import { createWriteStream } from "node:fs";
+import { createWriteStream, existsSync } from "node:fs";
 import { readdir, rm, stat } from "node:fs/promises";
 import http, { type IncomingMessage } from "node:http";
 import https from "node:https";
@@ -231,8 +231,10 @@ async function runYtDlp(url: string, dir: string, options: DownloadOptions, prox
     "--no-simulate",
     // --print deja a yt-dlp en modo silencioso: esto vuelve a mostrar el avance.
     "--progress",
-    "--ffmpeg-location",
-    options.ffmpegPath,
+    // Ruta COMPLETA: con un nombre suelto ("ffmpeg"), yt-dlp lo busca en la carpeta actual, no lo
+    // encuentra y sigue SIN FFmpeg (el aviso lo oculta --no-warnings). Sin FFmpeg no puede unir video
+    // y audio separados (Instagram, Facebook) y el archivo final nunca existía (error ENOENT).
+    ...ffmpegLocationArgs(options.ffmpegPath),
     // Hasta 1080p, prefiriendo H.264/AAC (más rápido de procesar); todo en un .mp4.
     "-f",
     "bv*+ba/b",
@@ -293,13 +295,32 @@ async function runYtDlp(url: string, dir: string, options: DownloadOptions, prox
       reject(new DownloadError(mapped.message, mapped.retryable, mapped.blocked ?? false, `${proxy ? "[proxy] " : ""}${lastLine}`));
     });
   });
-  // yt-dlp no descarga nada si el video no pasa los filtros (duración, en vivo) pero termina bien.
-  if (!file) {
-    const leftovers = (await readdir(dir)).filter((f) => f.startsWith("source."));
-    if (leftovers.length === 0) throw new DownloadError(ytDlpErrorMessage(stderr || "does not pass filter").message, false);
+  // El archivo anunciado puede no existir (p. ej. no se pudieron unir video y audio): se usa lo que
+  // haya quedado. yt-dlp tampoco descarga nada si el video no pasa los filtros (duración, en vivo).
+  if (!file || !existsSync(file)) {
+    const leftovers = (await readdir(dir)).filter((f) => f.startsWith("source.") && !/\.(part|ytdl|temp)$/.test(f));
+    if (leftovers.length === 0) {
+      if (file) throw new DownloadError("No pudimos descargar el video de ese enlace. Lo intentaremos de nuevo.", true, false, "falta el archivo final");
+      throw new DownloadError(ytDlpErrorMessage(stderr || "does not pass filter").message, false);
+    }
+    // Varios archivos = video y audio sin unir: no sirve uno solo (quedaría sin sonido o sin imagen).
+    if (leftovers.length > 1) {
+      throw new DownloadError("No pudimos unir el video y el audio de ese enlace. Lo intentaremos de nuevo.", true, false, `sin unir: ${leftovers.join(", ")}`);
+    }
     file = path.join(dir, leftovers[0]!);
   }
   return { file, title };
+}
+
+/** `--ffmpeg-location` con ruta completa (buscada en el PATH si viene solo el nombre); si no está, nada. */
+export function ffmpegLocationArgs(ffmpegPath: string): string[] {
+  if (path.isAbsolute(ffmpegPath)) return ["--ffmpeg-location", ffmpegPath];
+  for (const folder of (process.env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
+    const candidate = path.join(folder, ffmpegPath);
+    if (existsSync(candidate)) return ["--ffmpeg-location", candidate];
+  }
+  // Sin la opción, yt-dlp busca "ffmpeg" en el PATH por su cuenta.
+  return [];
 }
 
 // ---------------------------------------------------------------------------

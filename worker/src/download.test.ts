@@ -9,6 +9,7 @@ import {
   DownloadError,
   downloadFromUrl,
   downloadWithYtDlp,
+  ffmpegLocationArgs,
   isPlatformUrl,
   redactCredentials,
   withStickySession,
@@ -96,6 +97,14 @@ describe("descarga por enlace directo", () => {
 describe("plataformas (yt-dlp)", () => {
   it("rechaza YouTube con un mensaje claro aunque llegue un enlace guardado antes", async () => {
     await expect(downloadFromUrl("https://youtu.be/abc", target("yt"), options())).rejects.toThrow(/no se pueden importar videos de YouTube/);
+  });
+
+  it("le pasa a yt-dlp la ruta COMPLETA de FFmpeg (con solo el nombre, yt-dlp seguía sin FFmpeg)", () => {
+    const args = ffmpegLocationArgs("ffmpeg");
+    expect(args[0]).toBe("--ffmpeg-location");
+    expect(path.isAbsolute(args[1]!)).toBe(true);
+    expect(ffmpegLocationArgs("/usr/bin/ffmpeg")).toEqual(["--ffmpeg-location", "/usr/bin/ffmpeg"]);
+    expect(ffmpegLocationArgs("no-existe-este-programa")).toEqual([]);
   });
 
   it("reconoce los enlaces de plataformas", () => {
@@ -245,5 +254,39 @@ describe("proxy residencial para plataformas que bloquean a AWS", () => {
     expect(flagged.message).toMatch(/bloqueó la descarga/);
     // Un video borrado de verdad sigue diciendo que no existe.
     expect(ytDlpErrorMessage("ERROR: [youtube] x: Video unavailable. This video has been removed by the uploader").message).toMatch(/No encontramos/);
+  });
+});
+
+describe("cuando yt-dlp no deja el archivo que anuncia", () => {
+  function fakeSplit(name: string, parts: string[]) {
+    const d = target(name);
+    const script = path.join(d, "yt-dlp.sh");
+    writeFileSync(
+      script,
+      [
+        "#!/bin/sh",
+        'out=""; prev=""',
+        'for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done',
+        'base=$(echo "$out" | sed "s/source.%(ext)s//")',
+        ...parts.map((p) => `echo data > "${"$"}{base}${p}"`),
+        'echo "FILE ${base}source.mp4"',
+      ].join("\n"),
+    );
+    chmodSync(script, 0o755);
+    return { script, work: target(`${name}-work`) };
+  }
+
+  it("video y audio sin unir: error claro que se reintenta (antes: ENOENT)", async () => {
+    const yt = fakeSplit("split", ["source.f137.mp4", "source.f140.m4a"]);
+    const error = await downloadFromUrl("https://www.instagram.com/reel/abc/", yt.work, { ...options(), ytDlpPath: yt.script }).catch((e) => e);
+    expect(error).toBeInstanceOf(DownloadError);
+    expect(error).toMatchObject({ retryable: true });
+    expect(error.message).toMatch(/unir el video y el audio/);
+  });
+
+  it("si quedó un solo archivo con otro nombre, se usa ese", async () => {
+    const yt = fakeSplit("single", ["source.webm"]);
+    const result = await downloadFromUrl("https://www.facebook.com/watch?v=1", yt.work, { ...options(), ytDlpPath: yt.script });
+    expect(path.basename(result.file)).toBe("source.webm");
   });
 });
