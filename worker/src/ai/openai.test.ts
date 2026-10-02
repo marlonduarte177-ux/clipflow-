@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { AIProviderError, OpenAIProvider, parseResetDuration } from "./openai.js";
+import { AIProviderError, dedupeHighlights, OpenAIProvider, parseResetDuration } from "./openai.js";
 
 const dir = mkdtempSync(path.join(tmpdir(), "openai-test-"));
 const chunkA = path.join(dir, "audio-000.mp3");
@@ -203,6 +203,55 @@ describe("OpenAIProvider.analyze", () => {
   it("rechaza respuestas que no cumplen el formato", async () => {
     const { impl } = fakeFetch([json({ choices: [{ message: { content: "{\"otra\":1}" } }] })]);
     await expect(provider(impl).analyze(segments, 60)).rejects.toBeInstanceOf(AIProviderError);
+  });
+
+  it("videos largos: analiza por partes de 20 min, reintenta una respuesta cortada y usa las partes que salen bien", async () => {
+    // 50 min de habla: 3 partes (0–20, 20–40, 40–50 min).
+    const long = Array.from({ length: 50 }, (_, i) => ({ startSeconds: i * 60, endSeconds: i * 60 + 50, text: `Frase ${i}` }));
+    const tries: Record<string, number> = {};
+    const bodies: { max_completion_tokens?: number; messages: { content: string }[] }[] = [];
+    const impl = (async (_url: string | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init!.body));
+      bodies.push(body);
+      const part = /parte de (\d+)\.0/.exec(body.messages[1].content)![1]!;
+      tries[part] = (tries[part] ?? 0) + 1;
+      const usage = { prompt_tokens: 1000, completion_tokens: 100 };
+      const ok = (start: number) =>
+        json({ choices: [{ message: { content: JSON.stringify({ highlights: [{ start_seconds: start, end_seconds: start + 40, strength: 0.8, reason: `parte ${part}` }] }) }, finish_reason: "stop" }], usage });
+      if (part === "0") return ok(60);
+      // 2ª parte: la primera respuesta llega cortada; al reintentar sale bien.
+      if (part === "1200") return tries[part] === 1 ? json({ choices: [{ message: { content: '{"highlights":[{"start_' }, finish_reason: "length" }], usage }) : ok(1300);
+      // 3ª parte: JSON roto las dos veces: se descarta y se usan las demás.
+      return json({ choices: [{ message: { content: "{roto" }, finish_reason: "stop" }], usage });
+    }) as typeof fetch;
+
+    const result = await provider(impl).analyze(long, 3000);
+    expect(tries).toEqual({ "0": 1, "1200": 2, "2400": 2 });
+    expect(result.highlights.map((h) => h.reason)).toEqual(["parte 0", "parte 1200"]);
+    // El costo suma todos los pedidos que salieron bien.
+    expect(result.usage).toMatchObject({ inputTokens: 2000, outputTokens: 200 });
+    expect(bodies[0]!.max_completion_tokens).toBe(4000);
+    expect(bodies[0]!.messages[0]!.content).toContain("como máximo 8 momentos");
+    // Cada parte solo lleva su tramo (más un poco de solape), no las 2 h.
+    expect(bodies.find((b) => b.messages[1]!.content.includes("parte de 0.0"))!.messages[1]!.content).not.toContain("Frase 30");
+  });
+
+  it("si fallan todas las partes, avisa el error", async () => {
+    const { impl } = fakeFetch([
+      json({ choices: [{ message: { content: "{roto" } }] }),
+      json({ choices: [{ message: { content: "{roto" } }] }),
+    ]);
+    await expect(provider(impl).analyze(segments, 60)).rejects.toThrow(/JSON inválido/);
+  });
+
+  it("une los momentos de las partes: si dos se pisan, queda el más fuerte", () => {
+    expect(
+      dedupeHighlights([
+        { startSeconds: 100, endSeconds: 140, strength: 0.6, reason: "a" },
+        { startSeconds: 110, endSeconds: 150, strength: 0.9, reason: "b" },
+        { startSeconds: 10, endSeconds: 40, strength: 0.5, reason: "c" },
+      ]).map((h) => h.reason),
+    ).toEqual(["c", "b"]);
   });
 
   it("sin transcripción no llama a la API", async () => {

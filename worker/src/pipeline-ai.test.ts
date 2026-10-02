@@ -43,6 +43,7 @@ class FakeAI implements AIAnalysisProvider {
   constructor(
     private readonly fail = false,
     private readonly segments: TranscriptSegment[] = SEGMENTS,
+    private readonly failAnalysis = false,
   ) {}
   async transcribe(chunks: AudioChunk[]) {
     if (this.fail) {
@@ -58,6 +59,7 @@ class FakeAI implements AIAnalysisProvider {
   }
   async analyze() {
     this.analyzeCalls++;
+    if (this.failAnalysis) throw new AIProviderError("OpenAI devolvió JSON inválido", true);
     // El contenido importante está en una parte SILENCIOSA (2–12 s): sin IA no se elegiría.
     return {
       highlights: [{ startSeconds: 2, endSeconds: 12, strength: 1, reason: "gancho" }],
@@ -221,6 +223,20 @@ describe("procesamiento con IA", () => {
     expect(result.clipCount).toBeGreaterThan(0);
     const subs = await db.select().from(schema.subtitles).where(eq(schema.subtitles.videoId, job.videoId));
     expect(subs).toEqual([]);
+  });
+
+  it("si falla solo el análisis, la transcripción (ya pagada) se conserva: subtítulos, títulos y su costo", async () => {
+    const db = h!.db;
+    const { job } = await seedVideoJob(db, root, { sample });
+    const deps = { ...makeDeps(db, root, path.join(root, "work")), ai: new FakeAI(false, SEGMENTS, true) };
+    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    expect(result).toMatchObject({ ai: "unavailable", aiReason: "falló el análisis de momentos: OpenAI devolvió JSON inválido", language: "spanish" });
+    expect(result.costs!.transcriptionUsd).toBeCloseTo(0.004);
+    expect(result.clipCount).toBeGreaterThan(0);
+    const subs = await db.select().from(schema.subtitles).where(eq(schema.subtitles.videoId, job.videoId));
+    expect(subs.length).toBeGreaterThan(0);
+    const clips = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
+    expect(clips.some((c) => c.title?.startsWith("Título"))).toBe(true);
   });
 
   it("sin habla real (gameplay) no inventa títulos ni subtítulos y lo indica", async () => {

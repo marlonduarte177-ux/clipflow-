@@ -196,3 +196,31 @@ El siguiente video que se procese ya usará la IA: el worker lee la clave cada v
 
 **No probado todavía:** llamadas reales a OpenAI con tu clave. Será la primera prueba después del
 despliegue.
+
+## Análisis de momentos por partes (02/10/2026)
+
+**Qué pasó:** con un video de Kick de 2 h 30 min, la transcripción salió bien (Whisper cobró ~0,90 USD:
+150 min × 0,006 USD), pero el análisis de momentos falló con "OpenAI devolvió JSON inválido".
+- **Causa:** toda la transcripción iba en un solo pedido. Con tanto texto, la respuesta se cortaba por
+  largo y el JSON quedaba a medias.
+- **Efecto:** al fallar, también se descartaba la transcripción ya pagada, así que los clips salían sin
+  subtítulos ni títulos.
+
+**Arreglo:**
+- **Por partes:** el análisis va en partes de 20 min, con 90 s de solape para no cortar momentos en el
+  borde.
+  - Se analizan 3 partes a la vez y como máximo 8 momentos por parte.
+  - La respuesta tiene un tope de 4000 tokens.
+  - Si dos momentos se pisan más de la mitad, queda el más fuerte.
+- **Reintento:** si una parte llega cortada o con JSON roto, se reintenta una vez. Si sigue fallando, se
+  usan las demás partes. Solo falla si fallan todas.
+- **Se conserva la transcripción:** si falla el análisis después de transcribir, igual se generan
+  subtítulos, títulos y la transcripción completa, y su costo se registra.
+  - La web lo dice: "La IA no pudo elegir los momentos… los subtítulos y la transcripción sí están".
+
+**Costo de la transcripción:** Whisper (`whisper-1`) cuesta 0,006 USD por minuto, unos 0,36 USD por hora
+de video.
+- Los modelos `gpt-4o-mini-transcribe` cuestan la mitad, pero no dan los tiempos por frase y palabra
+  que necesitan los subtítulos. Por eso se mantiene Whisper.
+- **Pendiente:** hoy, "Reintentar" vuelve a transcribir y a pagar. Guardar la transcripción por video
+  evitaría pagarla dos veces.

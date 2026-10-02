@@ -656,6 +656,9 @@ async function runAI(
   if (!deps.ai) return { ...empty, status: "disabled", reason: deps.aiDisabledReason ?? "IA no configurada" };
   if (!info.hasAudio) return { ...empty, status: "no_audio", reason: "El video no tiene audio" };
   let step = "la preparación del audio";
+  // Si la transcripción salió bien y lo que falla es el análisis, se conserva (ya se pagó): sirve
+  // para subtítulos, títulos y la transcripción completa.
+  let transcribed: Awaited<ReturnType<NonNullable<PipelineDeps["ai"]>["transcribe"]>> | null = null;
   try {
     const chunks = await extractAudioChunks(deps.tools, input, dir, {
       maxSeconds: Math.min(info.durationSeconds, deps.aiMaxAudioMinutes * 60),
@@ -664,6 +667,7 @@ async function runAI(
     await onProgress(0.2);
     step = "la transcripción";
     const transcript = await deps.ai.transcribe(chunks);
+    transcribed = transcript;
     await onProgress(0.7);
 
     // Sin habla real (p. ej. gameplay o música): no se inventan títulos ni subtítulos,
@@ -699,6 +703,16 @@ async function runAI(
     deps.log.warn({ step, error: e.message, status: e.status, code: e.code }, "IA no disponible; se continúa solo con FFmpeg");
     // Solo se muestran mensajes propios (los de OpenAIProvider no incluyen contenido del usuario).
     const detail = err instanceof AIProviderError ? e.message : "error inesperado";
+    if (transcribed) {
+      return {
+        status: "unavailable",
+        reason: `falló ${step}: ${detail}`,
+        segments: transcribed.segments,
+        language: transcribed.language,
+        usage: { ...transcribed.usage },
+        transcribeCostUsd: transcribed.usage.estimatedCostUsd ?? 0,
+      };
+    }
     return { ...empty, status: "unavailable", reason: `falló ${step}: ${detail}` };
   }
 }
