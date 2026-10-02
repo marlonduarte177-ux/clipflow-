@@ -134,7 +134,7 @@ export class ApiStack extends Stack {
       }),
     );
     // Previews y descargas: lectura de resultados. Borrado: solo cuando el usuario elimina un video.
-    const results = ["clips/*", "thumbnails/*", "subtitles/*", "exports/*"];
+    const results = ["clips/*", "thumbnails/*", "subtitles/*", "exports/*", "transcripts/*"];
     taskDefinition.taskRole.addToPrincipalPolicy(
       new iam.PolicyStatement({
         actions: ["s3:GetObject", "s3:DeleteObject"],

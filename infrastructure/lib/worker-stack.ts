@@ -166,6 +166,13 @@ export class WorkerStack extends Stack {
         resources: ["clips/*", "thumbnails/*", "subtitles/*", "tmp/*"].map((p) => props.bucket.arnForObjects(p)),
       }),
     );
+    // Transcripciones guardadas por video: se leen al reprocesar (no se paga Whisper dos veces).
+    taskDefinition.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["s3:GetObject", "s3:PutObject"],
+        resources: [props.bucket.arnForObjects("transcripts/*")],
+      }),
+    );
 
     const workerSecurityGroup = new ec2.SecurityGroup(this, "WorkerSecurityGroup", {
       vpc: props.vpc,

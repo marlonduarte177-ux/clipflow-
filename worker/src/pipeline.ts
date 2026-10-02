@@ -1,10 +1,12 @@
 import { mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { and, eq } from "drizzle-orm";
-import { writeFile } from "node:fs/promises";
+import { z } from "zod";
+import { readFile, writeFile } from "node:fs/promises";
 import {
   bestFrameLabel,
   fullTranscriptKey,
+  transcriptCacheKey,
   segmentsForRange,
   selectMoments,
   snapToSentences,
@@ -341,7 +343,11 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     //    La IA de imágenes prepara sus hojas en paralelo, pero no envía nada a OpenAI hasta que
     //    termina el análisis de texto: comparten el límite por minuto de la cuenta y el análisis de
     //    texto (el que elige los momentos) tiene prioridad.
-    const aiPromise = runAI(deps, info, input, dir, controller.signal, async (f) => void (await report("ai")(f)));
+    const aiPromise = runAI(deps, info, input, dir, controller.signal, async (f) => void (await report("ai")(f)), {
+      userId: job.userId,
+      videoId: video.id,
+      jobId: job.id,
+    });
     const [raw, ai, vision] = await Promise.all([
       analyzeSignals(deps.tools, input, info, dir, {
         signal: controller.signal,
@@ -627,6 +633,58 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
   }
 }
 
+type Transcribed = Awaited<ReturnType<NonNullable<PipelineDeps["ai"]>["transcribe"]>>;
+
+/** Transcripción guardada por video (ver `transcriptCacheKey`). */
+const CachedTranscript = z.object({
+  version: z.literal(1),
+  coveredSeconds: z.number(),
+  analyzedSeconds: z.number(),
+  language: z.string().nullable(),
+  segments: z.array(
+    z.object({
+      startSeconds: z.number(),
+      endSeconds: z.number(),
+      text: z.string(),
+      words: z.array(z.object({ startSeconds: z.number(), endSeconds: z.number(), text: z.string() })).optional(),
+    }),
+  ),
+});
+
+/**
+ * Lee la transcripción guardada del video. Solo se usa si cubre el MISMO tramo de audio (el modelo ya
+ * va en la ruta). Si no existe o no sirve, devuelve null y se transcribe normalmente.
+ */
+async function loadTranscript(deps: PipelineDeps, key: string, coveredSeconds: number, file: string) {
+  try {
+    await deps.storage.download(key, file);
+    const parsed = CachedTranscript.safeParse(JSON.parse(await readFile(file, "utf8")));
+    if (!parsed.success || Math.abs(parsed.data.coveredSeconds - coveredSeconds) > 1) return null;
+    return parsed.data;
+  } catch {
+    return null; // No existe todavía (lo normal la primera vez).
+  } finally {
+    await rm(file, { force: true });
+  }
+}
+
+/** Guarda la transcripción del video. Si falla, solo se registra: el trabajo sigue. */
+async function saveTranscript(
+  deps: PipelineDeps,
+  key: string,
+  file: string,
+  data: Omit<z.infer<typeof CachedTranscript>, "version">,
+) {
+  try {
+    await writeFile(file, JSON.stringify({ version: 1, ...data }));
+    await deps.storage.upload(file, key, "application/json");
+  } catch (err) {
+    deps.log.warn({ error: (err as Error).message }, "no se pudo guardar la transcripción para reutilizarla");
+  } finally {
+    await rm(file, { force: true });
+  }
+}
+
 interface AIOutcome {
   status: JobResult["ai"];
   reason?: string;
@@ -651,24 +709,49 @@ async function runAI(
   dir: string,
   signal: AbortSignal,
   onProgress: (fraction: number) => Promise<void>,
+  ids: { userId: string; videoId: string; jobId: string },
 ): Promise<AIOutcome> {
   const empty = { segments: [], language: null, usage: {}, transcribeCostUsd: 0 };
   if (!deps.ai) return { ...empty, status: "disabled", reason: deps.aiDisabledReason ?? "IA no configurada" };
   if (!info.hasAudio) return { ...empty, status: "no_audio", reason: "El video no tiene audio" };
   let step = "la preparación del audio";
+  // Si la transcripción salió bien y lo que falla es el análisis, se conserva (ya se pagó): sirve
+  // para subtítulos, títulos y la transcripción completa.
+  let transcribed: Transcribed | null = null;
   try {
-    const chunks = await extractAudioChunks(deps.tools, input, dir, {
-      maxSeconds: Math.min(info.durationSeconds, deps.aiMaxAudioMinutes * 60),
-      signal,
-    });
-    await onProgress(0.2);
-    step = "la transcripción";
-    const transcript = await deps.ai.transcribe(chunks);
-    await onProgress(0.7);
+    const coveredSeconds = Math.min(info.durationSeconds, deps.aiMaxAudioMinutes * 60);
+    // ¿Ya se transcribió este video (reintento o nuevo procesamiento)? Se reutiliza: no se paga otra vez.
+    const cacheKey = deps.ai.transcriptionModel
+      ? transcriptCacheKey(ids.userId, ids.videoId, deps.ai.name, deps.ai.transcriptionModel)
+      : null;
+    const cached = cacheKey ? await loadTranscript(deps, cacheKey, coveredSeconds, path.join(dir, "transcript-cache.json")) : null;
+    let transcript: Transcribed;
+    let analyzedSeconds: number;
+    if (cached) {
+      transcript = { segments: cached.segments, language: cached.language, usage: {} };
+      analyzedSeconds = cached.analyzedSeconds;
+      deps.log.info({ jobId: ids.jobId, segments: cached.segments.length }, "transcripción reutilizada (sin costo)");
+      await onProgress(0.7);
+    } else {
+      const chunks = await extractAudioChunks(deps.tools, input, dir, { maxSeconds: coveredSeconds, signal });
+      await onProgress(0.2);
+      step = "la transcripción";
+      transcript = await deps.ai.transcribe(chunks);
+      analyzedSeconds = chunks.reduce((sum, c) => sum + c.durationSeconds, 0);
+      if (cacheKey) {
+        await saveTranscript(deps, cacheKey, path.join(dir, "transcript-cache.json"), {
+          coveredSeconds,
+          analyzedSeconds,
+          language: transcript.language,
+          segments: transcript.segments,
+        });
+      }
+      await onProgress(0.7);
+    }
+    transcribed = transcript;
 
     // Sin habla real (p. ej. gameplay o música): no se inventan títulos ni subtítulos,
     // y los momentos se eligen por acción, sonido y movimiento.
-    const analyzedSeconds = chunks.reduce((sum, c) => sum + c.durationSeconds, 0);
     const speechSeconds = transcript.segments.reduce((sum, s) => sum + (s.endSeconds - s.startSeconds), 0);
     if (speechSeconds < Math.max(15, analyzedSeconds * 0.1)) {
       return {
@@ -699,6 +782,16 @@ async function runAI(
     deps.log.warn({ step, error: e.message, status: e.status, code: e.code }, "IA no disponible; se continúa solo con FFmpeg");
     // Solo se muestran mensajes propios (los de OpenAIProvider no incluyen contenido del usuario).
     const detail = err instanceof AIProviderError ? e.message : "error inesperado";
+    if (transcribed) {
+      return {
+        status: "unavailable",
+        reason: `falló ${step}: ${detail}`,
+        segments: transcribed.segments,
+        language: transcribed.language,
+        usage: { ...transcribed.usage },
+        transcribeCostUsd: transcribed.usage.estimatedCostUsd ?? 0,
+      };
+    }
     return { ...empty, status: "unavailable", reason: `falló ${step}: ${detail}` };
   }
 }

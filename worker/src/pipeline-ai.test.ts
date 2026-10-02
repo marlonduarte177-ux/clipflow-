@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { fullTranscriptKey, type AIAnalysisProvider, type AudioChunk, type FrameSheet, type TranscriptSegment } from "@clipflow/shared";
-import { claimJob, schema, type DbHandle } from "@clipflow/shared/db";
+import { fullTranscriptKey, transcriptCacheKey, type AIAnalysisProvider, type AudioChunk, type FrameSheet, type TranscriptSegment } from "@clipflow/shared";
+import { claimJob, createJob, schema, type DbHandle } from "@clipflow/shared/db";
 import { createTestDb } from "@clipflow/shared/db/testing";
 import { AIProviderError } from "./ai/openai.js";
 import { processAnalyzeJob } from "./pipeline.js";
@@ -43,6 +43,7 @@ class FakeAI implements AIAnalysisProvider {
   constructor(
     private readonly fail = false,
     private readonly segments: TranscriptSegment[] = SEGMENTS,
+    private readonly failAnalysis = false,
   ) {}
   async transcribe(chunks: AudioChunk[]) {
     if (this.fail) {
@@ -58,6 +59,7 @@ class FakeAI implements AIAnalysisProvider {
   }
   async analyze() {
     this.analyzeCalls++;
+    if (this.failAnalysis) throw new AIProviderError("OpenAI devolvió JSON inválido", true);
     // El contenido importante está en una parte SILENCIOSA (2–12 s): sin IA no se elegiría.
     return {
       highlights: [{ startSeconds: 2, endSeconds: 12, strength: 1, reason: "gancho" }],
@@ -221,6 +223,66 @@ describe("procesamiento con IA", () => {
     expect(result.clipCount).toBeGreaterThan(0);
     const subs = await db.select().from(schema.subtitles).where(eq(schema.subtitles.videoId, job.videoId));
     expect(subs).toEqual([]);
+  });
+
+  it("si falla solo el análisis, la transcripción (ya pagada) se conserva: subtítulos, títulos y su costo", async () => {
+    const db = h!.db;
+    const { job } = await seedVideoJob(db, root, { sample });
+    const deps = { ...makeDeps(db, root, path.join(root, "work")), ai: new FakeAI(false, SEGMENTS, true) };
+    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    expect(result).toMatchObject({ ai: "unavailable", aiReason: "falló el análisis de momentos: OpenAI devolvió JSON inválido", language: "spanish" });
+    expect(result.costs!.transcriptionUsd).toBeCloseTo(0.004);
+    expect(result.clipCount).toBeGreaterThan(0);
+    const subs = await db.select().from(schema.subtitles).where(eq(schema.subtitles.videoId, job.videoId));
+    expect(subs.length).toBeGreaterThan(0);
+    const clips = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
+    expect(clips.some((c) => c.title?.startsWith("Título"))).toBe(true);
+  });
+
+  it("la transcripción se guarda por video y se reutiliza al volver a procesar: no se paga dos veces", async () => {
+    const db = h!.db;
+    const { job, video } = await seedVideoJob(db, root, { sample });
+    const ai = Object.assign(new FakeAI(), { transcriptionModel: "whisper-1" });
+    let transcribeCalls = 0;
+    const transcribe = ai.transcribe.bind(ai);
+    ai.transcribe = async (chunks) => (transcribeCalls++, transcribe(chunks));
+    const deps = { ...makeDeps(db, root, path.join(root, "work")), ai };
+
+    const first = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    expect(transcribeCalls).toBe(1);
+    expect(first.costs!.transcriptionUsd).toBeCloseTo(0.004);
+    // Guardada en la carpeta de ESE usuario y ESE video, con el modelo en el nombre.
+    const key = transcriptCacheKey(job.userId, video.id, "fake", "whisper-1");
+    expect(key).toBe(`transcripts/${job.userId}/${video.id}/fake-whisper-1.json`);
+    expect(existsSync(path.join(root, key))).toBe(true);
+
+    // Otro procesamiento del mismo video (p. ej. otra duración de clips): sin volver a transcribir.
+    const { job: again } = await createJob(db, {
+      userId: job.userId,
+      videoId: video.id,
+      type: "analyze_video",
+      idempotencyKey: `again:${video.id}`,
+      params: { clipDurationSeconds: 15 },
+    });
+    const second = await processAnalyzeJob((await claimJob(db, again.id, "test-worker"))!, deps);
+    expect(transcribeCalls).toBe(1);
+    expect(second).toMatchObject({ ai: "used", language: "spanish" });
+    expect(second.costs!.transcriptionUsd).toBe(0);
+    // Con la transcripción reutilizada hay títulos (y subtítulos) igual que la primera vez.
+    const clips = await db.select().from(schema.clips).where(eq(schema.clips.jobId, again.id));
+    expect(clips.length).toBeGreaterThan(0);
+    expect(clips.every((c) => c.title?.startsWith("Título"))).toBe(true);
+
+    // Si cambia el tramo de audio (otro límite de minutos), no sirve: se transcribe de nuevo.
+    const { job: shorter } = await createJob(db, {
+      userId: job.userId,
+      videoId: video.id,
+      type: "analyze_video",
+      idempotencyKey: `shorter:${video.id}`,
+      params: { clipDurationSeconds: 15 },
+    });
+    await processAnalyzeJob((await claimJob(db, shorter.id, "test-worker"))!, { ...deps, aiMaxAudioMinutes: 0.5 });
+    expect(transcribeCalls).toBe(2);
   });
 
   it("sin habla real (gameplay) no inventa títulos ni subtítulos y lo indica", async () => {

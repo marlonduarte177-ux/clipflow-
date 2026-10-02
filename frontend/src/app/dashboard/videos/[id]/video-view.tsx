@@ -391,6 +391,9 @@ function AiNote({ result }: { result: NonNullable<JobDto["result"]> }) {
       ? "No se detectó habla (gameplay o música): los clips se eligieron por acción, volumen y movimiento. Sin títulos ni subtítulos."
       : result.ai === "no_audio"
         ? "El video no tiene audio: los clips se eligieron por movimiento y cambios de escena."
-        : `Sin análisis de IA${result.aiReason ? `: ${result.aiReason}` : ""}. Los clips se eligieron por acción, volumen y movimiento.`;
+        : result.ai === "unavailable" && result.language
+          ? // Falló solo el análisis de momentos: la transcripción se conservó.
+            `La IA no pudo elegir los momentos${result.aiReason ? ` (${result.aiReason})` : ""}. Se eligieron por acción, volumen y movimiento; los subtítulos y la transcripción sí están.`
+          : `Sin análisis de IA${result.aiReason ? `: ${result.aiReason}` : ""}. Los clips se eligieron por acción, volumen y movimiento.`;
   return <p className="rounded-2xl border border-line bg-surface px-4 py-3 text-[13px] leading-[18px] text-muted">{text}</p>;
 }

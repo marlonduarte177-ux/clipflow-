@@ -196,3 +196,55 @@ El siguiente video que se procese ya usará la IA: el worker lee la clave cada v
 
 **No probado todavía:** llamadas reales a OpenAI con tu clave. Será la primera prueba después del
 despliegue.
+
+## Análisis de momentos por partes (02/10/2026)
+
+**Qué pasó:** con un video de Kick de 2 h 30 min, la transcripción salió bien (Whisper cobró ~0,90 USD:
+150 min × 0,006 USD), pero el análisis de momentos falló con "OpenAI devolvió JSON inválido".
+- **Causa:** toda la transcripción iba en un solo pedido. Con tanto texto, la respuesta se cortaba por
+  largo y el JSON quedaba a medias.
+- **Efecto:** al fallar, también se descartaba la transcripción ya pagada, así que los clips salían sin
+  subtítulos ni títulos.
+
+**Arreglo:**
+- **Por partes:** el análisis va en partes de 20 min, con 90 s de solape para no cortar momentos en el
+  borde.
+  - Se analizan 3 partes a la vez y como máximo 8 momentos por parte.
+  - La respuesta tiene un tope de 4000 tokens.
+  - Si dos momentos se pisan más de la mitad, queda el más fuerte.
+- **Reintento:** si una parte llega cortada o con JSON roto, se reintenta una vez. Si sigue fallando, se
+  usan las demás partes. Solo falla si fallan todas.
+- **Se conserva la transcripción:** si falla el análisis después de transcribir, igual se generan
+  subtítulos, títulos y la transcripción completa, y su costo se registra.
+  - La web lo dice: "La IA no pudo elegir los momentos… los subtítulos y la transcripción sí están".
+
+**Costo de la transcripción:** Whisper (`whisper-1`) cuesta 0,006 USD por minuto, unos 0,36 USD por hora
+de video.
+- Los modelos `gpt-4o-mini-transcribe` cuestan la mitad, pero no dan los tiempos por frase y palabra
+  que necesitan los subtítulos. Por eso se mantiene Whisper.
+
+## Transcripción guardada por video (02/10/2026)
+
+Antes, "Reintentar" o volver a procesar el mismo video (por ejemplo, con otra duración de clip)
+transcribía de nuevo y se pagaba otra vez.
+
+**Dónde se guarda:** en el mismo bucket privado y cifrado de S3, en `transcripts/<usuario>/<video>/openai-whisper-1.json`.
+Guarda los segmentos con los tiempos de cada palabra, el idioma y el tramo de audio que cubre.
+
+**Por qué no se mezcla con otras:**
+- La ruta lleva el código único del **usuario** y del **video**, y el **proveedor y modelo** en el nombre.
+- Se reutiliza solo si cubre el **mismo tramo de audio** (`OPENAI_MAX_AUDIO_MINUTES`). Si no, se
+  transcribe de nuevo y se reemplaza.
+- Si el archivo no existe o no se puede leer, se transcribe normalmente. Si no se puede guardar, solo se
+  registra en el log y el trabajo sigue.
+- **Se borra con el video,** y también al borrar su proyecto.
+
+**Permisos:**
+- El worker puede leer y escribir en `transcripts/*`.
+- La API puede leer y borrar en `transcripts/*`, para la limpieza al eliminar.
+
+**Costo:**
+- Una transcripción de 2,5 h pesa 1–3 MB; en S3 son ~0,00007 USD al mes.
+- Cada reutilización ahorra la transcripción entera (~0,90 USD en un video de 2,5 h).
+- En el resultado del trabajo, `costs.transcriptionUsd` queda en 0 cuando se reutiliza, y el log dice
+  "transcripción reutilizada (sin costo)".
