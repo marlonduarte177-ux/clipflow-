@@ -8,11 +8,12 @@ import https from "node:https";
 import { isIP } from "node:net";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
-import { isPrivateAddress } from "@clipflow/shared";
+import { checkImportUrl, isImportPlatformUrl, isPrivateAddress } from "@clipflow/shared";
 
 /**
  * Descarga de videos importados por enlace.
- * - Plataformas conocidas (YouTube, TikTok, Instagram, Facebook, X, Vimeo…): yt-dlp.
+ * - TikTok, Instagram y Facebook: yt-dlp. YouTube y otras plataformas por ahora no (las rechaza
+ *   `checkImportUrl`: bloquean la descarga desde servidores).
  * - Cualquier otro enlace: debe ser un archivo de video directo. Se descarga con protección
  *   contra SSRF: en cada paso (también en redirecciones) se comprueba la IP REAL a la que se
  *   conecta, para no llegar nunca a direcciones internas (p. ej. las credenciales de ECS en
@@ -34,29 +35,8 @@ export class DownloadError extends Error {
   }
 }
 
-const PLATFORM_DOMAINS = [
-  "youtube.com",
-  "youtu.be",
-  "tiktok.com",
-  "instagram.com",
-  "facebook.com",
-  "fb.watch",
-  "x.com",
-  "twitter.com",
-  "vimeo.com",
-  "twitch.tv",
-  "dailymotion.com",
-  "dai.ly",
-  "reddit.com",
-  "redd.it",
-  "kick.com",
-];
-
-/** true si el enlace es de una plataforma que se descarga con yt-dlp. */
-export function isPlatformUrl(url: string): boolean {
-  const host = new URL(url).hostname.toLowerCase();
-  return PLATFORM_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`));
-}
+/** true si el enlace es de una plataforma que se descarga con yt-dlp (TikTok, Instagram, Facebook). */
+export const isPlatformUrl = isImportPlatformUrl;
 
 export interface DownloadOptions {
   ytDlpPath: string;
@@ -74,8 +54,6 @@ export interface DownloadOptions {
   proxyUrl?: string | null;
   /** Sin proxy: por qué ("mal escrito", "sin configurar"). Se agrega al mensaje si nos bloquean. */
   proxyProblem?: string | null;
-  /** Carpeta del generador de tokens de YouTube (bgutil, modo script). */
-  potHome?: string | null;
 }
 
 export interface Downloaded {
@@ -87,6 +65,9 @@ export interface Downloaded {
 
 /** Descarga el video del enlace dentro de `dir`. */
 export async function downloadFromUrl(url: string, dir: string, options: DownloadOptions): Promise<Downloaded> {
+  // También aquí: un enlace guardado antes de un cambio de reglas (p. ej. YouTube) se rechaza claro.
+  const checked = checkImportUrl(url);
+  if (!checked.ok && !options.allowHosts?.includes(new URL(url).hostname)) throw new DownloadError(checked.message, false);
   const result = isPlatformUrl(url) ? await downloadWithYtDlp(url, dir, options) : await downloadDirect(url, dir, options);
   const size = (await stat(result.file)).size;
   if (size === 0) throw new DownloadError("El enlace no devolvió ningún video.", false);
@@ -106,7 +87,7 @@ export function ytDlpErrorMessage(stderr: string): { message: string; retryable:
     const { reason, retryable } = proxyFailure(s);
     return { message: `Nuestro servicio de descarga no respondió (proxy: ${reason}). Lo intentaremos de nuevo.`, retryable };
   }
-  // Restricción de edad: YouTube exige una cuenta; un proxy no lo arregla.
+  // Restricción de edad: la plataforma exige una cuenta; un proxy no lo arregla.
   if (s.includes("confirm your age") || s.includes("age-restricted") || s.includes("inappropriate for some users")) {
     return {
       message: "Este video tiene restricción de edad y la plataforma pide iniciar sesión para verlo. Descárgalo y súbelo como archivo.",
@@ -121,7 +102,7 @@ export function ytDlpErrorMessage(stderr: string): { message: string; retryable:
       blocked: true,
     };
   }
-  // "This content isn't available, try again later": así responde YouTube a IPs que marcó.
+  // "This content isn't available, try again later": así responden a IPs que marcaron.
   if (s.includes("content isn't available") || s.includes("content isn\u2019t available") || s.includes("try again later")) {
     return {
       message: "La plataforma bloqueó la descarga desde nuestros servidores. Descarga el video y súbelo como archivo.",
@@ -144,7 +125,7 @@ export function ytDlpErrorMessage(stderr: string): { message: string; retryable:
     s.includes("logged-in") ||
     s.includes("logged in")
   ) {
-    // Instagram, Vimeo y otras piden "iniciar sesión" a los servidores de nube aunque el video sea
+    // Instagram y Facebook piden "iniciar sesión" a los servidores de nube aunque el video sea
     // público: con el proxy se reintenta (si de verdad es privado, falla igual y casi sin costo).
     return { message: "Este video es privado o pide iniciar sesión, así que no se puede descargar.", retryable: false, blocked: true };
   }
@@ -190,35 +171,22 @@ function proxyFailure(s: string): { reason: string; retryable: boolean } {
   return { reason: "no se pudo conectar", retryable: true };
 }
 
-/** Plataformas que bloquean SIEMPRE a los servidores de nube: van directo por el proxy. */
-const PROXY_FIRST_DOMAINS = ["youtube.com", "youtu.be"];
-
 /**
- * Descarga con yt-dlp. Con proxy configurado:
- * - YouTube va directo por el proxy (sin él siempre bloquea);
- * - el resto se intenta primero sin proxy (gratis) y, si la plataforma nos bloquea, se reintenta
- *   una vez por el proxy.
- * Por el proxy se descarga hasta 720p: se paga por GB y para clips verticales sobra.
+ * Descarga con yt-dlp. Primero sin proxy (gratis: TikTok funciona así). Si la plataforma nos
+ * bloquea y hay proxy configurado, se reintenta una vez por el proxy, hasta 720p (se paga por GB y
+ * para clips verticales sobra).
  */
 export async function downloadWithYtDlp(url: string, dir: string, options: DownloadOptions): Promise<Omit<Downloaded, "sizeBytes">> {
   const proxy = options.proxyUrl ? withStickySession(options.proxyUrl) : null;
-  if (!proxy) {
-    try {
-      return await runYtDlp(url, dir, options, null);
-    } catch (err) {
-      // Bloqueado y sin proxy utilizable: se dice por qué, para no tener que buscarlo en CloudWatch.
-      if (err instanceof DownloadError && err.blocked && options.proxyProblem) {
-        throw new DownloadError(`${err.message} (proxy: ${options.proxyProblem})`, err.retryable, true, err.detail);
-      }
-      throw err;
-    }
-  }
-  const host = new URL(url).hostname.toLowerCase();
-  if (PROXY_FIRST_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`))) return runYtDlp(url, dir, options, proxy);
   try {
     return await runYtDlp(url, dir, options, null);
   } catch (err) {
     if (!(err instanceof DownloadError) || !err.blocked) throw err;
+    if (!proxy) {
+      // Bloqueado y sin proxy utilizable: se dice por qué, para no tener que buscarlo en CloudWatch.
+      if (options.proxyProblem) throw new DownloadError(`${err.message} (proxy: ${options.proxyProblem})`, err.retryable, true, err.detail);
+      throw err;
+    }
     for (const leftover of (await readdir(dir)).filter((f) => f.startsWith("source."))) {
       await rm(path.join(dir, leftover), { force: true });
     }
@@ -229,10 +197,9 @@ export async function downloadWithYtDlp(url: string, dir: string, options: Downl
 /**
  * Opciones de Evomi, que van agregadas a la contraseña:
  * - **País fijo** (`_country-US`, salvo que la contraseña ya traiga uno). Con "Mundial", cada
- *   descarga salía de un país al azar y YouTube respondía "no disponible en tu país" para videos
- *   con licencia. EE. UU. es donde YouTube tiene más catálogo disponible.
- * - **Misma IP durante toda la descarga** (`_session-<8 caracteres>`, 60 min): YouTube ata el
- *   enlace del video a la IP que lo pidió, y un proxy que rota la IP en cada petición lo rompería.
+ *   descarga salía de un país al azar y algunos videos volvían "no disponible en tu país".
+ * - **Misma IP durante toda la descarga** (`_session-<8 caracteres>`, 60 min): las plataformas
+ *   atan el enlace del video a la IP que lo pidió; un proxy que rota la IP en cada petición lo rompería.
  * Otros proveedores: pegar la URL ya con su país y su sesión fija.
  */
 export function withStickySession(proxyUrl: string): string {
@@ -264,9 +231,6 @@ async function runYtDlp(url: string, dir: string, options: DownloadOptions, prox
     "--no-simulate",
     // --print deja a yt-dlp en modo silencioso: esto vuelve a mostrar el avance.
     "--progress",
-    // YouTube necesita un intérprete de JavaScript: se usa Node (ya está en la imagen).
-    "--js-runtimes",
-    "node",
     "--ffmpeg-location",
     options.ffmpegPath,
     // Hasta 1080p, prefiriendo H.264/AAC (más rápido de procesar); todo en un .mp4.
@@ -275,17 +239,6 @@ async function runYtDlp(url: string, dir: string, options: DownloadOptions, prox
     "-S",
     proxy ? "res:720,vcodec:h264,acodec:aac" : "res:1080,vcodec:h264,acodec:aac",
     ...(proxy ? ["--proxy", proxy] : []),
-    // YouTube exige un "token de origen" (PO token) para descargar: lo genera bgutil, que yt-dlp
-    // llama solo, a través del mismo proxy. Los clientes mweb y web_safari son los que lo usan
-    // (guía oficial de yt-dlp); los otros responden 403 o "no reproducible" desde servidores.
-    ...(options.potHome
-      ? [
-          "--extractor-args",
-          `youtubepot-bgutilscript:server_home=${options.potHome}`,
-          "--extractor-args",
-          "youtube:player_client=mweb,web_safari",
-        ]
-      : []),
     "--merge-output-format",
     "mp4",
     "--match-filters",

@@ -77,7 +77,7 @@ export class WorkerStack extends Stack {
       removalPolicy: props.stage === "production" ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     });
 
-    // Proxy residencial para importar de plataformas que bloquean a AWS (YouTube…). Se crea con un
+    // Proxy residencial para importar de plataformas que bloquean a AWS (Instagram, Facebook…). Se crea con un
     // valor de relleno (el proxy queda apagado) y el usuario pega su URL en Secrets Manager:
     // http://USUARIO:CONTRASEÑA@rp.evomi.com:1000. Solo el worker puede leerla.
     const downloadProxy = new secretsmanager.Secret(this, "DownloadProxy", {
@@ -134,7 +134,7 @@ export class WorkerStack extends Stack {
         AI_VISION_MAX_FRAMES: "600",
         // Encuadre que sigue a quien habla (detector local YuNet, sin costo por imagen).
         FACE_TRACKING_ENABLED: "true",
-        // Importar por enlace (YouTube, TikTok…): yt-dlp instalado en la imagen.
+        // Importar por enlace (TikTok, Instagram, Facebook): yt-dlp instalado en la imagen.
         YTDLP_PATH: "/usr/local/bin/yt-dlp",
       },
       secrets: {

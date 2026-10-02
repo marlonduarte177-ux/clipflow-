@@ -96,6 +96,35 @@ export const ImportVideoSchema = z.object({
  * internas escritas a mano (el worker vuelve a comprobar la IP real al descargar).
  * Devuelve el enlace normalizado o un mensaje de error.
  */
+/** Plataformas desde las que se importa por enlace (las descarga el worker con yt-dlp). */
+export const IMPORT_PLATFORMS = ["TikTok", "Instagram", "Facebook"] as const;
+const IMPORT_PLATFORM_DOMAINS = ["tiktok.com", "instagram.com", "facebook.com", "fb.com", "fb.watch"];
+
+/**
+ * Plataformas conocidas que por ahora NO se importan: bloquean la descarga desde servidores (YouTube
+ * exige además tokens que no alcanzaron, probado el 02/10/2026). Se avisa antes de intentarlo.
+ */
+const UNSUPPORTED_PLATFORMS: { name: string; domains: string[] }[] = [
+  { name: "YouTube", domains: ["youtube.com", "youtu.be", "youtube-nocookie.com"] },
+  { name: "Vimeo", domains: ["vimeo.com"] },
+  { name: "X", domains: ["x.com", "twitter.com"] },
+  { name: "Twitch", domains: ["twitch.tv"] },
+  { name: "Dailymotion", domains: ["dailymotion.com", "dai.ly"] },
+  { name: "Reddit", domains: ["reddit.com", "redd.it"] },
+  { name: "Kick", domains: ["kick.com"] },
+];
+
+const hostIn = (host: string, domains: string[]) => domains.some((d) => host === d || host.endsWith(`.${d}`));
+
+/** true si el enlace es de TikTok, Instagram o Facebook. */
+export function isImportPlatformUrl(raw: string): boolean {
+  try {
+    return hostIn(new URL(raw).hostname.toLowerCase(), IMPORT_PLATFORM_DOMAINS);
+  } catch {
+    return false;
+  }
+}
+
 export function checkImportUrl(raw: string): { ok: true; url: string } | { ok: false; message: string } {
   let url: URL;
   try {
@@ -112,6 +141,13 @@ export function checkImportUrl(raw: string): { ok: true; url: string } | { ok: f
     return { ok: false, message: "Ese enlace apunta a una dirección privada." };
   }
   if (!host.includes(".") && !host.includes(":")) return { ok: false, message: "Ese enlace no es válido." };
+  const unsupported = UNSUPPORTED_PLATFORMS.find((p) => hostIn(host, p.domains));
+  if (unsupported) {
+    return {
+      ok: false,
+      message: `Por ahora no se pueden importar videos de ${unsupported.name}. Descárgalo y súbelo como archivo. Por enlace funcionan ${IMPORT_PLATFORMS.join(", ").replace(/, ([^,]*)$/, " y $1")}.`,
+    };
+  }
   url.hash = "";
   return { ok: true, url: url.toString() };
 }

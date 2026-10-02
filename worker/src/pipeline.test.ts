@@ -163,7 +163,7 @@ describe("gameplay sin voz", () => {
 describe("videos importados por enlace", () => {
   it("descarga el enlace, lo guarda como original, usa el título como nombre y genera clips", async () => {
     const db = h!.db;
-    const { job, video } = await seedVideoJob(db, root, { sample, importUrl: "https://www.youtube.com/watch?v=abc" });
+    const { job, video } = await seedVideoJob(db, root, { sample, importUrl: "https://www.tiktok.com/@ana/video/1" });
     const calls: string[] = [];
     const deps = {
       ...makeDeps(db, root, path.join(root, "work")),
@@ -176,7 +176,7 @@ describe("videos importados por enlace", () => {
       },
     };
     const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
-    expect(calls).toEqual(["https://www.youtube.com/watch?v=abc"]);
+    expect(calls).toEqual(["https://www.tiktok.com/@ana/video/1"]);
     expect(result.clipCount).toBeGreaterThan(0);
 
     const [row] = await db.select().from(schema.videos).where(eq(schema.videos.id, video.id));
@@ -190,7 +190,7 @@ describe("videos importados por enlace", () => {
 
   it("si el enlace no se puede descargar, el video queda rechazado con un mensaje claro", async () => {
     const db = h!.db;
-    const { job, video } = await seedVideoJob(db, root, { sample, importUrl: "https://www.youtube.com/watch?v=privado" });
+    const { job, video } = await seedVideoJob(db, root, { sample, importUrl: "https://www.instagram.com/reel/privado/" });
     const deps = {
       ...makeDeps(db, root, path.join(root, "work")),
       download: async () => {
