@@ -72,6 +72,7 @@ try {
       aiMaxAudioMinutes: config.OPENAI_MAX_AUDIO_MINUTES,
       faceTracking: config.FACE_TRACKING_ENABLED,
       ytDlpPath: config.YTDLP_PATH,
+      ytDlpPotHome: config.YTDLP_POT_HOME || null,
       downloadProxyUrl,
       downloadProxyProblem: downloadProxyUrl ? null : describeProxyValue(config.DOWNLOAD_PROXY_URL),
       vision: {

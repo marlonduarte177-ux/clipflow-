@@ -113,6 +113,20 @@ Desde el 02/10/2026 el procesador puede descargar a través de un proxy residenc
   - **Sesión fija** (`_session-XXXXXXXX_lifetime-60`): YouTube ata el enlace del video a la IP que
     lo pidió, así que se mantiene la misma IP durante toda la descarga.
   - Con otro proveedor hay que pegar la URL ya con su país y su sesión fija.
+- **Token de origen de YouTube (PO token), desde el 02/10/2026:** YouTube exige un comprobante de
+  que la petición viene de un reproductor real. Sin él responde **403** al descargar, aunque la IP
+  sea residencial. Eso pasó en staging con Evomi ya funcionando.
+  - Lo genera **bgutil-ytdlp-pot-provider** (versión fijada `2.0.1` en `worker/Dockerfile`,
+    licencia GPL-3.0). Corre como programa aparte: yt-dlp lo llama solo cuando hace falta, a
+    través del mismo proxy.
+  - yt-dlp usa los clientes `mweb` y `web_safari` de YouTube, que son los que aceptan el token
+    según la guía oficial.
+  - **Probado en desarrollo:** el token se genera en la misma base de la imagen (Debian bookworm).
+    La descarga no se pudo probar ahí porque esa IP es de centro de datos y YouTube la bloquea
+    siempre. Falta probar en staging con Evomi.
+  - **Si falla el generador,** yt-dlp sigue sin token, igual que antes.
+  - **Hay que actualizarlo** junto con yt-dlp cuando YouTube cambie algo: cambiar `BGUTIL_VERSION` en
+    el Dockerfile y desplegar.
 - **Restricción de edad:** YouTube exige una cuenta y el proxy no lo arregla. La app lo dice con su
   propio mensaje.
 - **Seguridad:**

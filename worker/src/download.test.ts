@@ -142,14 +142,15 @@ describe("proxy residencial para plataformas que bloquean a AWS", () => {
       script,
       [
         "#!/bin/sh",
-        'out=""; proxy=""; sort=""; prev=""',
+        'out=""; proxy=""; sort=""; xargs=""; prev=""',
         'for a in "$@"; do',
         '  [ "$prev" = "-o" ] && out="$a"',
         '  [ "$prev" = "--proxy" ] && proxy="$a"',
         '  [ "$prev" = "-S" ] && sort="$a"',
+        '  [ "$prev" = "--extractor-args" ] && xargs="$xargs $a"',
         '  prev="$a"',
         "done",
-        'echo "call proxy=$proxy sort=$sort" >> "$(dirname "$0")/calls.log"',
+        'echo "call proxy=$proxy sort=$sort$xargs" >> "$(dirname "$0")/calls.log"',
         'if [ -z "$proxy" ]; then echo "ERROR: [youtube] x: Sign in to confirm you are not a bot" >&2; exit 1; fi',
         'file=$(echo "$out" | sed "s/%(ext)s/mp4/")',
         'echo data > "$file"',
@@ -189,6 +190,17 @@ describe("proxy residencial para plataformas que bloquean a AWS", () => {
     expect(calls).toHaveLength(2);
     expect(calls[0]).toBe("call proxy= sort=res:1080,vcodec:h264,acodec:aac");
     expect(calls[1]).toMatch(/proxy=http:\/\/user:secreto_country-US_session-/);
+  });
+
+  it("con el generador de tokens configurado, yt-dlp lo usa con los clientes de YouTube que lo piden", async () => {
+    const yt = fakeYtDlp("pot-token");
+    await downloadFromUrl("https://youtu.be/abc", yt.work, {
+      ...options(),
+      ytDlpPath: yt.script,
+      proxyUrl: "http://user:secreto@rp.evomi.com:1000",
+      potHome: "/opt/bgutil-pot",
+    });
+    expect(yt.calls()[0]).toContain(" youtubepot-bgutilscript:server_home=/opt/bgutil-pot youtube:player_client=mweb,web_safari");
   });
 
   it("si el proxy está mal escrito y nos bloquean, el mensaje lo dice", async () => {

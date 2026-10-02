@@ -74,6 +74,8 @@ export interface DownloadOptions {
   proxyUrl?: string | null;
   /** Sin proxy: por qué ("mal escrito", "sin configurar"). Se agrega al mensaje si nos bloquean. */
   proxyProblem?: string | null;
+  /** Carpeta del generador de tokens de YouTube (bgutil, modo script). */
+  potHome?: string | null;
 }
 
 export interface Downloaded {
@@ -273,6 +275,17 @@ async function runYtDlp(url: string, dir: string, options: DownloadOptions, prox
     "-S",
     proxy ? "res:720,vcodec:h264,acodec:aac" : "res:1080,vcodec:h264,acodec:aac",
     ...(proxy ? ["--proxy", proxy] : []),
+    // YouTube exige un "token de origen" (PO token) para descargar: lo genera bgutil, que yt-dlp
+    // llama solo, a través del mismo proxy. Los clientes mweb y web_safari son los que lo usan
+    // (guía oficial de yt-dlp); los otros responden 403 o "no reproducible" desde servidores.
+    ...(options.potHome
+      ? [
+          "--extractor-args",
+          `youtubepot-bgutilscript:server_home=${options.potHome}`,
+          "--extractor-args",
+          "youtube:player_client=mweb,web_safari",
+        ]
+      : []),
     "--merge-output-format",
     "mp4",
     "--match-filters",

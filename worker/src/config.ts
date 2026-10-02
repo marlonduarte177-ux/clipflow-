@@ -15,6 +15,8 @@ const EnvSchema = z.object({
   FFPROBE_PATH: z.string().default("ffprobe"),
   /** yt-dlp para importar videos por enlace (YouTube, TikTok…). */
   YTDLP_PATH: z.string().default("yt-dlp"),
+  /** Carpeta del generador de tokens de YouTube (bgutil). Sin ella, yt-dlp no pide tokens. */
+  YTDLP_POT_HOME: z.string().optional(),
   /**
    * Proxy residencial para plataformas que bloquean a AWS (YouTube…). Viene de Secrets Manager;
    * mientras tenga el valor de relleno (no es una URL), el proxy queda apagado.
