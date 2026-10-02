@@ -285,6 +285,58 @@ describe("procesamiento con IA", () => {
     expect(transcribeCalls).toBe(2);
   });
 
+  it("el MISMO enlace importado otra vez reutiliza la transcripción del video anterior (solo del mismo usuario)", async () => {
+    const db = h!.db;
+    const link = "https://www.tiktok.com/@ana/video/123";
+    const { job, video } = await seedVideoJob(db, root, { sample, importUrl: link });
+    const ai = Object.assign(new FakeAI(), { transcriptionModel: "whisper-1" });
+    let transcribeCalls = 0;
+    const transcribe = ai.transcribe.bind(ai);
+    ai.transcribe = async (chunks) => (transcribeCalls++, transcribe(chunks));
+    const deps = {
+      ...makeDeps(db, root, path.join(root, "work")),
+      ai,
+      download: async (_url: string, dir: string) => {
+        const file = path.join(dir, "source.mp4");
+        execFileSync("cp", [sample, file]);
+        return { file, sizeBytes: 1, title: "Mi video" };
+      },
+    };
+    await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    expect(transcribeCalls).toBe(1);
+
+    // Mismo usuario, mismo enlace, otro video en ClipFlow.
+    const importAgain = async (userId: string, projectId: string) => {
+      const [row] = await db
+        .insert(schema.videos)
+        .values({
+          userId,
+          projectId,
+          originalFilename: "tiktok.com/@ana/video/123",
+          mimeType: "video/mp4",
+          sizeBytes: 0,
+          s3Key: `originals/${userId}/${crypto.randomUUID()}/original.mp4`,
+          status: "importing",
+          sourceUrl: link,
+          rightsConfirmedAt: new Date(),
+        })
+        .returning();
+      const { job: j } = await createJob(db, { userId, videoId: row!.id, type: "analyze_video", idempotencyKey: `analyze:${row!.id}`, params: { clipDurationSeconds: 15 } });
+      return { video: row!, job: j };
+    };
+    const same = await importAgain(job.userId, video.projectId);
+    const result = await processAnalyzeJob((await claimJob(db, same.job.id, "test-worker"))!, deps);
+    expect(transcribeCalls).toBe(1);
+    expect(result.costs!.transcriptionUsd).toBe(0);
+    // Queda una copia propia para el video nuevo (se borra con él).
+    expect(existsSync(path.join(root, transcriptCacheKey(job.userId, same.video.id, "fake", "whisper-1")))).toBe(true);
+
+    // OTRO usuario con el mismo enlace: no recibe la transcripción ajena, se transcribe para él.
+    const other = await seedVideoJob(db, root, { sample, importUrl: link });
+    await processAnalyzeJob((await claimJob(db, other.job.id, "test-worker"))!, deps);
+    expect(transcribeCalls).toBe(2);
+  });
+
   it("sin habla real (gameplay) no inventa títulos ni subtítulos y lo indica", async () => {
     const db = h!.db;
     const { job } = await seedVideoJob(db, root, { sample });

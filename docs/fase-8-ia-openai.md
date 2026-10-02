@@ -239,6 +239,17 @@ Guarda los segmentos con los tiempos de cada palabra, el idioma y el tramo de au
   registra en el log y el trabajo sigue.
 - **Se borra con el video,** y también al borrar su proyecto.
 
+**El mismo enlace importado otra vez (arreglo del 02/10/2026):**
+- Importar de nuevo el mismo enlace crea **otro video** en ClipFlow, así que al principio no encontraba la
+  transcripción y se volvía a pagar. Así se probó en staging.
+- Ahora, si el video no tiene transcripción propia, se busca la de los videos anteriores **del mismo
+  usuario** con el **mismo enlace** (los 5 más recientes), con las mismas condiciones de modelo y tramo
+  de audio.
+- Si se encuentra, se guarda una copia para el video nuevo, que se borra con él.
+- Nunca se usa la transcripción de otro usuario, aunque haya importado el mismo enlace.
+- Las transcripciones hechas **antes** del despliegue del PR #28 no se guardaron: esas se pagan una vez
+  más, la primera vez.
+
 **Permisos:**
 - El worker puede leer y escribir en `transcripts/*`.
 - La API puede leer y borrar en `transcripts/*`, para la limpieza al eliminar.
