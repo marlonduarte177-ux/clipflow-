@@ -64,6 +64,7 @@ export function JobProgress({ job }: { job: JobDto }) {
 
 /** Pantalla de progreso: anillo con el porcentaje, tiempos y la lista de pasos. */
 export function JobProgressPanel({ job, subtitles, imported = false }: { job: JobDto; subtitles: boolean; imported?: boolean }) {
+  const downloadOnly = job.params.downloadOnly === true;
   const radius = 86;
   const circumference = 2 * Math.PI * radius;
   const progress = job.status === "queued" ? 0 : job.progress;
@@ -75,9 +76,14 @@ export function JobProgressPanel({ job, subtitles, imported = false }: { job: Jo
     label: stage === "rendering_clips" && subtitles ? "Generando clips con subtítulos" : STAGE_LABELS[stage],
     state: i < current ? ("done" as const) : i === current ? ("active" as const) : ("pending" as const),
   }));
-  const steps = imported
+  // "Solo descargar": bajar el video y dejarlo listo; no hay análisis ni clips.
+  const steps = downloadOnly
     ? stageSteps
-    : [{ label: "Video subido", state: "done" as const }, ...stageSteps.filter((s) => s.stage !== "downloading")];
+        .filter((s) => s.stage === "downloading" || s.stage === "preparing")
+        .map((s) => (s.stage === "preparing" ? { ...s, label: "Preparando tu descarga" } : s))
+    : imported
+      ? stageSteps
+      : [{ label: "Video subido", state: "done" as const }, ...stageSteps.filter((s) => s.stage !== "downloading")];
 
   return (
     <div className="space-y-5">

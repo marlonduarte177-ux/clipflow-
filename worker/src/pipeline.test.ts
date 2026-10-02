@@ -188,6 +188,27 @@ describe("videos importados por enlace", () => {
     expect(usage.find((u) => u.metric === "storage_bytes")).toMatchObject({ details: { event: "import_completed" } });
   });
 
+  it("solo descargar: guarda el original listo para bajarlo, sin analizar ni crear clips", async () => {
+    const db = h!.db;
+    const { job, video } = await seedVideoJob(db, root, { sample, importUrl: "https://www.tiktok.com/@ana/video/2", params: { downloadOnly: true } });
+    const deps = {
+      ...makeDeps(db, root, path.join(root, "work")),
+      download: async (_url: string, dir: string) => {
+        const file = path.join(dir, "source.mp4");
+        execFileSync("cp", [sample, file]);
+        return { file, sizeBytes: statSync(file).size, title: "Mi baile" };
+      },
+    };
+    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    expect(result).toMatchObject({ clipCount: 0, downloadOnly: true });
+
+    const [row] = await db.select().from(schema.videos).where(eq(schema.videos.id, video.id));
+    expect(row).toMatchObject({ status: "ready", originalFilename: "Mi baile.mp4" });
+    expect(row!.durationSeconds).toBeCloseTo(40, 0);
+    expect(statSync(path.join(root, video.s3Key)).size).toBe(statSync(sample).size);
+    expect(await db.select().from(schema.clips).where(eq(schema.clips.videoId, video.id))).toHaveLength(0);
+  });
+
   it("si el enlace no se puede descargar, el video queda rechazado con un mensaje claro", async () => {
     const db = h!.db;
     const { job, video } = await seedVideoJob(db, root, { sample, importUrl: "https://www.instagram.com/reel/privado/" });

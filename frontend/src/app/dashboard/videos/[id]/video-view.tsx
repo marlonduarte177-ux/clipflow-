@@ -3,14 +3,18 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ClipDto, ClipListResponse, JobDto, JobListResponse, SubtitleStyle, VideoDto } from "@clipflow/shared";
+import type { ClipDto, ClipListResponse, JobDto, JobListResponse, SubtitleStyle, VideoDownloadResponse, VideoDto } from "@clipflow/shared";
 import { ClipViewer, FullTranscript, scoreOf } from "@/components/clip-viewer";
 import { DEFAULT_DURATION, DurationPicker, SubtitlePicker } from "@/components/clip-options";
-import { BackIcon, CheckIcon, RetryIcon, TrashIcon } from "@/components/icons";
+import { BackIcon, CheckIcon, DownloadIcon, RetryIcon, ShareIcon, TrashIcon } from "@/components/icons";
 import { isActive, JobProgressPanel } from "@/components/job-progress";
 import { Alert } from "@/components/ui";
 import { apiConfigured, apiFetch, formatBytes, formatDuration } from "@/lib/api";
 import { languageName } from "@/lib/language";
+import { shareVideoFile } from "@/lib/share";
+
+/** Compartir baja el video entero al celular: solo para videos no tan pesados. */
+const MAX_SHARE_BYTES = 200 * 1024 * 1024;
 
 interface Data {
   video: VideoDto;
@@ -41,6 +45,8 @@ export function VideoView({ videoId }: { videoId: string }) {
   const [deleting, setDeleting] = useState(false);
   const [clipSeconds, setClipSeconds] = useState(DEFAULT_DURATION);
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>("highlight");
+  const [saving, setSaving] = useState<"download" | "share" | null>(null);
+  const [note, setNote] = useState("");
   const processing = isActive(data?.job);
 
   useEffect(() => {
@@ -79,6 +85,37 @@ export function VideoView({ videoId }: { videoId: string }) {
       setData({ ...data, job });
     } catch (err) {
       setError((err as Error).message);
+    }
+  }
+
+  /** URL temporal del video original (la pide al momento: caduca en minutos). */
+  async function originalUrl() {
+    return (await apiFetch<VideoDownloadResponse>(`/videos/${videoId}/download`)).url;
+  }
+
+  async function downloadOriginal() {
+    setSaving("download");
+    try {
+      window.location.href = await originalUrl();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  async function shareOriginal() {
+    if (!data) return;
+    setSaving("share");
+    setNote("");
+    try {
+      const name = data.video.originalFilename.replace(/\.[a-z0-9]{2,4}$/i, "");
+      const result = await shareVideoFile(await originalUrl(), `${name}.mp4`, name);
+      if (result === "unsupported") setNote("Este navegador no puede compartir videos directo: usa Descargar.");
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(null);
     }
   }
 
@@ -123,6 +160,8 @@ export function VideoView({ videoId }: { videoId: string }) {
 
   const { video, job, transcript } = data;
   const result = job?.status === "completed" ? job.result : null;
+  // "Solo descargar" terminado: el video está listo para bajarlo (y, si quiere, crear clips).
+  const downloadReady = result?.downloadOnly === true;
   const language = languageName(result?.language ?? transcript?.language);
   const style = job?.params.subtitleStyle ?? "highlight";
   let origin: string | null = null;
@@ -131,11 +170,11 @@ export function VideoView({ videoId }: { videoId: string }) {
   } catch {
     origin = null;
   }
-  const summary = [
+  const summary = (downloadReady ? [formatBytes(video.sizeBytes), formatDuration(video.durationSeconds), origin] : [
     job?.status === "completed" ? `${counts.all} clips` : video.sizeBytes > 0 ? formatBytes(video.sizeBytes) : origin,
     job?.params.clipDurationSeconds ? `de ${job.params.clipDurationSeconds} s` : formatDuration(video.durationSeconds),
     result?.ai === "used" && style !== "none" ? `subtítulos en ${(language ?? "su idioma").toLowerCase()}` : null,
-  ]
+  ])
     .filter(Boolean)
     .join(" · ");
 
@@ -177,7 +216,9 @@ export function VideoView({ videoId }: { videoId: string }) {
 
       {job && (job.status === "failed" || job.status === "cancelled") ? (
         <div className="mx-auto max-w-xl space-y-3 rounded-2xl border border-line bg-surface p-5">
-          <p className="font-semibold">{job.status === "failed" ? "No se pudo procesar el video" : "Procesamiento cancelado"}</p>
+          <p className="font-semibold">
+            {job.status === "failed" ? (job.params.downloadOnly ? "No se pudo descargar el video" : "No se pudo procesar el video") : "Procesamiento cancelado"}
+          </p>
           {job.errorMessage ? <p className="text-sm text-muted">{job.errorMessage}</p> : null}
           <button onClick={() => jobAction("retry")} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-accent font-bold text-black">
             <RetryIcon size={18} />
@@ -196,11 +237,60 @@ export function VideoView({ videoId }: { videoId: string }) {
         </div>
       ) : null}
 
+      {downloadReady ? (
+        <div className="mx-auto max-w-xl space-y-7">
+          <div className="space-y-4 rounded-[22px] border border-line bg-surface p-5">
+            <div className="flex items-center gap-3">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-accent text-black">
+                <CheckIcon size={20} strokeWidth={3} />
+              </span>
+              <div className="min-w-0">
+                <p className="font-semibold">Tu video está listo</p>
+                <p className="text-[13px] text-muted">Guárdalo en tu celular o compártelo.</p>
+              </div>
+            </div>
+            <div className={`grid gap-2.5 ${video.sizeBytes <= MAX_SHARE_BYTES ? "grid-cols-2" : "grid-cols-1"}`}>
+              <button
+                onClick={downloadOriginal}
+                disabled={saving !== null}
+                className="flex h-[54px] items-center justify-center gap-2 rounded-2xl bg-accent text-base font-bold text-black disabled:opacity-60"
+              >
+                <DownloadIcon size={20} strokeWidth={2.4} />
+                {saving === "download" ? "Preparando…" : "Descargar"}
+              </button>
+              {video.sizeBytes <= MAX_SHARE_BYTES ? (
+                <button
+                  onClick={shareOriginal}
+                  disabled={saving !== null}
+                  className="flex h-[54px] items-center justify-center gap-2 rounded-2xl border border-[#2a3040] bg-background text-base font-semibold disabled:opacity-60"
+                >
+                  <ShareIcon size={20} />
+                  {saving === "share" ? "Preparando…" : "Compartir"}
+                </button>
+              ) : null}
+            </div>
+            {note ? <p className="text-xs text-muted">{note}</p> : null}
+          </div>
+
+          <div className="space-y-5">
+            <div className="space-y-1">
+              <h2 className="text-lg font-bold">¿Quieres clips de este video?</h2>
+              <p className="text-sm text-muted">Usamos el video que ya descargamos: no hay que volver a pegar el enlace.</p>
+            </div>
+            <DurationPicker value={clipSeconds} onChange={setClipSeconds} />
+            <SubtitlePicker value={subtitleStyle} onChange={setSubtitleStyle} />
+            <button onClick={startProcessing} className="h-14 w-full rounded-2xl bg-accent text-[17px] font-bold text-black">
+              Crear clips
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {!job && video.status === "pending_upload" ? (
         <Alert kind="info">Esta subida no terminó. Vuelve a subir el video desde “Subir video”.</Alert>
       ) : null}
 
-      {job?.status === "completed" ? (
+      {job?.status === "completed" && !downloadReady ? (
         <section className="space-y-4">
           {result && result.ai !== "used" ? <AiNote result={result} /> : null}
 

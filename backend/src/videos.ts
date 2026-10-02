@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
 import { and, count, desc, eq, gt, inArray, or } from "drizzle-orm";
 import { z } from "zod";
@@ -16,6 +17,7 @@ import {
   type ProductConfig,
   type SubtitleStyle,
   type UploadPartUrlsResponse,
+  type VideoDownloadResponse,
   type VideoDto,
   type VideoListResponse,
 } from "@clipflow/shared";
@@ -66,6 +68,24 @@ export function toVideoDto(row: VideoRow, extras: Pick<VideoDto, "thumbnailUrl" 
 function nameFromUrl(url: string): string {
   const u = new URL(url);
   return `${u.hostname.replace(/^www\./, "")}${u.pathname === "/" ? "" : u.pathname}`.slice(0, 120);
+}
+
+/** Validez del enlace de descarga del original. */
+const DOWNLOAD_TTL_SECONDS = 15 * 60;
+
+/** Nombre del archivo al descargar: el título, sin caracteres raros, con su extensión. */
+function downloadName(originalFilename: string, s3Key: string): string {
+  const ext = path.extname(s3Key) || ".mp4";
+  // Solo letras simples: el nombre viaja en una cabecera HTTP (los acentos se quitan, no se rompen).
+  const base = originalFilename
+    .replace(/\.[a-z0-9]{2,4}$/i, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w .-]+/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .slice(0, 80);
+  return `${base || "clipflow-video"}${ext}`;
 }
 
 /** Quita caracteres de control del nombre (solo se muestra; nunca se usa como ruta en S3). */
@@ -260,7 +280,9 @@ export function videoRoutes(deps: VideoRouteDeps) {
       if (!input.success) return sendValidationError(reply, input.error);
       const checked = checkImportUrl(input.data.url);
       if (!checked.ok) return sendError(reply, 400, "invalid_url", checked.message);
-      const options = processingParams(product, input.data);
+      // "Solo descargar": sin opciones de clips. Si después quiere clips, usa "Crear clips" en el video.
+      const downloadOnly = input.data.downloadOnly === true;
+      const options = downloadOnly ? ({ ok: true, params: { downloadOnly: true } } as const) : processingParams(product, input.data);
       if (!options.ok) return sendError(reply, 400, "invalid_duration", options.message);
       const userId = request.user!.id;
 
@@ -309,11 +331,12 @@ export function videoRoutes(deps: VideoRouteDeps) {
         userId,
         videoId,
         type: "analyze_video",
-        idempotencyKey: `analyze:${videoId}`,
+        // Otra clave para "solo descargar": así después se puede crear clips (analyze:) del mismo video.
+        idempotencyKey: `${downloadOnly ? "download" : "analyze"}:${videoId}`,
         params: { ...options.params },
       });
       // Solo el dominio en los registros: el enlace completo puede llevar datos privados.
-      request.log.info({ videoId, host: new URL(checked.url).hostname }, "importación por enlace iniciada");
+      request.log.info({ videoId, host: new URL(checked.url).hostname, downloadOnly }, "importación por enlace iniciada");
       await enqueue(queue, job, request.log);
       wakeWorkers(db, launcher, request.log);
       return reply.code(201).send({ video: toVideoDto(row!), job: toJobDto(job) } satisfies ImportVideoResponse);
@@ -417,6 +440,19 @@ export function videoRoutes(deps: VideoRouteDeps) {
 
     // Iniciar el procesamiento de un video ya subido que no tiene trabajo
     // (p. ej. videos subidos antes de existir el procesador), eligiendo la duración de los clips.
+    // Bajar el video original (p. ej. después de "solo descargar"): URL firmada con su nombre.
+    app.get("/videos/:id/download", async (request, reply) => {
+      const params = IdParams.safeParse(request.params);
+      if (!params.success) return notFound(reply);
+      const row = await findOwnVideo(params.data.id, request.user!.id);
+      if (!row) return notFound(reply);
+      if ((row.status !== "uploaded" && row.status !== "ready") || row.sizeBytes <= 0) {
+        return sendError(reply, 409, "not_ready", "El video todavía no está listo para descargar.");
+      }
+      const ttl = DOWNLOAD_TTL_SECONDS;
+      return { url: await storage.presignGet(row.s3Key, ttl, downloadName(row.originalFilename, row.s3Key)), expiresInSeconds: ttl } satisfies VideoDownloadResponse;
+    });
+
     app.post("/videos/:id/process", async (request, reply) => {
       const params = IdParams.safeParse(request.params);
       if (!params.success) return notFound(reply);
