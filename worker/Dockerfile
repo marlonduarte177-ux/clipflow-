@@ -46,6 +46,8 @@ COPY --from=build /app/worker/dist worker/dist
 COPY --from=build /app/worker/models worker/models
 # Fuente de los subtítulos dibujados en el video (Montserrat ExtraBold, licencia OFL).
 COPY --from=build /app/worker/fonts worker/fonts
+# Complementos propios de yt-dlp (Kick con los códigos de video nuevos).
+COPY --from=build /app/worker/ytdlp-plugins worker/ytdlp-plugins
 RUN mkdir -p /tmp/clipflow && chown node:node /tmp/clipflow
 USER node
 CMD ["node", "worker/dist/main.js"]
