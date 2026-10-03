@@ -98,6 +98,14 @@ usa para elegir los momentos: donde el chat explota suele haber un buen clip.
 
 ## Descargar solo el video (02/10/2026)
 
+> **Desactivado el 03/10/2026** para cumplir con la pasarela de pago (Paddle). El interruptor es
+> `FEATURES.downloadOnly` en `shared/src/features.ts` (un solo lugar para la API y la web). Con `false`:
+> - la web no muestra el botón, y de los videos que ya se habían bajado solo ofrece «Crear clips»;
+> - la API responde 403 `download_disabled` a `POST /videos/import` con `downloadOnly: true`, y a
+>   `GET /videos/:id/download` de un video importado por enlace;
+> - los clips generados se siguen pudiendo descargar, y un archivo subido por el usuario también.
+> Para reactivarlo: poner `true`, fusionar y desplegar. Lo que sigue describe cómo funciona activado.
+
 Debajo del campo del enlace hay un botón **"Descargar solo el video"**: baja el video tal cual,
 sin crear clips.
 - **Misma ventana de derechos de autor;** el botón dice "Acepto, descargar".

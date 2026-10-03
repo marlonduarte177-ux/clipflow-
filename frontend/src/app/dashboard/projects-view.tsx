@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
-import type { JobDto, JobListResponse, ProjectDto, ProjectListResponse, VideoDto, VideoListResponse } from "@clipflow/shared";
+import { FEATURES, type JobDto, type JobListResponse, type ProjectDto, type ProjectListResponse, type VideoDto, type VideoListResponse } from "@clipflow/shared";
 import { DownIcon, NextIcon, PlusIcon, TrashIcon, UploadIcon, VideosIcon } from "@/components/icons";
 import { isActive, JobProgress } from "@/components/job-progress";
 import { Alert } from "@/components/ui";
@@ -233,7 +233,7 @@ function VideoState({ video, job }: { video: VideoDto; job: JobDto | undefined }
   if (job?.status === "completed" && job.result?.downloadOnly) {
     return (
       <span className="flex items-center gap-2">
-        <span className="whitespace-nowrap rounded-full border border-accent/60 px-2.5 py-0.5 text-xs font-bold text-accent">Listo para descargar</span>
+        <span className="whitespace-nowrap rounded-full border border-accent/60 px-2.5 py-0.5 text-xs font-bold text-accent">{FEATURES.downloadOnly ? "Listo para descargar" : "Listo para crear clips"}</span>
         <span className="text-xs text-muted">{formatDuration(video.durationSeconds)}</span>
       </span>
     );

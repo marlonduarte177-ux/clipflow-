@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import { FEATURES } from "@clipflow/shared";
 import { schema } from "@clipflow/shared/db";
 import { bearer, closeTestApp, createTestApp, type TestContext } from "./test-helpers.js";
 
@@ -85,7 +86,29 @@ describe("importar videos por enlace", () => {
   });
 });
 
-describe("solo descargar el video (sin clips)", () => {
+describe.runIf(!FEATURES.downloadOnly)("«Descargar solo el video» desactivado", () => {
+  it("rechaza las importaciones de solo descarga sin crear nada", async () => {
+    const projectId = await newProject("alice");
+    const res = await importVideo("alice", { projectId, url: "https://www.tiktok.com/@ana/video/9", rightsConfirmed: true, downloadOnly: true });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe("download_disabled");
+    expect(ctx!.queue.sent).toEqual([]);
+    expect(await ctx!.database.db.select().from(schema.videos)).toEqual([]);
+  });
+
+  it("no entrega el original de un video importado por enlace, pero sí crea clips con el enlace", async () => {
+    const projectId = await newProject("alice");
+    const res = await importVideo("alice", { projectId, url: "https://www.tiktok.com/@ana/video/9", rightsConfirmed: true });
+    expect(res.statusCode).toBe(201);
+    const { video } = res.json();
+    await ctx!.database.db.update(schema.videos).set({ status: "ready", sizeBytes: 1234 }).where(eq(schema.videos.id, video.id));
+    const dl = await app().inject({ method: "GET", url: `/videos/${video.id}/download`, headers: bearer("alice") });
+    expect(dl.statusCode).toBe(403);
+    expect(dl.json().error.code).toBe("download_disabled");
+  });
+});
+
+describe.runIf(FEATURES.downloadOnly)("solo descargar el video (sin clips)", () => {
   it("crea un trabajo de solo descarga; luego se baja el original con su nombre y se pueden crear clips", async () => {
     const projectId = await newProject("alice");
     const res = await importVideo("alice", { projectId, url: "https://www.tiktok.com/@ana/video/9", rightsConfirmed: true, downloadOnly: true });
@@ -125,7 +148,7 @@ describe("solo descargar el video (sin clips)", () => {
   });
 });
 
-describe("streams largos analizados con copia liviana", () => {
+describe.runIf(FEATURES.downloadOnly)("streams largos analizados con copia liviana", () => {
   it("no se ofrece la copia liviana para descargar y se explica cómo bajar el video completo", async () => {
     const projectId = await newProject("alice");
     const { video } = (await importVideo("alice", { projectId, url: "https://www.twitch.tv/videos/1", rightsConfirmed: true })).json();

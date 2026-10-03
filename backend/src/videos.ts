@@ -20,6 +20,8 @@ import {
   type VideoDownloadResponse,
   type VideoDto,
   type VideoListResponse,
+  DOWNLOAD_DISABLED_MESSAGE,
+  FEATURES,
 } from "@clipflow/shared";
 import { createJob, schema, type Database } from "@clipflow/shared/db";
 import { deleteVideoRows, purgeVideoFiles } from "./cleanup.js";
@@ -282,6 +284,7 @@ export function videoRoutes(deps: VideoRouteDeps) {
       if (!checked.ok) return sendError(reply, 400, "invalid_url", checked.message);
       // "Solo descargar": sin opciones de clips. Si después quiere clips, usa "Crear clips" en el video.
       const downloadOnly = input.data.downloadOnly === true;
+      if (downloadOnly && !FEATURES.downloadOnly) return sendError(reply, 403, "download_disabled", DOWNLOAD_DISABLED_MESSAGE);
       const options = downloadOnly ? ({ ok: true, params: { downloadOnly: true } } as const) : processingParams(product, input.data);
       if (!options.ok) return sendError(reply, 400, "invalid_duration", options.message);
       const userId = request.user!.id;
@@ -449,6 +452,9 @@ export function videoRoutes(deps: VideoRouteDeps) {
       if ((row.status !== "uploaded" && row.status !== "ready") || row.sizeBytes <= 0) {
         return sendError(reply, 409, "not_ready", "El video todavía no está listo para descargar.");
       }
+      // Un video importado por enlace no se entrega tal cual mientras «Descargar solo el video» esté
+      // desactivado (sí sus clips). Un archivo que subió el propio usuario, sí.
+      if (row.sourceUrl && !FEATURES.downloadOnly) return sendError(reply, 403, "download_disabled", DOWNLOAD_DISABLED_MESSAGE);
       // Stream largo: solo se guardó una copia liviana (160p) para elegir los momentos; no se ofrece.
       if ((row.probe as { clipflowAnalysisCopy?: boolean } | null)?.clipflowAnalysisCopy) {
         return sendError(

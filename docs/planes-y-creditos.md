@@ -24,6 +24,8 @@ Reglas:
 
 ## «Descargar solo el video»
 
+> Desactivado el 03/10/2026 por Paddle (ver `docs/importar-por-enlace.md`). Si se reactiva, aplican estas reglas.
+
 - **No gasta minutos** (no usa OpenAI).
 - **Pro: ilimitadas mientras no pasen por el proxy residencial (Evomi).** TikTok, Kick, Twitch y los
   enlaces directos bajan sin proxy, así que no tienen límite.
