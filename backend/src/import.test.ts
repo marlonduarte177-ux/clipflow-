@@ -124,3 +124,17 @@ describe("solo descargar el video (sin clips)", () => {
     expect(processed.json().id).not.toBe(job.id);
   });
 });
+
+describe("streams largos analizados con copia liviana", () => {
+  it("no se ofrece la copia liviana para descargar y se explica cómo bajar el video completo", async () => {
+    const projectId = await newProject("alice");
+    const { video } = (await importVideo("alice", { projectId, url: "https://www.twitch.tv/videos/1", rightsConfirmed: true })).json();
+    await ctx!.database.db
+      .update(schema.videos)
+      .set({ status: "ready", sizeBytes: 1234, probe: { clipflowAnalysisCopy: true } })
+      .where(eq(schema.videos.id, video.id));
+    const res = await app().inject({ method: "GET", url: `/videos/${video.id}/download`, headers: bearer("alice") });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toMatchObject({ code: "analysis_copy", message: expect.stringContaining("Descargar solo el video") });
+  });
+});

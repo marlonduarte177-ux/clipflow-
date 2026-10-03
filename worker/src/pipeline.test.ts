@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { claimJob, failJob, schema, type DbHandle } from "@clipflow/shared/db";
+import { claimJob, createJob, failJob, schema, type DbHandle } from "@clipflow/shared/db";
 import { createTestDb } from "@clipflow/shared/db/testing";
-import { DownloadError } from "./download.js";
+import { DownloadError, downloadSection, type StreamSource } from "./download.js";
 import { JobError, processAnalyzeJob } from "./pipeline.js";
 import { makeDeps, makeGameplayVideo, makeLetterboxedVideo, makeSampleVideo, seedVideoJob } from "./test-helpers.js";
 
@@ -322,5 +322,76 @@ describe("videos importados por enlace", () => {
     expect(warnings.find((w) => w.step === "guardar el video importado")).toMatchObject({ code: "AccessDenied" });
     const [row] = await db.select().from(schema.videos).where(eq(schema.videos.id, video.id));
     expect(row!.status).toBe("importing");
+  });
+});
+
+describe("streams largos de Kick/Twitch: copia liviana para analizar y solo los tramos de los clips", () => {
+  function streamDeps(db: Parameters<typeof makeDeps>[0], hd: string, durationSeconds = 40) {
+    const calls = { info: 0, downloads: [] as (string | undefined)[], resolve: 0, sections: [] as { start: number; duration: number }[] };
+    const deps = {
+      ...makeDeps(db, root, path.join(root, "work")),
+      longStreamMinSeconds: 30,
+      download: async (_url: string, dir: string, options: { quality?: string }) => {
+        calls.downloads.push(options.quality);
+        const file = path.join(dir, "source.mp4");
+        execFileSync("cp", [sample, file]); // la "copia liviana"
+        return { file, sizeBytes: statSync(file).size, title: "Stream de prueba" };
+      },
+      streams: {
+        fetchMediaInfo: async () => (calls.info++, { title: "Stream de prueba", durationSeconds, isLive: false }),
+        resolveStreamUrls: async (): Promise<StreamSource> => (calls.resolve++, { urls: [hd], proxy: null }),
+        // El corte real con FFmpeg, sobre un archivo local en lugar del HLS de la plataforma.
+        downloadSection: async (src: StreamSource, start: number, duration: number, out: string, o: { ffmpegPath: string }) => {
+          calls.sections.push({ start, duration });
+          await downloadSection(src, start, duration, out, o);
+        },
+      },
+    };
+    return { deps, calls };
+  }
+
+  it("analiza la copia liviana, corta cada clip en 720p desde el enlace y no ofrece la copia para descargar", async () => {
+    const db = h!.db;
+    // El "720p" de la plataforma: el mismo video en otra resolución.
+    const hd = path.join(root, "hd.mp4");
+    execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-i", sample, "-vf", "scale=1280:720", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", hd]);
+    const { job, video } = await seedVideoJob(db, root, { sample, importUrl: "https://www.twitch.tv/videos/123" });
+    const { deps, calls } = streamDeps(db, hd);
+
+    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    expect(result.clipCount).toBeGreaterThan(0);
+    expect(calls.downloads).toEqual(["analysis"]);
+    expect(calls.resolve).toBe(1);
+    // Un tramo por clip, en el segundo exacto del clip.
+    const clipRows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
+    expect(calls.sections.map((s) => s.start).sort()).toEqual(clipRows.map((c) => c.startSeconds).sort());
+    for (const c of clipRows) expect(probeSize(path.join(root, c.s3Key!))).toBe("1080,1920");
+    const [row] = await db.select().from(schema.videos).where(eq(schema.videos.id, video.id));
+    expect(row!.probe).toMatchObject({ clipflowAnalysisCopy: true });
+
+    // Volver a procesar: usa la copia guardada (no baja nada entero) y vuelve a cortar los tramos.
+    const { job: again } = await createJob(db, { userId: job.userId, videoId: video.id, type: "analyze_video", idempotencyKey: `again:${video.id}`, params: { clipDurationSeconds: 15 } });
+    await processAnalyzeJob((await claimJob(db, again.id, "test-worker"))!, deps);
+    expect(calls.downloads).toEqual(["analysis"]);
+    expect(calls.resolve).toBe(2);
+  });
+
+  it("un stream corto (p. ej. un clip de Twitch) se baja entero, sin tramos", async () => {
+    const db = h!.db;
+    const { job } = await seedVideoJob(db, root, { sample, importUrl: "https://www.twitch.tv/videos/456" });
+    const { deps, calls } = streamDeps(db, sample, 20);
+    await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    expect(calls.info).toBe(1);
+    expect(calls.downloads).toEqual([undefined]);
+    expect(calls.sections).toEqual([]);
+  });
+
+  it("'Descargar solo el video' baja el stream entero (sin consultar ni cortar)", async () => {
+    const db = h!.db;
+    const { job } = await seedVideoJob(db, root, { sample, importUrl: "https://kick.com/canal/videos/1", params: { downloadOnly: true } });
+    const { deps, calls } = streamDeps(db, sample);
+    await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    expect(calls.info).toBe(0);
+    expect(calls.downloads).toEqual([undefined]);
   });
 });
