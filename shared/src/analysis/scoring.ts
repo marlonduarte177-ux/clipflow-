@@ -45,6 +45,7 @@ export const SIGNAL_MIN_RANGE: Record<SignalName, number> = {
   reaction: 0,
   action: 1, // al menos un pico de diferencia entre segundos
   vision: 0,
+  chat: 0,
 };
 
 /** Normaliza a 0–1 usando percentiles 5 y 95 (resistente a valores extremos). */

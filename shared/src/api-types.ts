@@ -118,6 +118,10 @@ export interface JobResult {
   /** Por qué no se pudo usar el análisis de imágenes, o si quedó incompleto. */
   visionReason?: string;
   visionFrames?: number;
+  /** Chat del VOD de Twitch como señal extra: "used" si se leyó, "unavailable" si no se pudo. */
+  chat?: "used" | "unavailable";
+  /** Mensajes del chat leídos (muestra). */
+  chatMessages?: number;
   /** Costo estimado de ESTE procesamiento, en USD. */
   costs?: {
     transcriptionUsd: number;

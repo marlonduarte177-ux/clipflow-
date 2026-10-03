@@ -1,7 +1,7 @@
 # Importar videos por enlace
 
 Fecha: 01/10/2026. En **Subir video → Enlace** se pega el enlace de un video de **TikTok, Instagram,
-Facebook o Kick**, o un enlace directo a un archivo `.mp4`/`.mov`/`.webm`/`.mkv`. ClipFlow lo descarga y lo
+Facebook, Kick o Twitch**, o un enlace directo a un archivo `.mp4`/`.mov`/`.webm`/`.mkv`. ClipFlow lo descarga y lo
 procesa igual que un video subido.
 
 **YouTube, por ahora no (02/10/2026).** Se probó con proxy residencial (Evomi) y con el generador
@@ -9,7 +9,7 @@ de tokens de YouTube, y YouTube siguió bloqueando la descarga (403). A pedido d
 se quitó; se retomará más adelante.
 - La API y la web avisan al pegar el enlace: "Por ahora no se pueden importar videos de YouTube.
   Descárgalo y súbelo como archivo. Por enlace funcionan TikTok, Instagram y Facebook".
-- Lo mismo con Vimeo, X, Twitch, Dailymotion y Reddit.
+- Lo mismo con Vimeo, X, Dailymotion y Reddit.
 
 **Kick (02/10/2026):** se importan **clips** (`kick.com/canal/clips/clip_…` o `kick.com/canal?clip=clip_…`)
 y **videos guardados** (`kick.com/canal/videos/…`), para crear clips o para "Descargar solo el video".
@@ -38,6 +38,63 @@ y **videos guardados** (`kick.com/canal/videos/…`), para crear clips o para "D
 - El worker también lo rechaza, por si llega un enlace guardado antes del cambio.
 - **Si se retoma:** el generador de tokens está en el historial de git (PR #21). Se quitó de la
   imagen para no mantenerlo sin uso.
+
+**Twitch (03/10/2026):** se importan **clips** (`twitch.tv/canal/clip/…`, `clips.twitch.tv/…`) y
+**videos guardados** (`twitch.tv/videos/123…`), para crear clips o para "Descargar solo el video".
+- Mismos límites que Kick: hasta **720p** y **3 h**; un canal en vivo se rechaza.
+- Videos solo para suscriptores: "Este video es solo para suscriptores del canal, así que no se puede
+  importar." Videos borrados o caducados: "No encontramos un video…".
+- Algunos clips de Twitch vienen en HEVC: al crear clips se recomprimen igual; en "Descargar solo el
+  video" se pasan a H.264 para el iPhone.
+
+## Streams largos de Kick y Twitch: primero una copia liviana (03/10/2026)
+
+Un video guardado de **10 min o más** (al crear clips; no en "Descargar solo el video") no se baja entero
+en 720p. En su lugar:
+1. **Se leen los datos del enlace** (título, duración, si está en vivo) sin bajar nada.
+2. **Se baja una copia liviana** (la calidad más baja, ~160p, con el audio en AAC). Con ella se transcribe,
+   se miden las señales y se eligen los momentos. Bajarla es mucho más rápido y ocupa poco.
+3. **Por cada clip elegido,** se baja **solo ese tramo** en 720p directo desde la plataforma
+   (FFmpeg con `-ss` antes de la entrada y recompresión, así el corte es exacto: medido ±0,05 s).
+4. El clip se genera desde ese tramo, con su propio encuadre, y el tramo se borra.
+
+Detalles:
+- En S3 queda la copia liviana como "original", marcada con `probe.clipflowAnalysisCopy`.
+  - Volver a procesar usa esa copia y vuelve a bajar los tramos.
+  - `GET /videos/:id/download` responde 409 `analysis_copy`: "De este video guardamos solo una copia
+    liviana para elegir los momentos. Para bajarlo completo, impórtalo con «Descargar solo el video»".
+- Si un tramo falla, se reintenta una vez; si la plataforma ya no deja abrir el video (p. ej. se borró),
+  el trabajo falla con un mensaje claro.
+- Los clips de Twitch/Kick y los videos de menos de 10 min se bajan enteros, como antes.
+
+## Chat de Twitch como señal extra (03/10/2026)
+
+En los **videos guardados de Twitch** (`twitch.tv/videos/…`) también se lee el **chat del directo** y se
+usa para elegir los momentos: donde el chat explota suele haber un buen clip.
+- **Cómo se lee:** con la misma API pública que usa el reproductor web de Twitch (GraphQL). No necesita
+  cuenta, claves ni secretos nuestros. Módulo: `worker/src/chat/twitch.ts`.
+- **Qué se mide:** cada 15 s se lee una página de mensajes (en streams de más de ~4 h, cada más
+  segundos: máximo 900 consultas) y se calcula la actividad de esa ventana:
+  - **mensajes por segundo;**
+  - **emotes y risas** (KEKW, LUL, jaja, xd, POG, "clip"…): cada uno pesa 1,5;
+  - **cheers (bits)** ("Cheer500"): pesan más según los bits;
+  - **subs y donaciones** que anuncian los bots del canal (StreamElements, Streamlabs, Nightbot,
+    Moobot, Fossabot…): pesan 4.
+- **Retraso del chat:** la gente escribe unos segundos después de lo que pasa; la señal se adelanta 6 s.
+- **Peso en el score:** `chat` = 0,4 (variable `SCORE_WEIGHT_CHAT` para cambiarlo; 0 lo desactiva).
+- **Nunca hace fallar el trabajo:** si el chat no se puede leer (VOD sin repetición del chat, Twitch
+  caído), los momentos se eligen con las demás señales. Tiene un límite de 2 min y corre en paralelo
+  con la transcripción.
+- **Resultado:** el trabajo guarda `result.chat` ("used"/"unavailable") y `result.chatMessages`. La web
+  muestra "También se usó el chat del directo de Twitch…".
+- **Probado:** un VOD real de 29 min: 118 muestras y 3220 mensajes leídos en 3 s.
+- **Límites honestos:**
+  - Las suscripciones y donaciones **solo cuentan si aparecen en el chat** (un bot que las anuncia o
+    un cheer). Las alertas en pantalla del stream no están en el chat guardado.
+  - Los clips de Twitch no tienen chat guardado, así que no lo usan.
+  - **Kick:** su API de historial del chat devuelve muy pocos mensajes (a veces ninguno), así que por
+    ahora no se usa.
+  - No tiene costo: no usa OpenAI ni el proxy.
 
 ## Descargar solo el video (02/10/2026)
 

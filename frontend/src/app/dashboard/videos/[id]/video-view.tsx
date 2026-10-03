@@ -293,6 +293,11 @@ export function VideoView({ videoId }: { videoId: string }) {
       {job?.status === "completed" && !downloadReady ? (
         <section className="space-y-4">
           {result && result.ai !== "used" ? <AiNote result={result} /> : null}
+          {result?.chat === "used" ? (
+            <p className="rounded-2xl border border-line bg-surface px-4 py-3 text-[13px] leading-[18px] text-muted">
+              También se usó el chat del directo de Twitch para encontrar los momentos donde más reaccionó la gente.
+            </p>
+          ) : null}
 
           <div className="-mx-5 flex gap-2 overflow-x-auto px-5 sm:mx-0 sm:px-0" role="tablist" aria-label="Filtrar clips">
             {(

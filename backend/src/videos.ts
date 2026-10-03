@@ -449,6 +449,15 @@ export function videoRoutes(deps: VideoRouteDeps) {
       if ((row.status !== "uploaded" && row.status !== "ready") || row.sizeBytes <= 0) {
         return sendError(reply, 409, "not_ready", "El video todavía no está listo para descargar.");
       }
+      // Stream largo: solo se guardó una copia liviana (160p) para elegir los momentos; no se ofrece.
+      if ((row.probe as { clipflowAnalysisCopy?: boolean } | null)?.clipflowAnalysisCopy) {
+        return sendError(
+          reply,
+          409,
+          "analysis_copy",
+          "De este video guardamos solo una copia liviana para elegir los momentos. Para bajarlo completo, impórtalo con «Descargar solo el video».",
+        );
+      }
       const ttl = DOWNLOAD_TTL_SECONDS;
       return { url: await storage.presignGet(row.s3Key, ttl, downloadName(row.originalFilename, row.s3Key)), expiresInSeconds: ttl } satisfies VideoDownloadResponse;
     });

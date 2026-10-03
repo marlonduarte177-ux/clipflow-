@@ -16,6 +16,8 @@ export interface ScoreWeights {
   action: number;
   /** Lo que la IA ve en las imágenes (kills, avisos en pantalla, jugadas, reacciones). */
   vision: number;
+  /** Actividad del chat del directo (mensajes por segundo, emotes, cheers, subs): solo VODs de Twitch. */
+  chat: number;
 }
 
 export interface ProductConfig {
@@ -41,7 +43,7 @@ export interface ProductConfig {
 export const DEFAULT_PRODUCT_CONFIG: ProductConfig = {
   clipDurationsSeconds: [15, 30, 45, 60, 90],
   defaultClipDurationSeconds: 30,
-  scoreWeights: { audio: 0.2, speech: 0.35, visual: 0.15, action: 0.3, vision: 0.35, ocr: 0.05, reaction: 0.1 },
+  scoreWeights: { audio: 0.2, speech: 0.35, visual: 0.15, action: 0.3, vision: 0.35, ocr: 0.05, reaction: 0.1, chat: 0.4 },
   minClipScore: 0.6,
   maxClipsPerVideo: 15,
   upload: {
@@ -106,6 +108,7 @@ export function loadProductConfig(env: Env = process.env): ProductConfig {
     reaction: weight("reaction"),
     action: weight("action"),
     vision: weight("vision"),
+    chat: weight("chat"),
   };
   if (Object.values(scoreWeights).every((w) => w === 0)) {
     throw new Error("Al menos un peso del score debe ser mayor que 0");

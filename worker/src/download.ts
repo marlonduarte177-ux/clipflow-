@@ -13,7 +13,7 @@ import { checkImportUrl, isImportPlatformUrl, isPrivateAddress } from "@clipflow
 
 /**
  * Descarga de videos importados por enlace.
- * - TikTok, Instagram, Facebook y Kick: yt-dlp. YouTube y otras plataformas por ahora no (las rechaza
+ * - TikTok, Instagram, Facebook, Kick y Twitch: yt-dlp. YouTube y otras plataformas por ahora no (las rechaza
  *   `checkImportUrl`: bloquean la descarga desde servidores).
  * - Cualquier otro enlace: debe ser un archivo de video directo. Se descarga con protección
  *   contra SSRF: en cada paso (también en redirecciones) se comprueba la IP REAL a la que se
@@ -36,7 +36,7 @@ export class DownloadError extends Error {
   }
 }
 
-/** true si el enlace es de una plataforma que se descarga con yt-dlp (TikTok, Instagram, Facebook, Kick). */
+/** true si el enlace es de una plataforma que se descarga con yt-dlp (TikTok, Instagram, Facebook, Kick, Twitch). */
 export const isPlatformUrl = isImportPlatformUrl;
 
 export interface DownloadOptions {
@@ -55,6 +55,11 @@ export interface DownloadOptions {
   proxyUrl?: string | null;
   /** Sin proxy: por qué ("mal escrito", "sin configurar"). Se agrega al mensaje si nos bloquean. */
   proxyProblem?: string | null;
+  /**
+   * "analysis": copia liviana (160p) de un stream largo, solo para elegir los momentos. Los clips se
+   * generan después con tramos en 720p (`downloadSection`).
+   */
+  quality?: "analysis";
 }
 
 export interface Downloaded {
@@ -87,6 +92,10 @@ export function ytDlpErrorMessage(stderr: string): { message: string; retryable:
   if (s.includes("proxy") || s.includes("tunnel") || s.includes("http error 407")) {
     const { reason, retryable } = proxyFailure(s);
     return { message: `Nuestro servicio de descarga no respondió (proxy: ${reason}). Lo intentaremos de nuevo.`, retryable };
+  }
+  // Twitch: videos solo para suscriptores del canal. Un proxy no lo arregla.
+  if (s.includes("subscriber-only")) {
+    return { message: "Este video es solo para suscriptores del canal, así que no se puede importar.", retryable: false };
   }
   // Restricción de edad: la plataforma exige una cuenta; un proxy no lo arregla.
   if (s.includes("confirm your age") || s.includes("age-restricted") || s.includes("inappropriate for some users")) {
@@ -142,7 +151,14 @@ export function ytDlpErrorMessage(stderr: string): { message: string; retryable:
     return { message: "El video supera el tamaño máximo permitido.", retryable: false };
   }
   if (s.includes("is live") || s.includes("live event")) return { message: "No se pueden importar transmisiones en vivo.", retryable: false };
-  if (s.includes("unsupported url") || s.includes("no video formats") || s.includes("unavailable") || s.includes("http error 404")) {
+  if (
+    s.includes("unsupported url") ||
+    s.includes("no video formats") ||
+    s.includes("unavailable") ||
+    s.includes("http error 404") ||
+    s.includes("does not exist") ||
+    s.includes("not found")
+  ) {
     return { message: "No encontramos un video en ese enlace (puede que se haya borrado).", retryable: false };
   }
   if (s.includes("unexpected response from webpage") || s.includes("ip address is blocked") || s.includes("impersonat")) {
@@ -199,6 +215,153 @@ export async function downloadWithYtDlp(url: string, dir: string, options: Downl
   }
 }
 
+// ---------------------------------------------------------------------------
+// Streams largos: datos del enlace y tramos de video
+// ---------------------------------------------------------------------------
+
+export interface MediaInfo {
+  title: string | null;
+  durationSeconds: number | null;
+  isLive: boolean;
+}
+
+/** Corre yt-dlp sin descargar y devuelve lo que imprime (con el mismo respaldo por proxy). */
+async function ytDlpQuery(url: string, options: DownloadOptions, extraArgs: string[]): Promise<{ stdout: string; proxy: string | null }> {
+  const run = (proxy: string | null) =>
+    new Promise<{ stdout: string; proxy: string | null }>((resolve, reject) => {
+      const args = [
+        "--no-playlist",
+        "--no-warnings",
+        "--no-cache-dir",
+        ...(existsSync(YTDLP_PLUGINS_DIR) ? ["--plugin-dirs", YTDLP_PLUGINS_DIR] : []),
+        "--socket-timeout",
+        "30",
+        ...(proxy ? ["--proxy", proxy] : []),
+        ...extraArgs,
+        "--",
+        url,
+      ];
+      const child = spawn(options.ytDlpPath, args, { stdio: ["ignore", "pipe", "pipe"] });
+      const onAbort = () => child.kill("SIGKILL");
+      options.signal?.addEventListener("abort", onAbort, { once: true });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (c: Buffer) => (stdout += c.toString()));
+      child.stderr.on("data", (c: Buffer) => (stderr = (stderr + c.toString()).slice(-4000)));
+      child.on("error", (err) => reject(new DownloadError(`No se pudo iniciar la descarga (${err.message}).`, true)));
+      child.on("close", (code) => {
+        options.signal?.removeEventListener("abort", onAbort);
+        if (options.signal?.aborted) return reject(new DOMException("Cancelado", "AbortError"));
+        if (code === 0) return resolve({ stdout, proxy });
+        const mapped = ytDlpErrorMessage(stderr);
+        const lastLine = redactCredentials(stderr.trim().split("\n").pop() ?? "").slice(0, 300);
+        reject(new DownloadError(mapped.message, mapped.retryable, mapped.blocked ?? false, `${proxy ? "[proxy] " : ""}${lastLine}`));
+      });
+    });
+  const proxy = options.proxyUrl ? withStickySession(options.proxyUrl) : null;
+  try {
+    return await run(null);
+  } catch (err) {
+    if (!(err instanceof DownloadError) || !err.blocked || !proxy) throw err;
+    return run(proxy);
+  }
+}
+
+/** Título, duración y si está en vivo, sin descargar nada (para decidir cómo procesar). */
+export async function fetchMediaInfo(url: string, options: DownloadOptions): Promise<MediaInfo> {
+  const { stdout } = await ytDlpQuery(url, options, ["--skip-download", "--dump-single-json"]);
+  try {
+    const data = JSON.parse(stdout) as { title?: string; duration?: number; is_live?: boolean };
+    return {
+      title: typeof data.title === "string" ? data.title : null,
+      durationSeconds: typeof data.duration === "number" && data.duration > 0 ? data.duration : null,
+      isLive: data.is_live === true,
+    };
+  } catch {
+    throw new DownloadError("No pudimos leer los datos de ese enlace.", true);
+  }
+}
+
+/** Fuente de los tramos de un stream: las URLs del video en 720p (HLS) y el proxy, si hizo falta. */
+export interface StreamSource {
+  urls: string[];
+  proxy: string | null;
+}
+
+/** Las direcciones directas del video en 720p (una con audio y video, o una de cada). */
+export async function resolveStreamUrls(url: string, options: DownloadOptions): Promise<StreamSource> {
+  const { stdout, proxy } = await ytDlpQuery(url, options, ["-f", "bv*+ba/b", "-S", "res:720,vcodec:h264,acodec:aac", "--get-url"]);
+  const urls = stdout
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => /^https?:\/\//.test(l));
+  if (urls.length === 0 || urls.length > 2) throw new DownloadError("No pudimos leer los datos de ese enlace.", true);
+  return { urls, proxy };
+}
+
+/**
+ * Baja SOLO un tramo del video (p. ej. un clip de 60 s de un stream de 3 h), con corte exacto:
+ * FFmpeg busca el segundo pedido y vuelve a codificar (sin eso, el tramo empezaría en el fotograma
+ * clave anterior y los subtítulos quedarían corridos). Probado: desfase de ~0,04 s.
+ */
+export async function downloadSection(
+  source: StreamSource,
+  startSeconds: number,
+  durationSeconds: number,
+  output: string,
+  options: { ffmpegPath: string; signal?: AbortSignal },
+): Promise<void> {
+  const inputs = source.urls.flatMap((u) => [
+    "-ss",
+    startSeconds.toFixed(3),
+    ...(source.proxy && /^https?:/.test(u) ? ["-http_proxy", source.proxy] : []),
+    "-i",
+    u,
+  ]);
+  const maps = source.urls.length === 2 ? ["-map", "0:v:0", "-map", "1:a:0"] : ["-map", "0:v:0", "-map", "0:a:0?"];
+  const args = [
+    "-hide_banner",
+    "-nostats",
+    "-loglevel",
+    "error",
+    "-y",
+    ...inputs,
+    ...maps,
+    "-t",
+    durationSeconds.toFixed(3),
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "18",
+    "-pix_fmt",
+    "yuv420p",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "160k",
+    "-movflags",
+    "+faststart",
+    output,
+  ];
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(options.ffmpegPath, args, { stdio: ["ignore", "ignore", "pipe"] });
+    const onAbort = () => child.kill("SIGKILL");
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    let stderr = "";
+    child.stderr.on("data", (c: Buffer) => (stderr = (stderr + c.toString()).slice(-2000)));
+    child.on("error", (err) => reject(new DownloadError(`No se pudo bajar un tramo del video (${err.message}).`, true)));
+    child.on("close", (code) => {
+      options.signal?.removeEventListener("abort", onAbort);
+      if (options.signal?.aborted) return reject(new DOMException("Cancelado", "AbortError"));
+      if (code === 0 && existsSync(output)) return resolve();
+      const detail = redactCredentials(stderr.trim().split("\n").pop() ?? "").slice(0, 300);
+      reject(new DownloadError("No pudimos bajar un tramo del video. Lo intentaremos de nuevo.", true, false, detail));
+    });
+  });
+}
+
 /**
  * Opciones de Evomi, que van agregadas a la contraseña:
  * - **País fijo** (`_country-US`, salvo que la contraseña ya traiga uno). Con "Mundial", cada
@@ -246,9 +409,13 @@ async function runYtDlp(url: string, dir: string, options: DownloadOptions, prox
     "-f",
     "bv*+ba/b",
     "-S",
-    // Hasta 720p por el proxy (se paga por GB) y en Kick: sus videos guardados duran horas y en
-    // 1080p60 pesan ~2,8 GB por hora (en 720p, la mitad; para clips verticales alcanza).
-    proxy || isKickUrl(url) ? "res:720,vcodec:h264,acodec:aac" : "res:1080,vcodec:h264,acodec:aac",
+    // Hasta 720p por el proxy (se paga por GB) y en Kick y Twitch: sus videos guardados duran horas y
+    // en 1080p60 pesan ~2,8 GB por hora (en 720p, la mitad; para clips verticales alcanza).
+    options.quality === "analysis"
+      ? "res:160,+size,acodec:aac"
+      : proxy || isStreamPlatformUrl(url)
+        ? "res:720,vcodec:h264,acodec:aac"
+        : "res:1080,vcodec:h264,acodec:aac",
     ...(proxy ? ["--proxy", proxy] : []),
     "--merge-output-format",
     "mp4",
@@ -327,7 +494,8 @@ async function runYtDlp(url: string, dir: string, options: DownloadOptions, prox
  */
 export const YTDLP_PLUGINS_DIR = fileURLToPath(new URL("../ytdlp-plugins/", import.meta.url));
 
-const isKickUrl = (url: string) => /(^|\.)kick\.com$/i.test(new URL(url).hostname);
+/** Kick y Twitch: plataformas de streams (videos guardados de horas). */
+export const isStreamPlatformUrl = (url: string) => /(^|\.)(kick\.com|twitch\.tv)$/i.test(new URL(url).hostname);
 
 /** `--ffmpeg-location` con ruta completa (buscada en el PATH si viene solo el nombre); si no está, nada. */
 export function ffmpegLocationArgs(ffmpegPath: string): string[] {
