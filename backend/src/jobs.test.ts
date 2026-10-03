@@ -117,6 +117,27 @@ describe("trabajos de procesamiento", () => {
     const retry = await app().inject({ method: "POST", url: `/jobs/${job.id}/retry`, headers: bearer("alice") });
     expect(retry.statusCode).toBe(200);
   });
+
+  it("un trabajo que terminó sin análisis de IA se puede volver a analizar; uno con IA o sin habla, no", async () => {
+    const finished = async (ai: string) => {
+      const { complete } = await uploadedVideo("alice");
+      const { job } = (await complete()).json();
+      await claimJob(db(), job.id, "w");
+      await completeJob(db(), job.id, "w", { clipCount: 2, ai, language: "es" });
+      return job.id as string;
+    };
+    const failedAi = await finished("unavailable");
+    const retry = await app().inject({ method: "POST", url: `/jobs/${failedAi}/retry`, headers: bearer("alice") });
+    expect(retry.statusCode).toBe(200);
+    expect(retry.json()).toMatchObject({ status: "queued", progress: 0, result: null });
+    expect(ctx!.queue.sent).toContain(failedAi);
+
+    for (const ai of ["used", "no_speech"]) {
+      const id = await finished(ai);
+      const res = await app().inject({ method: "POST", url: `/jobs/${id}/retry`, headers: bearer("alice") });
+      expect(res.statusCode).toBe(409);
+    }
+  });
 });
 
 describe("clips", () => {
