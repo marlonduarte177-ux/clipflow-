@@ -34,6 +34,8 @@ export interface WorkerStackProps extends StackProps {
  */
 export class WorkerStack extends Stack {
   readonly queue: sqs.Queue;
+  readonly deadLetterQueue: sqs.Queue;
+  readonly logGroup: logs.LogGroup;
   readonly cluster: ecs.Cluster;
   readonly taskDefinition: ecs.FargateTaskDefinition;
   readonly securityGroup: ec2.SecurityGroup;
@@ -58,15 +60,8 @@ export class WorkerStack extends Stack {
       deadLetterQueue: { queue: deadLetterQueue, maxReceiveCount: 6 },
     });
 
-    new cloudwatch.Alarm(this, "DlqAlarm", {
-      alarmName: `${prefix}-jobs-dlq-not-empty`,
-      alarmDescription: "Hay trabajos de video que fallaron repetidamente (revisar logs del worker).",
-      metric: deadLetterQueue.metricApproximateNumberOfMessagesVisible({ period: Duration.minutes(5) }),
-      threshold: 1,
-      evaluationPeriods: 1,
-      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-    });
+    // La alarma de la cola de errores (con aviso por correo) está en MonitoringStack.
+    this.deadLetterQueue = deadLetterQueue;
 
     // Clave de OpenAI: se crea con un valor aleatorio de relleno y el usuario pega la real
     // en la consola de Secrets Manager. Solo el worker puede leerla; nunca está en el código.
@@ -95,6 +90,7 @@ export class WorkerStack extends Stack {
       retention: logs.RetentionDays.ONE_MONTH,
       removalPolicy: RemovalPolicy.DESTROY,
     });
+    this.logGroup = logGroup;
 
     const taskDefinition = new ecs.FargateTaskDefinition(this, "WorkerTask", {
       family: this.taskFamily,

@@ -2,6 +2,7 @@ import { App, Tags } from "aws-cdk-lib";
 import { ApiStack } from "../lib/api-stack.js";
 import { AuthStack } from "../lib/auth-stack.js";
 import { DatabaseStack } from "../lib/database-stack.js";
+import { MonitoringStack } from "../lib/monitoring-stack.js";
 import { NetworkStack } from "../lib/network-stack.js";
 import { parseStage, resourcePrefix } from "../lib/stage.js";
 import { stageConfig } from "../lib/stage-config.js";
@@ -30,7 +31,7 @@ const worker = new WorkerStack(app, `${prefix}-worker`, {
   database: database.instance,
   databaseSecurityGroup: database.securityGroup,
 });
-new ApiStack(app, `${prefix}-api`, {
+const api = new ApiStack(app, `${prefix}-api`, {
   env,
   stage,
   vpc: network.vpc,
@@ -47,6 +48,20 @@ new ApiStack(app, `${prefix}-api`, {
     securityGroup: worker.securityGroup,
   },
   webOrigins: config.webOrigins,
+});
+
+// Alertas por correo y presupuesto. El correo y el presupuesto llegan desde variables de GitHub
+// (ALERT_EMAIL, MONTHLY_BUDGET_USD): no están en el código.
+const budget = Number(app.node.tryGetContext("monthlyBudgetUsd"));
+new MonitoringStack(app, `${prefix}-monitoring`, {
+  env,
+  stage,
+  deadLetterQueue: worker.deadLetterQueue,
+  workerLogs: worker.logGroup,
+  httpApi: api.httpApi,
+  database: database.instance,
+  alertEmail: app.node.tryGetContext("alertEmail") || undefined,
+  monthlyBudgetUsd: Number.isFinite(budget) && budget > 0 ? budget : undefined,
 });
 
 // Etiquetas en todos los recursos: permiten ver costos por entorno en Billing.
