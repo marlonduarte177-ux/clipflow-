@@ -11,7 +11,7 @@ describe("enlaces para importar videos", () => {
     for (const link of ["https://www.youtube.com/watch?v=abc", "https://youtu.be/abc", "https://m.youtube.com/shorts/abc"]) {
       const r = checkImportUrl(link);
       expect(r.ok, link).toBe(false);
-      if (!r.ok) expect(r.message).toBe("Por ahora no se pueden importar videos de YouTube. Descárgalo y súbelo como archivo. Por enlace funcionan TikTok, Instagram, Facebook y Kick.");
+      if (!r.ok) expect(r.message).toBe("Por ahora no se pueden importar videos de YouTube. Descárgalo y súbelo como archivo. Por enlace funcionan TikTok, Instagram, Facebook, Kick y Twitch.");
     }
     expect(checkImportUrl("https://vimeo.com/1")).toMatchObject({ ok: false });
     // Un dominio que solo se parece no se confunde.
@@ -27,10 +27,14 @@ describe("enlaces para importar videos", () => {
       "https://kick.com/spreen/clips/clip_01J8RGZRKHXHXXKJEHGRM932A5",
       "https://kick.com/destiny?clip=clip_01H9SKET879NE7N9RJRRDS98J3",
       "https://kick.com/xqc/videos/5c697a87-afce-4256-b01f-3c8fe71ef5cb",
+      "https://www.twitch.tv/videos/2885611944",
+      "https://m.twitch.tv/videos/2885611944",
+      "https://clips.twitch.tv/AwkwardHelplessSalamanderSwiftRage",
+      "https://www.twitch.tv/ibai/clip/AwkwardHelplessSalamanderSwiftRage",
     ]) {
       expect(isImportPlatformUrl(u), u).toBe(true);
     }
-    for (const u of ["https://youtu.be/x", "https://example.com/v.mp4", "https://tiktok.com.evil.com/x", "https://kick.com.evil.com/x", "no es un enlace"]) {
+    for (const u of ["https://youtu.be/x", "https://example.com/v.mp4", "https://tiktok.com.evil.com/x", "https://kick.com.evil.com/x", "https://twitch.tv.evil.com/x", "no es un enlace"]) {
       expect(isImportPlatformUrl(u), u).toBe(false);
     }
   });

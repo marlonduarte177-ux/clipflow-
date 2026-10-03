@@ -99,9 +99,12 @@ export const ImportVideoSchema = z.object({
  * Devuelve el enlace normalizado o un mensaje de error.
  */
 /** Plataformas desde las que se importa por enlace (las descarga el worker con yt-dlp). */
-export const IMPORT_PLATFORMS = ["TikTok", "Instagram", "Facebook", "Kick"] as const;
-/** Kick: clips y videos guardados (VOD). Un canal en vivo se rechaza al descargar (no hay video terminado). */
-const IMPORT_PLATFORM_DOMAINS = ["tiktok.com", "instagram.com", "facebook.com", "fb.com", "fb.watch", "kick.com"];
+export const IMPORT_PLATFORMS = ["TikTok", "Instagram", "Facebook", "Kick", "Twitch"] as const;
+/**
+ * Kick y Twitch: clips y videos guardados (VOD). Un canal en vivo se rechaza al descargar (no hay video
+ * terminado).
+ */
+const IMPORT_PLATFORM_DOMAINS = ["tiktok.com", "instagram.com", "facebook.com", "fb.com", "fb.watch", "kick.com", "twitch.tv"];
 
 /**
  * Plataformas conocidas que por ahora NO se importan: bloquean la descarga desde servidores (YouTube
@@ -111,14 +114,13 @@ const UNSUPPORTED_PLATFORMS: { name: string; domains: string[] }[] = [
   { name: "YouTube", domains: ["youtube.com", "youtu.be", "youtube-nocookie.com"] },
   { name: "Vimeo", domains: ["vimeo.com"] },
   { name: "X", domains: ["x.com", "twitter.com"] },
-  { name: "Twitch", domains: ["twitch.tv"] },
   { name: "Dailymotion", domains: ["dailymotion.com", "dai.ly"] },
   { name: "Reddit", domains: ["reddit.com", "redd.it"] },
 ];
 
 const hostIn = (host: string, domains: string[]) => domains.some((d) => host === d || host.endsWith(`.${d}`));
 
-/** true si el enlace es de TikTok, Instagram, Facebook o Kick. */
+/** true si el enlace es de TikTok, Instagram, Facebook, Kick o Twitch. */
 export function isImportPlatformUrl(raw: string): boolean {
   try {
     return hostIn(new URL(raw).hostname.toLowerCase(), IMPORT_PLATFORM_DOMAINS);

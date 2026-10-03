@@ -48,7 +48,7 @@ export function RightsDialog({
         <p className="text-sm leading-5">
           Importa solo videos que sean tuyos o que tengas permiso de usar. Descargar o reutilizar contenido de otras personas
           sin autorización puede infringir sus <strong>derechos de autor</strong> y las reglas de la plataforma de origen
-          (TikTok, Instagram, Facebook, Kick…).
+          (TikTok, Instagram, Facebook, Kick, Twitch…).
         </p>
         <ul className="list-disc space-y-1.5 pl-5 text-[13px] leading-[18px] text-muted">
           <li>Eres responsable del contenido que importas y de cómo usas los clips.</li>

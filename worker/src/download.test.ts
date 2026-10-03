@@ -109,7 +109,7 @@ describe("plataformas (yt-dlp)", () => {
   });
 
   it("reconoce los enlaces de plataformas", () => {
-    for (const u of ["https://vm.tiktok.com/x", "https://www.instagram.com/reel/x", "https://www.facebook.com/watch?v=1", "https://fb.watch/x", "https://kick.com/spreen/clips/clip_1"]) {
+    for (const u of ["https://vm.tiktok.com/x", "https://www.instagram.com/reel/x", "https://www.facebook.com/watch?v=1", "https://fb.watch/x", "https://kick.com/spreen/clips/clip_1", "https://www.twitch.tv/videos/1"]) {
       expect(isPlatformUrl(u), u).toBe(true);
     }
     for (const u of ["https://example.com/v.mp4", "https://youtu.be/x", "https://vimeo.com/1", "https://tiktok.com.evil.com/x"]) {
@@ -126,6 +126,11 @@ describe("plataformas (yt-dlp)", () => {
     expect(ytDlpErrorMessage("ERROR: unable to download video data: HTTP Error 403: Forbidden").message).toMatch(/bloqueó la descarga/);
     expect(ytDlpErrorMessage("ERROR: [vimeo] 1: The web client only works when logged-in.").message).toMatch(/iniciar sesión/);
     expect(ytDlpErrorMessage("ERROR: [TikTok] 1: Unexpected response from webpage request; please report this issue").message).toMatch(/no permitió descargar/);
+    // Twitch: solo suscriptores (sin reintentar por el proxy) y video borrado.
+    const subs = ytDlpErrorMessage("ERROR: [twitch:vod] 1: You must be logged into an account that has access to this subscriber-only content");
+    expect(subs.message).toMatch(/solo para suscriptores/);
+    expect(subs.blocked).toBeFalsy();
+    expect(ytDlpErrorMessage("ERROR: [twitch:vod] 1: Video 1 does not exist").message).toMatch(/No encontramos/);
     // Canal de Kick sin transmitir: se explica qué enlace pegar.
     expect(ytDlpErrorMessage("ERROR: [kick:live] a-log-burner: The channel is not currently live").message).toMatch(/enlace de un clip o de un video guardado/);
     // "page" o "message" no se confunden con "edad".
@@ -194,6 +199,16 @@ describe("proxy residencial para plataformas que bloquean a AWS", () => {
     expect(calls[0]).toMatch(/^call proxy= sort=res:1080,vcodec:h264,acodec:aac( |$)/);
     expect(calls[1]).toMatch(/proxy=http:\/\/user:secreto_country-US_session-[A-Za-z0-9]{8}_lifetime-60@rp\.evomi\.com:1000/);
     expect(calls[1]).toContain("sort=res:720,");
+  });
+
+  it("Twitch: también baja hasta 720p", async () => {
+    const yt = fakeYtDlp("twitch");
+    await downloadFromUrl("https://www.twitch.tv/videos/2885611944", yt.work, {
+      ...options(),
+      ytDlpPath: yt.script,
+      proxyUrl: "http://user:secreto@rp.evomi.com:1000",
+    });
+    expect(yt.calls()[0]).toContain("sort=res:720,");
   });
 
   it("Kick: usa los complementos propios (códigos de video nuevos) y baja hasta 720p", async () => {

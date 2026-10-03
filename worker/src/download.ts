@@ -13,7 +13,7 @@ import { checkImportUrl, isImportPlatformUrl, isPrivateAddress } from "@clipflow
 
 /**
  * Descarga de videos importados por enlace.
- * - TikTok, Instagram, Facebook y Kick: yt-dlp. YouTube y otras plataformas por ahora no (las rechaza
+ * - TikTok, Instagram, Facebook, Kick y Twitch: yt-dlp. YouTube y otras plataformas por ahora no (las rechaza
  *   `checkImportUrl`: bloquean la descarga desde servidores).
  * - Cualquier otro enlace: debe ser un archivo de video directo. Se descarga con protección
  *   contra SSRF: en cada paso (también en redirecciones) se comprueba la IP REAL a la que se
@@ -36,7 +36,7 @@ export class DownloadError extends Error {
   }
 }
 
-/** true si el enlace es de una plataforma que se descarga con yt-dlp (TikTok, Instagram, Facebook, Kick). */
+/** true si el enlace es de una plataforma que se descarga con yt-dlp (TikTok, Instagram, Facebook, Kick, Twitch). */
 export const isPlatformUrl = isImportPlatformUrl;
 
 export interface DownloadOptions {
@@ -87,6 +87,10 @@ export function ytDlpErrorMessage(stderr: string): { message: string; retryable:
   if (s.includes("proxy") || s.includes("tunnel") || s.includes("http error 407")) {
     const { reason, retryable } = proxyFailure(s);
     return { message: `Nuestro servicio de descarga no respondió (proxy: ${reason}). Lo intentaremos de nuevo.`, retryable };
+  }
+  // Twitch: videos solo para suscriptores del canal. Un proxy no lo arregla.
+  if (s.includes("subscriber-only")) {
+    return { message: "Este video es solo para suscriptores del canal, así que no se puede importar.", retryable: false };
   }
   // Restricción de edad: la plataforma exige una cuenta; un proxy no lo arregla.
   if (s.includes("confirm your age") || s.includes("age-restricted") || s.includes("inappropriate for some users")) {
@@ -142,7 +146,14 @@ export function ytDlpErrorMessage(stderr: string): { message: string; retryable:
     return { message: "El video supera el tamaño máximo permitido.", retryable: false };
   }
   if (s.includes("is live") || s.includes("live event")) return { message: "No se pueden importar transmisiones en vivo.", retryable: false };
-  if (s.includes("unsupported url") || s.includes("no video formats") || s.includes("unavailable") || s.includes("http error 404")) {
+  if (
+    s.includes("unsupported url") ||
+    s.includes("no video formats") ||
+    s.includes("unavailable") ||
+    s.includes("http error 404") ||
+    s.includes("does not exist") ||
+    s.includes("not found")
+  ) {
     return { message: "No encontramos un video en ese enlace (puede que se haya borrado).", retryable: false };
   }
   if (s.includes("unexpected response from webpage") || s.includes("ip address is blocked") || s.includes("impersonat")) {
@@ -246,9 +257,9 @@ async function runYtDlp(url: string, dir: string, options: DownloadOptions, prox
     "-f",
     "bv*+ba/b",
     "-S",
-    // Hasta 720p por el proxy (se paga por GB) y en Kick: sus videos guardados duran horas y en
-    // 1080p60 pesan ~2,8 GB por hora (en 720p, la mitad; para clips verticales alcanza).
-    proxy || isKickUrl(url) ? "res:720,vcodec:h264,acodec:aac" : "res:1080,vcodec:h264,acodec:aac",
+    // Hasta 720p por el proxy (se paga por GB) y en Kick y Twitch: sus videos guardados duran horas y
+    // en 1080p60 pesan ~2,8 GB por hora (en 720p, la mitad; para clips verticales alcanza).
+    proxy || isStreamPlatformUrl(url) ? "res:720,vcodec:h264,acodec:aac" : "res:1080,vcodec:h264,acodec:aac",
     ...(proxy ? ["--proxy", proxy] : []),
     "--merge-output-format",
     "mp4",
@@ -327,7 +338,8 @@ async function runYtDlp(url: string, dir: string, options: DownloadOptions, prox
  */
 export const YTDLP_PLUGINS_DIR = fileURLToPath(new URL("../ytdlp-plugins/", import.meta.url));
 
-const isKickUrl = (url: string) => /(^|\.)kick\.com$/i.test(new URL(url).hostname);
+/** Kick y Twitch: plataformas de streams (videos guardados de horas). */
+export const isStreamPlatformUrl = (url: string) => /(^|\.)(kick\.com|twitch\.tv)$/i.test(new URL(url).hostname);
 
 /** `--ffmpeg-location` con ruta completa (buscada en el PATH si viene solo el nombre); si no está, nada. */
 export function ffmpegLocationArgs(ffmpegPath: string): string[] {
