@@ -13,7 +13,13 @@ export const STAGE_CONFIG: Record<Stage, StageConfig> = {
     webOrigins: ["http://localhost:3000"],
   },
   staging: {
-    webOrigins: ["https://main.dqw8wqexijjzj.amplifyapp.com", "http://localhost:3000"],
+    webOrigins: [
+      // Dominio propio (03/10/2026), con y sin "www".
+      "https://clipflowia.com",
+      "https://www.clipflowia.com",
+      "https://main.dqw8wqexijjzj.amplifyapp.com",
+      "http://localhost:3000",
+    ],
   },
   production: {
     // Se completa cuando exista el dominio (Fase 10).
