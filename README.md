@@ -16,6 +16,7 @@ En construcción por fases. Ver `docs/`:
 - [Fase 8 — Análisis con IA (OpenAI)](docs/fase-8-ia-openai.md)
 - [Interfaz para celular y subtítulos en el video](docs/interfaz-movil.md)
 - [Importar videos por enlace (con aviso de derechos de autor)](docs/importar-por-enlace.md)
+- [Fase 10 — Producción: alertas, topes diarios y pendientes](docs/fase-10-produccion.md)
 - [Planes, minutos y descargas (decisiones, pendiente de la pasarela)](docs/planes-y-creditos.md)
 
 ## Estructura

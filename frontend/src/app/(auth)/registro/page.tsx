@@ -62,6 +62,17 @@ export default function RegisterPage() {
           />
           <Alert kind="error">{error}</Alert>
           <SubmitButton loading={loading}>Crear cuenta</SubmitButton>
+          <p className="text-center text-xs leading-[18px] text-muted">
+            Al crear tu cuenta aceptas los{" "}
+            <Link href="/terminos" className="text-foreground underline">
+              Términos de uso
+            </Link>{" "}
+            y la{" "}
+            <Link href="/privacidad" className="text-foreground underline">
+              Política de privacidad
+            </Link>
+            .
+          </p>
           <p className="text-center text-sm text-muted">
             ¿Ya tienes cuenta?{" "}
             <Link href="/login" className="text-foreground hover:underline">

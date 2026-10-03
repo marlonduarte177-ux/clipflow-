@@ -6,6 +6,7 @@ import { useEffect, useId, useState, type ReactNode } from "react";
 import { deleteUser, signOut } from "aws-amplify/auth";
 import type { MeResponse } from "@clipflow/shared";
 import { apiFetch, ApiError } from "@/lib/api";
+import { LEGAL } from "@/lib/legal";
 import {
   BoltIcon,
   BulbIcon,
@@ -76,13 +77,13 @@ export function AccountView({ name, email }: { name: string | null; email: strin
 
         <Group>
           <Row icon={<GlobeIcon size={20} />} label="Idioma" value="Español" href={soon("Idioma")} />
-          <Row icon={<HelpIcon size={20} />} label="Ayuda y soporte" href={soon("Ayuda y soporte")} />
-          <Row icon={<BulbIcon size={20} />} label="Sugerir una función" href={soon("Sugerir una función")} />
+          <Row icon={<HelpIcon size={20} />} label="Ayuda y soporte" value={LEGAL.email} href={`mailto:${LEGAL.email}?subject=${encodeURIComponent("Ayuda con ClipFlow")}`} />
+          <Row icon={<BulbIcon size={20} />} label="Sugerir una función" href={`mailto:${LEGAL.email}?subject=${encodeURIComponent("Sugerencia para ClipFlow")}`} />
         </Group>
 
         <Group>
-          <Row icon={<ShieldIcon size={20} />} label="Política de privacidad" href={soon("Política de privacidad")} />
-          <Row icon={<DocumentIcon size={20} />} label="Términos de uso" href={soon("Términos de uso")} />
+          <Row icon={<ShieldIcon size={20} />} label="Política de privacidad" href="/privacidad" />
+          <Row icon={<DocumentIcon size={20} />} label="Términos de uso" href="/terminos" />
         </Group>
 
         <Group>
@@ -138,11 +139,19 @@ function Row({
     </>
   );
   const className = `group flex w-full items-center gap-3 pl-4 text-left ${interactive ? "transition hover:bg-white/[0.03] active:bg-white/[0.05]" : ""}`;
-  if (href) {
+  if (href?.startsWith("/")) {
     return (
       <Link href={href} className={className}>
         {inner}
       </Link>
+    );
+  }
+  if (href) {
+    // Correo de soporte (mailto:): abre la app de correo.
+    return (
+      <a href={href} className={className}>
+        {inner}
+      </a>
     );
   }
   if (onClick) {

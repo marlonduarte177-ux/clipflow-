@@ -48,7 +48,14 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
       - name: cdk deploy
         working-directory: infrastructure
-        run: npx cdk deploy --all -c stage=${{ inputs.stage }} --require-approval never --outputs-file cdk-outputs.json
+        # Correo de alertas y presupuesto: variables del environment en GitHub (pueden estar vacías).
+        env:
+          ALERT_EMAIL: ${{ vars.ALERT_EMAIL }}
+          MONTHLY_BUDGET_USD: ${{ vars.MONTHLY_BUDGET_USD }}
+        run: >-
+          npx cdk deploy --all -c stage=${{ inputs.stage }}
+          -c alertEmail="$ALERT_EMAIL" -c monthlyBudgetUsd="$MONTHLY_BUDGET_USD"
+          --require-approval never --outputs-file cdk-outputs.json
       - name: Resumen
         working-directory: infrastructure
         run: |

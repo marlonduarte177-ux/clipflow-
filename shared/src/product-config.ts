@@ -38,6 +38,14 @@ export interface ProductConfig {
     /** Subidas sin terminar que un usuario puede tener a la vez (evita abusos). */
     maxPendingUploads: number;
   };
+  /**
+   * Tope por usuario en las últimas 24 h (protege el gasto de OpenAI mientras no hay planes):
+   * cuántos videos puede mandar a crear clips y cuántos minutos de video suman.
+   */
+  daily: {
+    maxJobs: number;
+    maxVideoMinutes: number;
+  };
 }
 
 export const DEFAULT_PRODUCT_CONFIG: ProductConfig = {
@@ -52,6 +60,7 @@ export const DEFAULT_PRODUCT_CONFIG: ProductConfig = {
     allowedMimeTypes: ["video/mp4", "video/quicktime", "video/webm", "video/x-matroska"],
     maxPendingUploads: 3,
   },
+  daily: { maxJobs: 20, maxVideoMinutes: 300 },
 };
 
 type Env = Record<string, string | undefined>;
@@ -123,6 +132,8 @@ export function loadProductConfig(env: Env = process.env): ProductConfig {
     maxDuration: get("UPLOAD_MAX_DURATION_SECONDS"),
     mimes: get("UPLOAD_ALLOWED_MIME_TYPES"),
     maxPending: get("UPLOAD_MAX_PENDING"),
+    dailyJobs: get("DAILY_MAX_JOBS"),
+    dailyMinutes: get("DAILY_MAX_VIDEO_MINUTES"),
   };
 
   const clipDurationsSeconds = raw.durations
@@ -156,6 +167,10 @@ export function loadProductConfig(env: Env = process.env): ProductConfig {
       maxPendingUploads: raw.maxPending
         ? Math.floor(positiveNumber("UPLOAD_MAX_PENDING", raw.maxPending))
         : d.upload.maxPendingUploads,
+    },
+    daily: {
+      maxJobs: raw.dailyJobs ? Math.floor(positiveNumber("DAILY_MAX_JOBS", raw.dailyJobs)) : d.daily.maxJobs,
+      maxVideoMinutes: raw.dailyMinutes ? positiveNumber("DAILY_MAX_VIDEO_MINUTES", raw.dailyMinutes) : d.daily.maxVideoMinutes,
     },
   };
 }

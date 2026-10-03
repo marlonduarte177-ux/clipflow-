@@ -4,12 +4,13 @@ import { Match, Template } from "aws-cdk-lib/assertions";
 import { ApiStack } from "../lib/api-stack.js";
 import { AuthStack } from "../lib/auth-stack.js";
 import { DatabaseStack } from "../lib/database-stack.js";
+import { MonitoringStack } from "../lib/monitoring-stack.js";
 import { NetworkStack } from "../lib/network-stack.js";
 import { StorageStack } from "../lib/storage-stack.js";
 import { WorkerStack } from "../lib/worker-stack.js";
 
 const WEB = ["https://web.example.com"];
-let t: Record<"network" | "storage" | "database" | "worker" | "api", Template>;
+let t: Record<"network" | "storage" | "database" | "worker" | "api" | "monitoring" | "monitoringQuiet", Template>;
 
 beforeAll(() => {
   const app = new App();
@@ -47,7 +48,27 @@ beforeAll(() => {
     },
     webOrigins: WEB,
   });
+  const monitoring = new MonitoringStack(app, "monitoring", {
+    env,
+    stage,
+    deadLetterQueue: worker.deadLetterQueue,
+    workerLogs: worker.logGroup,
+    httpApi: api.httpApi,
+    database: database.instance,
+    alertEmail: "alertas@example.com",
+    monthlyBudgetUsd: 50,
+  });
+  const monitoringQuiet = new MonitoringStack(app, "monitoring-quiet", {
+    env,
+    stage,
+    deadLetterQueue: worker.deadLetterQueue,
+    workerLogs: worker.logGroup,
+    httpApi: api.httpApi,
+    database: database.instance,
+  });
   t = {
+    monitoring: Template.fromStack(monitoring),
+    monitoringQuiet: Template.fromStack(monitoringQuiet),
     network: Template.fromStack(network),
     storage: Template.fromStack(storage),
     database: Template.fromStack(database),
@@ -211,7 +232,8 @@ describe("cola y worker", () => {
       RedrivePolicy: Match.objectLike({ maxReceiveCount: 6 }),
       SqsManagedSseEnabled: true,
     });
-    t.worker.hasResourceProperties("AWS::CloudWatch::Alarm", { AlarmName: "clipflow-staging-jobs-dlq-not-empty" });
+    // Su alarma (con aviso por correo) está en el stack de monitoreo.
+    t.monitoring.hasResourceProperties("AWS::CloudWatch::Alarm", { AlarmName: "clipflow-staging-alert-jobs-failed" });
   });
 
   it("el worker empieza en 0, se enciende con 1 pendiente y se apaga tras 10 min sin trabajo", () => {
@@ -288,5 +310,28 @@ describe("cola y worker", () => {
     expect(originals).toHaveLength(1);
     expect([originals[0]!.Action].flat().sort()).toEqual(["s3:AbortMultipartUpload", "s3:PutObject"]);
     expect(statements.every((s) => ![s.Action].flat().includes("s3:DeleteObject"))).toBe(true);
+  });
+});
+
+describe("alertas", () => {
+  it("avisa por correo de trabajos fallidos, OpenAI o el proxy sin saldo, errores de la API y la base de datos", () => {
+    const m = t.monitoring;
+    m.hasResourceProperties("AWS::SNS::Subscription", { Protocol: "email", Endpoint: "alertas@example.com" });
+    for (const name of ["jobs-failed", "openai-account", "download-proxy", "api-5xx", "db-storage", "db-cpu"]) {
+      m.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        AlarmName: `clipflow-staging-alert-${name}`,
+        AlarmActions: [Match.objectLike({ Ref: Match.anyValue() })],
+      });
+    }
+    m.hasResourceProperties("AWS::Logs::MetricFilter", { FilterPattern: '?"insufficient_quota" ?"invalid_api_key"' });
+    m.hasResourceProperties("AWS::Budgets::Budget", {
+      Budget: Match.objectLike({ BudgetLimit: { Amount: 50, Unit: "USD" }, TimeUnit: "MONTHLY" }),
+    });
+  });
+
+  it("sin correo configurado: alarmas sí, pero sin suscripción ni presupuesto", () => {
+    t.monitoringQuiet.resourceCountIs("AWS::SNS::Subscription", 0);
+    t.monitoringQuiet.resourceCountIs("AWS::Budgets::Budget", 0);
+    t.monitoringQuiet.resourceCountIs("AWS::CloudWatch::Alarm", 6);
   });
 });

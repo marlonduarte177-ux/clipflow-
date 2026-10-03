@@ -48,6 +48,7 @@ export interface ApiStackProps extends StackProps {
  */
 export class ApiStack extends Stack {
   readonly apiUrl: string;
+  readonly httpApi: apigw.HttpApi;
 
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id, props);
@@ -251,6 +252,7 @@ export class ApiStack extends Stack {
     stage.defaultRouteSettings = { throttlingRateLimit: 20, throttlingBurstLimit: 50 };
 
     this.apiUrl = httpApi.apiEndpoint;
+    this.httpApi = httpApi;
     new CfnOutput(this, "ApiUrl", { value: httpApi.apiEndpoint });
   }
 }
