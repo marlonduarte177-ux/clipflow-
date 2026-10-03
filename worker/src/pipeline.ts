@@ -53,6 +53,7 @@ import {
   type DownloadOptions,
   type StreamSource,
 } from "./download.js";
+import { fetchTwitchChatActivity, twitchVideoId } from "./chat/twitch.js";
 
 const { clips, subtitles, usage, videos } = schema;
 
@@ -109,6 +110,8 @@ export interface PipelineDeps {
     resolveStreamUrls?: typeof resolveStreamUrls;
     downloadSection?: typeof downloadSection;
   };
+  /** Lee el chat de los VODs de Twitch como señal extra (se reemplaza en tests; false = no leerlo). */
+  twitchChat?: typeof fetchTwitchChatActivity | false;
   /** Desde esta duración, un video guardado de Kick/Twitch se analiza con copia liviana (s). */
   longStreamMinSeconds?: number;
   /** Análisis de imágenes con IA (experimental, tiene costo por imagen). */
@@ -397,13 +400,15 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       jobId: job.id,
       sourceUrl: video.sourceUrl,
     });
-    const [raw, ai, vision] = await Promise.all([
+    const chatPromise = readTwitchChat(deps, video.sourceUrl, info.durationSeconds, controller.signal, job.id);
+    const [raw, ai, vision, chat] = await Promise.all([
       analyzeSignals(deps.tools, input, info, dir, {
         signal: controller.signal,
         onProgress: (sec) => void report("signals")(sec / info.durationSeconds),
       }),
       aiPromise,
       runVision(deps, info, input, dir, contentBox, controller.signal, async (f) => void (await report("vision")(f)), aiPromise),
+      chatPromise,
     ]);
     check();
     const signals: SignalSeries = {
@@ -415,6 +420,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     if (vision.frames.length) {
       signals.vision = visionSignalFromFrames(vision.frames, info.durationSeconds, vision.intervalSeconds);
     }
+    if (chat.status === "used") signals.chat = chat.series;
     await progress("analyzing", 1, true);
 
     step = "elegir los momentos";
@@ -448,7 +454,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     // Sin título de la transcripción (p. ej. gameplay sin voz): lo que se ve en el mejor fotograma.
     titles = titles.map((t, i) => t ?? bestFrameLabel(vision.frames, finalMoments[i]!.startSeconds, finalMoments[i]!.endSeconds));
     deps.log.info(
-      { jobId: job.id, moments: finalMoments.length, clipDuration, ai: ai.status, vision: vision.status },
+      { jobId: job.id, moments: finalMoments.length, clipDuration, ai: ai.status, vision: vision.status, chat: chat.status },
       "momentos elegidos",
     );
     await progress("detecting_moments", 1, true);
@@ -692,6 +698,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       vision: vision.status,
       ...(vision.reason ? { visionReason: vision.reason } : {}),
       visionFrames: vision.frames.length,
+      ...(chat.status ? { chat: chat.status, chatMessages: chat.messages } : {}),
       costs: {
         transcriptionUsd: usd(ai.transcribeCostUsd),
         textUsd: usd(textCostUsd),
@@ -789,6 +796,32 @@ function addUsage(total: AIUsage, extra: AIUsage) {
 }
 
 /** Transcripción + análisis con IA. Nunca hace fallar el trabajo: si algo falla, lo informa. */
+/**
+ * Chat del VOD de Twitch (solo enlaces twitch.tv/videos/…). Nunca hace fallar el trabajo:
+ * si no se puede leer, los momentos se eligen con las demás señales.
+ */
+async function readTwitchChat(
+  deps: PipelineDeps,
+  sourceUrl: string | null,
+  durationSeconds: number,
+  signal: AbortSignal,
+  jobId: string,
+): Promise<{ status?: "used" | "unavailable"; series: number[]; messages: number }> {
+  const videoId = twitchVideoId(sourceUrl);
+  if (!videoId || deps.twitchChat === false) return { series: [], messages: 0 };
+  const read = deps.twitchChat ?? fetchTwitchChatActivity;
+  try {
+    // Como mucho 2 minutos: es una señal extra, no debe frenar el análisis.
+    const activity = await read(videoId, durationSeconds, { signal, deadline: Date.now() + 120_000 });
+    if (!activity) return { status: "unavailable", series: [], messages: 0 };
+    deps.log.info({ jobId, messages: activity.messages, samples: activity.samples }, "chat de Twitch leído");
+    return { status: "used", series: activity.series, messages: activity.messages };
+  } catch (err) {
+    deps.log.warn({ jobId, error: (err as Error).message }, "no se pudo leer el chat de Twitch");
+    return { status: "unavailable", series: [], messages: 0 };
+  }
+}
+
 async function runAI(
   deps: PipelineDeps,
   info: { durationSeconds: number; hasAudio: boolean },

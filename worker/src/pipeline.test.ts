@@ -331,6 +331,7 @@ describe("streams largos de Kick/Twitch: copia liviana para analizar y solo los 
     const deps = {
       ...makeDeps(db, root, path.join(root, "work")),
       longStreamMinSeconds: 30,
+      twitchChat: async () => null,
       download: async (_url: string, dir: string, options: { quality?: string }) => {
         calls.downloads.push(options.quality);
         const file = path.join(dir, "source.mp4");
@@ -374,6 +375,38 @@ describe("streams largos de Kick/Twitch: copia liviana para analizar y solo los 
     await processAnalyzeJob((await claimJob(db, again.id, "test-worker"))!, deps);
     expect(calls.downloads).toEqual(["analysis"]);
     expect(calls.resolve).toBe(2);
+  });
+
+  it("usa el chat del VOD de Twitch como señal extra (y si no se puede leer, sigue igual)", async () => {
+    const db = h!.db;
+    const { job } = await seedVideoJob(db, root, { sample, importUrl: "https://www.twitch.tv/videos/789" });
+    const { deps } = streamDeps(db, sample, 20);
+    const asked: { id: string; duration: number }[] = [];
+    // El chat explota al final del video.
+    const chatDeps = {
+      ...deps,
+      twitchChat: async (id: string, duration: number) => {
+        asked.push({ id, duration });
+        return { series: Array.from({ length: Math.floor(duration) }, (_, t) => (t > duration - 15 ? 8 : 0.5)), messages: 321, samples: 3 };
+      },
+    };
+    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, chatDeps);
+    expect(asked).toEqual([{ id: "789", duration: expect.any(Number) }]);
+    expect(result).toMatchObject({ chat: "used", chatMessages: 321 });
+    const clipRows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
+    expect(clipRows.length).toBeGreaterThan(0);
+    expect(clipRows.some((c) => ((c.scoreBreakdown as Record<string, number>).chat ?? 0) > 0.5)).toBe(true);
+
+    const { job: second } = await seedVideoJob(db, root, { sample, importUrl: "https://www.twitch.tv/videos/790" });
+    const failing = {
+      ...deps,
+      twitchChat: async () => {
+        throw new Error("gql caído");
+      },
+    };
+    const fallback = await processAnalyzeJob((await claimJob(db, second.id, "test-worker"))!, failing);
+    expect(fallback).toMatchObject({ chat: "unavailable" });
+    expect(fallback.clipCount).toBeGreaterThan(0);
   });
 
   it("un stream corto (p. ej. un clip de Twitch) se baja entero, sin tramos", async () => {
