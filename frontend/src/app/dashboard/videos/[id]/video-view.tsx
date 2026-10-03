@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FEATURES, type ClipDto, type ClipListResponse, type JobDto, type JobListResponse, type SubtitleStyle, type VideoDownloadResponse, type VideoDto } from "@clipflow/shared";
+import { FEATURES, translateMessage, type ClipDto, type ClipListResponse, type JobDto, type JobListResponse, type SubtitleStyle, type VideoDownloadResponse, type VideoDto } from "@clipflow/shared";
 import { ClipViewer, FullTranscript, scoreOf } from "@/components/clip-viewer";
 import { DEFAULT_DURATION, DurationPicker, SubtitlePicker } from "@/components/clip-options";
 import { BackIcon, CheckIcon, DownloadIcon, RetryIcon, ShareIcon, TrashIcon } from "@/components/icons";
 import { isActive, JobProgressPanel } from "@/components/job-progress";
 import { Alert } from "@/components/ui";
+import { errorMessage } from "@/i18n/locale";
+import { useLocale, useT } from "@/i18n/provider";
 import { apiConfigured, apiFetch, formatBytes, formatDuration } from "@/lib/api";
 import { languageName } from "@/lib/language";
 import { shareVideoFile } from "@/lib/share";
@@ -35,6 +37,8 @@ async function fetchData(videoId: string): Promise<Data> {
 type Filter = "all" | "approved" | "discarded";
 
 export function VideoView({ videoId }: { videoId: string }) {
+  const t = useT();
+  const { locale } = useLocale();
   const router = useRouter();
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState("");
@@ -55,7 +59,7 @@ export function VideoView({ videoId }: { videoId: string }) {
     const load = () =>
       fetchData(videoId)
         .then((d) => active && (setData(d), setError("")))
-        .catch((err: Error) => active && setError(err.message));
+        .catch((err: Error) => active && setError(errorMessage(err)));
     void load();
     // Progreso real cada 4 s solo mientras se procesa.
     const timer = processing ? setInterval(load, 4000) : undefined;
@@ -71,7 +75,7 @@ export function VideoView({ videoId }: { videoId: string }) {
       const job = await apiFetch<JobDto>(`/jobs/${data.job.id}/${action}`, { method: "POST" });
       setData({ ...data, job });
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     }
   }
 
@@ -84,7 +88,7 @@ export function VideoView({ videoId }: { videoId: string }) {
       });
       setData({ ...data, job });
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     }
   }
 
@@ -98,7 +102,7 @@ export function VideoView({ videoId }: { videoId: string }) {
     try {
       window.location.href = await originalUrl();
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setSaving(null);
     }
@@ -111,9 +115,9 @@ export function VideoView({ videoId }: { videoId: string }) {
     try {
       const name = data.video.originalFilename.replace(/\.[a-z0-9]{2,4}$/i, "");
       const result = await shareVideoFile(await originalUrl(), `${name}.mp4`, name);
-      if (result === "unsupported") setNote("Este navegador no puede compartir videos directo: usa Descargar.");
+      if (result === "unsupported") setNote(t.video.shareUnsupported);
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setSaving(null);
     }
@@ -125,18 +129,18 @@ export function VideoView({ videoId }: { videoId: string }) {
       // El PATCH no trae URLs nuevas: se conservan las que ya había.
       setData((d) => d && { ...d, clips: d.clips.map((c) => (c.id === clip.id ? { ...c, status: updated.status } : c)) });
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     }
   }, []);
 
   async function deleteVideo() {
-    if (!data || !window.confirm(`¿Eliminar "${data.video.originalFilename}" y todos sus clips? No se puede deshacer.`)) return;
+    if (!data || !window.confirm(t.video.confirmDelete(data.video.originalFilename))) return;
     setDeleting(true);
     try {
       await apiFetch(`/videos/${videoId}`, { method: "DELETE" });
       router.replace("/dashboard");
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
       setDeleting(false);
     }
   }
@@ -153,27 +157,27 @@ export function VideoView({ videoId }: { videoId: string }) {
   );
   const closeViewer = useCallback(() => setViewer(null), []);
   // Sin título: "Clip N" en orden cronológico (la API los devuelve por tiempo de inicio).
-  const titleOf = (clip: ClipDto) => clip.title ?? `Clip ${(data?.clips.findIndex((c) => c.id === clip.id) ?? 0) + 1}`;
+  const titleOf = (clip: ClipDto) => clip.title ?? t.video.clipN((data?.clips.findIndex((c) => c.id === clip.id) ?? 0) + 1);
 
-  if (!apiConfigured) return <Alert kind="error">La API todavía no está conectada a esta web.</Alert>;
-  if (!data) return error ? <Alert kind="error">{error}</Alert> : <p className="text-sm text-muted">Cargando…</p>;
+  if (!apiConfigured) return <Alert kind="error">{t.common.apiNotConnected}</Alert>;
+  if (!data) return error ? <Alert kind="error">{error}</Alert> : <p className="text-sm text-muted">{t.common.loading}</p>;
 
   const { video, job, transcript } = data;
   const result = job?.status === "completed" ? job.result : null;
   // "Solo descargar" terminado: el video está listo para bajarlo (y, si quiere, crear clips).
   const downloadReady = result?.downloadOnly === true;
-  const language = languageName(result?.language ?? transcript?.language);
+  const language = languageName(result?.language ?? transcript?.language, t.languages);
   const style = job?.params.subtitleStyle ?? "highlight";
   let origin: string | null = null;
   try {
-    origin = video.sourceUrl ? `desde ${new URL(video.sourceUrl).hostname.replace(/^www\./, "")}` : null;
+    origin = video.sourceUrl ? t.video.from(new URL(video.sourceUrl).hostname.replace(/^www\./, "")) : null;
   } catch {
     origin = null;
   }
   const summary = (downloadReady ? [formatBytes(video.sizeBytes), formatDuration(video.durationSeconds), origin] : [
-    job?.status === "completed" ? `${counts.all} clips` : video.sizeBytes > 0 ? formatBytes(video.sizeBytes) : origin,
-    job?.params.clipDurationSeconds ? `de ${job.params.clipDurationSeconds} s` : formatDuration(video.durationSeconds),
-    result?.ai === "used" && style !== "none" ? `subtítulos en ${(language ?? "su idioma").toLowerCase()}` : null,
+    job?.status === "completed" ? t.video.clips(counts.all) : video.sizeBytes > 0 ? formatBytes(video.sizeBytes) : origin,
+    job?.params.clipDurationSeconds ? t.video.of(job.params.clipDurationSeconds) : formatDuration(video.durationSeconds),
+    result?.ai === "used" && style !== "none" ? t.video.subtitlesIn(language ?? t.video.itsLanguage) : null,
   ])
     .filter(Boolean)
     .join(" · ");
@@ -181,7 +185,7 @@ export function VideoView({ videoId }: { videoId: string }) {
   return (
     <div className="space-y-5">
       <header className="-ml-2 flex items-center gap-2">
-        <Link href="/dashboard" aria-label="Volver a Mis videos" className="grid h-11 w-11 shrink-0 place-items-center rounded-full hover:bg-surface">
+        <Link href="/dashboard" aria-label={t.video.backToVideos} className="grid h-11 w-11 shrink-0 place-items-center rounded-full hover:bg-surface">
           <BackIcon size={22} />
         </Link>
         <div className="min-w-0 flex-1">
@@ -192,8 +196,8 @@ export function VideoView({ videoId }: { videoId: string }) {
           <button
             onClick={deleteVideo}
             disabled={deleting}
-            aria-label="Eliminar video"
-            title="Eliminar video"
+            aria-label={t.video.delete}
+            title={t.video.delete}
             className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-muted hover:bg-surface hover:text-red-300 disabled:opacity-50"
           >
             <TrashIcon size={20} />
@@ -203,13 +207,13 @@ export function VideoView({ videoId }: { videoId: string }) {
 
       <Alert kind="error">{error}</Alert>
       {/* Si hay un procesamiento en curso o fallido, su tarjeta ya explica qué pasa. */}
-      {video.rejectionReason && (!job || job.status === "completed") ? <Alert kind="error">{video.rejectionReason}</Alert> : null}
+      {video.rejectionReason && (!job || job.status === "completed") ? <Alert kind="error">{translateMessage(video.rejectionReason, locale)}</Alert> : null}
 
       {job && isActive(job) ? (
         <div className="mx-auto max-w-xl space-y-3">
           <JobProgressPanel job={job} subtitles={style !== "none"} imported={Boolean(video.sourceUrl)} />
           <button onClick={() => jobAction("cancel")} className="h-11 w-full text-sm text-muted underline">
-            Cancelar procesamiento
+            {t.video.cancelProcessing}
           </button>
         </div>
       ) : null}
@@ -217,12 +221,12 @@ export function VideoView({ videoId }: { videoId: string }) {
       {job && (job.status === "failed" || job.status === "cancelled") ? (
         <div className="mx-auto max-w-xl space-y-3 rounded-2xl border border-line bg-surface p-5">
           <p className="font-semibold">
-            {job.status === "failed" ? (job.params.downloadOnly ? "No se pudo descargar el video" : "No se pudo procesar el video") : "Procesamiento cancelado"}
+            {job.status === "failed" ? (job.params.downloadOnly ? t.video.downloadFailed : t.video.processFailed) : t.video.cancelled}
           </p>
-          {job.errorMessage ? <p className="text-sm text-muted">{job.errorMessage}</p> : null}
+          {job.errorMessage ? <p className="text-sm text-muted">{translateMessage(job.errorMessage, locale)}</p> : null}
           <button onClick={() => jobAction("retry")} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-accent font-bold text-on-accent">
             <RetryIcon size={18} />
-            Reintentar
+            {t.common.retry}
           </button>
         </div>
       ) : null}
@@ -232,7 +236,7 @@ export function VideoView({ videoId }: { videoId: string }) {
           <DurationPicker value={clipSeconds} onChange={setClipSeconds} />
           <SubtitlePicker value={subtitleStyle} onChange={setSubtitleStyle} />
           <button onClick={startProcessing} className="h-14 w-full rounded-2xl bg-accent text-[17px] font-bold text-on-accent">
-            Crear clips
+            {t.common.createClips}
           </button>
         </div>
       ) : null}
@@ -247,8 +251,8 @@ export function VideoView({ videoId }: { videoId: string }) {
                 <CheckIcon size={20} strokeWidth={3} />
               </span>
               <div className="min-w-0">
-                <p className="font-semibold">Tu video está listo</p>
-                <p className="text-[13px] text-muted">Guárdalo en tu celular o compártelo.</p>
+                <p className="font-semibold">{t.video.ready}</p>
+                <p className="text-[13px] text-muted">{t.video.readyText}</p>
               </div>
             </div>
             <div className={`grid gap-2.5 ${video.sizeBytes <= MAX_SHARE_BYTES ? "grid-cols-2" : "grid-cols-1"}`}>
@@ -258,7 +262,7 @@ export function VideoView({ videoId }: { videoId: string }) {
                 className="flex h-[54px] items-center justify-center gap-2 rounded-2xl bg-accent text-base font-bold text-on-accent disabled:opacity-60"
               >
                 <DownloadIcon size={20} strokeWidth={2.4} />
-                {saving === "download" ? "Preparando…" : "Descargar"}
+                {saving === "download" ? t.common.preparing : t.common.download}
               </button>
               {video.sizeBytes <= MAX_SHARE_BYTES ? (
                 <button
@@ -267,7 +271,7 @@ export function VideoView({ videoId }: { videoId: string }) {
                   className="flex h-[54px] items-center justify-center gap-2 rounded-2xl border border-[#2a3040] bg-background text-base font-semibold disabled:opacity-60"
                 >
                   <ShareIcon size={20} />
-                  {saving === "share" ? "Preparando…" : "Compartir"}
+                  {saving === "share" ? t.common.preparing : t.common.share}
                 </button>
               ) : null}
             </div>
@@ -277,20 +281,20 @@ export function VideoView({ videoId }: { videoId: string }) {
 
           <div className="space-y-5">
             <div className="space-y-1">
-              <h2 className="text-lg font-bold">¿Quieres clips de este video?</h2>
-              <p className="text-sm text-muted">Usamos el video que ya tenemos: no hay que volver a pegar el enlace.</p>
+              <h2 className="text-lg font-bold">{t.video.wantClips}</h2>
+              <p className="text-sm text-muted">{t.video.wantClipsText}</p>
             </div>
             <DurationPicker value={clipSeconds} onChange={setClipSeconds} />
             <SubtitlePicker value={subtitleStyle} onChange={setSubtitleStyle} />
             <button onClick={startProcessing} className="h-14 w-full rounded-2xl bg-accent text-[17px] font-bold text-on-accent">
-              Crear clips
+              {t.common.createClips}
             </button>
           </div>
         </div>
       ) : null}
 
       {!job && video.status === "pending_upload" ? (
-        <Alert kind="info">Esta subida no terminó. Vuelve a subir el video desde “Subir video”.</Alert>
+        <Alert kind="info">{t.video.unfinished}</Alert>
       ) : null}
 
       {job?.status === "completed" && !downloadReady ? (
@@ -303,25 +307,25 @@ export function VideoView({ videoId }: { videoId: string }) {
                 className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-accent font-bold text-on-accent"
               >
                 <RetryIcon size={18} />
-                Volver a analizar con IA
+                {t.video.reanalyze}
               </button>
               <p className="text-center text-xs text-muted">
-                Usamos el video que ya está guardado{result.language ? " y su transcripción: no se vuelve a pagar" : ""}.
+                {t.video.reanalyzeNote(Boolean(result.language))}
               </p>
             </div>
           ) : null}
           {result?.chat === "used" ? (
             <p className="rounded-2xl border border-line bg-surface px-4 py-3 text-[13px] leading-[18px] text-muted">
-              También se usó el chat del directo de Twitch para encontrar los momentos donde más reaccionó la gente.
+              {t.video.chatUsed}
             </p>
           ) : null}
 
-          <div className="-mx-5 flex gap-2 overflow-x-auto px-5 sm:mx-0 sm:px-0" role="tablist" aria-label="Filtrar clips">
+          <div className="-mx-5 flex gap-2 overflow-x-auto px-5 sm:mx-0 sm:px-0" role="tablist" aria-label={t.video.filter}>
             {(
               [
-                ["all", `Todos · ${counts.all}`],
-                ["approved", `Aprobados · ${counts.approved}`],
-                ["discarded", `Descartados${counts.discarded ? ` · ${counts.discarded}` : ""}`],
+                ["all", t.video.tabAll(counts.all)],
+                ["approved", t.video.tabApproved(counts.approved)],
+                ["discarded", t.video.tabDiscarded(counts.discarded)],
               ] as const
             ).map(([id, label]) => (
               <button
@@ -340,11 +344,11 @@ export function VideoView({ videoId }: { videoId: string }) {
 
           {data.clips.length === 0 ? (
             <p className="rounded-2xl border border-dashed border-line p-5 text-sm text-muted">
-              No encontramos momentos que destaquen en este video (sin cambios claros de voz, volumen ni de escena).
+              {t.video.noMoments}
             </p>
           ) : visible.length === 0 ? (
             <p className="rounded-2xl border border-dashed border-line p-5 text-sm text-muted">
-              {filter === "approved" ? "Todavía no aprobaste ningún clip." : "No hay clips descartados."}
+              {filter === "approved" ? t.video.noApproved : t.video.noDiscarded}
             </p>
           ) : (
             <ul className="grid grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-3 lg:grid-cols-4">
@@ -408,14 +412,17 @@ export function VideoView({ videoId }: { videoId: string }) {
 
 /** Por qué no hubo análisis con IA (sin habla, sin clave, error), en lenguaje simple. */
 function AiNote({ result }: { result: NonNullable<JobDto["result"]> }) {
+  const t = useT();
+  const { locale } = useLocale();
+  const reason = translateMessage(result.aiReason, locale) ?? null;
   const text =
     result.ai === "no_speech"
-      ? "No se detectó habla (gameplay o música): los clips se eligieron por acción, volumen y movimiento. Sin títulos ni subtítulos."
+      ? t.video.aiNoSpeech
       : result.ai === "no_audio"
-        ? "El video no tiene audio: los clips se eligieron por movimiento y cambios de escena."
+        ? t.video.aiNoAudio
         : result.ai === "unavailable" && result.language
           ? // Falló solo el análisis de momentos: la transcripción se conservó.
-            `La IA no pudo elegir los momentos${result.aiReason ? ` (${result.aiReason})` : ""}. Se eligieron por acción, volumen y movimiento; los subtítulos y la transcripción sí están.`
-          : `Sin análisis de IA${result.aiReason ? `: ${result.aiReason}` : ""}. Los clips se eligieron por acción, volumen y movimiento.`;
+            t.video.aiMomentsFailed(reason)
+          : t.video.aiNone(reason);
   return <p className="rounded-2xl border border-line bg-surface px-4 py-3 text-[13px] leading-[18px] text-muted">{text}</p>;
 }

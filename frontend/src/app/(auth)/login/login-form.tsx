@@ -5,11 +5,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { signIn, signOut } from "aws-amplify/auth";
 import { Alert, Field, NotConfigured, SubmitButton } from "@/components/ui";
+import { useT } from "@/i18n/provider";
 import { authConfigured } from "@/lib/amplify-config";
 import { authErrorMessage, authErrorName } from "@/lib/auth-errors";
 import { safeNextPath } from "@/lib/redirect";
 
 export function LoginForm() {
+  const t = useT();
   const router = useRouter();
   const params = useSearchParams();
   const next = safeNextPath(params.get("next"));
@@ -43,7 +45,7 @@ export function LoginForm() {
         router.refresh();
         return;
       }
-      setError("Este paso de inicio de sesión todavía no está soportado.");
+      setError(t.auth.unsupportedStep);
     } catch (err) {
       if (authErrorName(err) === "UserNotConfirmedException") {
         router.push(`/verificar?email=${encodeURIComponent(email.trim())}`);
@@ -57,24 +59,24 @@ export function LoginForm() {
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      <Field label="Email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+      <Field label={t.auth.email} type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
       <Field
-        label="Contraseña"
+        label={t.auth.password}
         type="password"
         autoComplete="current-password"
         required
         value={password}
         onChange={(e) => setPassword(e.target.value)}
       />
-      {params.get("verificado") ? <Alert kind="info">Email verificado. Ya puedes iniciar sesión.</Alert> : null}
+      {params.get("verificado") ? <Alert kind="info">{t.auth.verified}</Alert> : null}
       <Alert kind="error">{error}</Alert>
-      <SubmitButton loading={loading}>Entrar</SubmitButton>
+      <SubmitButton loading={loading}>{t.auth.signIn}</SubmitButton>
       <div className="flex justify-between text-sm text-muted">
         <Link href="/recuperar" className="hover:text-foreground">
-          ¿Olvidaste tu contraseña?
+          {t.auth.forgot}
         </Link>
         <Link href="/registro" className="hover:text-foreground">
-          Crear cuenta
+          {t.auth.createAccount}
         </Link>
       </div>
     </form>

@@ -64,3 +64,28 @@ Si no hubo habla o falló la IA, no hay texto que dibujar y el clip sale sin sub
   (elegir archivo, cambiar opciones y "Crear clips" lleva al progreso con las opciones elegidas),
   Progreso, Tus clips, Ver un clip con su transcripción y la transcripción completa, sin errores en
   la consola.
+
+## Idioma: español e inglés (03/10/2026)
+
+Toda la app está en **español e inglés**. El usuario elige en **Cuenta → Idioma**.
+- **Cómo se decide el idioma:** la cookie `clipflow-lang` (la guarda el selector, dura un año). Sin cookie,
+  se usa el idioma del navegador: inglés si empieza por `en`, si no español.
+- **Textos de la web:** `frontend/src/i18n/messages.ts`, con las dos versiones lado a lado. TypeScript exige
+  que el inglés tenga las mismas claves que el español, y un test verifica que ninguna quede vacía.
+  - En componentes del navegador: `const t = useT()`. En los de servidor: `const t = await getT()`.
+  - Títulos de pestaña: `pageTitle("clave")`.
+- **Mensajes del servidor** (errores de la API, del procesador y de la IA): el servidor responde siempre
+  en español y la web los traduce con `translateMessage` (`shared/src/i18n.ts`).
+  - Un test revisa el código de la API, la validación y el procesador, y falla si un mensaje nuevo para el
+    usuario no tiene traducción. Al agregar un mensaje, agrega su traducción ahí.
+  - Si alguno se escapa, se muestra en español (nunca se rompe).
+- **Lo que no cambia de idioma:** los subtítulos, las transcripciones y los títulos de los clips (están en
+  el idioma en que se habla en el video), y los nombres de proyectos y videos.
+- Las páginas legales tienen su propia versión por dirección (`/terminos` y `/en/terms`, etc.).
+
+## Cuenta: nombre (03/10/2026)
+
+- **Nombre:** la fila abre `/dashboard/cuenta/nombre` para escribirlo; se guarda en Cognito (atributo
+  `name`) y se muestra en Cuenta. Sin nombre, la fila dice «Agregar nombre».
+- **Redes conectadas** se quitó hasta que exista la función (publicar directo exige que cada red apruebe
+  la app).

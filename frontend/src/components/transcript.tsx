@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CopyIcon, GlobeIcon } from "./icons";
+import { useT } from "@/i18n/provider";
 import { clock, parseVtt, type Cue } from "@/lib/vtt";
 
 /** Descarga y lee un WebVTT (URL temporal de S3). */
@@ -26,10 +27,11 @@ export function useCues(url: string | null | undefined): { cues: Cue[] | null; f
 }
 
 export function LanguageBadge({ name }: { name: string }) {
+  const t = useT();
   return (
     <span className="flex h-7 items-center gap-1.5 rounded-full border border-[#2c3a14] bg-[#161b12] px-2.5 text-xs font-semibold text-accent">
       <GlobeIcon size={14} />
-      {name} · detectado
+      {name} · {t.clip.detected}
     </span>
   );
 }
@@ -80,6 +82,7 @@ export function CueList({
 
 /** Botón "Copiar texto" con confirmación. */
 export function CopyTextButton({ cues }: { cues: Cue[] }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   const text = useMemo(() => cues.map((c) => c.text).join(" "), [cues]);
   return (
@@ -97,7 +100,7 @@ export function CopyTextButton({ cues }: { cues: Cue[] }) {
       className="flex h-11 items-center justify-center gap-1.5 rounded-xl border border-[#2a3040] bg-background text-[13px] font-semibold"
     >
       <CopyIcon size={16} />
-      {copied ? "¡Copiado!" : "Copiar texto"}
+      {copied ? t.clip.copied : t.clip.copy}
     </button>
   );
 }

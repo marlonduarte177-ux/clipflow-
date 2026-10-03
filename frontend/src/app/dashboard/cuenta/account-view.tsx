@@ -5,7 +5,11 @@ import { useRouter } from "next/navigation";
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { deleteUser, signOut } from "aws-amplify/auth";
 import type { MeResponse } from "@clipflow/shared";
-import { apiFetch, ApiError } from "@/lib/api";
+import { LEGAL_PATHS } from "@/components/legal-page";
+import { errorMessage } from "@/i18n/locale";
+import { LOCALE_NAMES } from "@/i18n/messages";
+import { useLocale, useT } from "@/i18n/provider";
+import { apiFetch } from "@/lib/api";
 import { LEGAL } from "@/lib/legal";
 import {
   BoltIcon,
@@ -14,7 +18,6 @@ import {
   DocumentIcon,
   GlobeIcon,
   HelpIcon,
-  LinkIcon,
   LogoutIcon,
   MailIcon,
   NextIcon,
@@ -23,10 +26,12 @@ import {
   UserIcon,
 } from "@/components/icons";
 
-/** Página "Próximamente" para lo que todavía no tiene función. */
-const soon = (que: string) => `/dashboard/proximamente?que=${encodeURIComponent(que)}`;
+/** Página "Próximamente" para lo que todavía no tiene función (el título sale de `t.soon.topics`). */
+const soon = (topic: "planes" | "creditos") => `/dashboard/proximamente?que=${topic}`;
 
 export function AccountView({ name, email }: { name: string | null; email: string }) {
+  const t = useT();
+  const { locale } = useLocale();
   const router = useRouter();
   const [credits, setCredits] = useState<number | null>(null);
   const [leaving, setLeaving] = useState(false);
@@ -52,46 +57,42 @@ export function AccountView({ name, email }: { name: string | null; email: strin
 
   return (
     <div className="mx-auto max-w-xl">
-      <h1 className="text-[28px] font-extrabold tracking-tight">Cuenta</h1>
+      <h1 className="text-[28px] font-extrabold tracking-tight">{t.account.title}</h1>
       <div className="mt-5 space-y-5">
         <Group>
-          <Row icon={<UserIcon size={20} />} label="Nombre" value={name ?? "Sin nombre"} />
-          <Row icon={<MailIcon size={20} />} label="Correo" value={email} />
+          <Row icon={<UserIcon size={20} />} label={t.account.name} value={name ?? t.account.noName} href="/dashboard/cuenta/nombre" />
+          <Row icon={<MailIcon size={20} />} label={t.account.email} value={email} />
           <Row
             icon={<CrownIcon size={20} />}
-            label="Suscripción"
-            href={soon("Planes")}
+            label={t.account.subscription}
+            href={soon("planes")}
             value={
               <span className="flex items-center gap-2">
-                Gratis
-                <span className="inline-flex h-6 items-center rounded-full bg-accent px-2.5 text-[13px] font-bold text-on-accent">Mejorar</span>
+                {t.account.free}
+                <span className="inline-flex h-6 items-center rounded-full bg-accent px-2.5 text-[13px] font-bold text-on-accent">{t.account.upgrade}</span>
               </span>
             }
           />
-          <Row icon={<BoltIcon size={20} />} label="Créditos" href={soon("Créditos")} value={credits === null ? "…" : `${credits} min`} />
+          <Row icon={<BoltIcon size={20} />} label={t.account.credits} href={soon("creditos")} value={credits === null ? "…" : t.account.minutes(credits)} />
         </Group>
 
         <Group>
-          <Row icon={<LinkIcon size={20} />} label="Redes conectadas" href={soon("Redes conectadas")} />
+          <Row icon={<GlobeIcon size={20} />} label={t.account.language} value={LOCALE_NAMES[locale]} href="/dashboard/cuenta/idioma" />
+          <Row icon={<HelpIcon size={20} />} label={t.account.help} value={LEGAL.email} href={`mailto:${LEGAL.email}?subject=${encodeURIComponent(t.account.helpSubject)}`} />
+          <Row icon={<BulbIcon size={20} />} label={t.account.suggest} href={`mailto:${LEGAL.email}?subject=${encodeURIComponent(t.account.suggestSubject)}`} />
         </Group>
 
         <Group>
-          <Row icon={<GlobeIcon size={20} />} label="Idioma" value="Español" href={soon("Idioma")} />
-          <Row icon={<HelpIcon size={20} />} label="Ayuda y soporte" value={LEGAL.email} href={`mailto:${LEGAL.email}?subject=${encodeURIComponent("Ayuda con ClipFlow")}`} />
-          <Row icon={<BulbIcon size={20} />} label="Sugerir una función" href={`mailto:${LEGAL.email}?subject=${encodeURIComponent("Sugerencia para ClipFlow")}`} />
+          <Row icon={<ShieldIcon size={20} />} label={t.account.privacy} href={LEGAL_PATHS.privacy[locale]} />
+          <Row icon={<DocumentIcon size={20} />} label={t.account.terms} href={LEGAL_PATHS.terms[locale]} />
         </Group>
 
         <Group>
-          <Row icon={<ShieldIcon size={20} />} label="Política de privacidad" href="/privacidad" />
-          <Row icon={<DocumentIcon size={20} />} label="Términos de uso" href="/terminos" />
+          <Row icon={<LogoutIcon size={20} />} label={leaving ? t.account.signingOut : t.account.signOut} onClick={leaving ? undefined : onSignOut} />
         </Group>
 
         <Group>
-          <Row icon={<LogoutIcon size={20} />} label={leaving ? "Saliendo…" : "Cerrar sesión"} onClick={leaving ? undefined : onSignOut} />
-        </Group>
-
-        <Group>
-          <Row icon={<TrashIcon size={20} />} label="Eliminar cuenta" danger onClick={() => setConfirmDelete(true)} />
+          <Row icon={<TrashIcon size={20} />} label={t.account.deleteAccount} danger onClick={() => setConfirmDelete(true)} />
         </Group>
       </div>
 
@@ -166,12 +167,13 @@ function Row({
 
 /** Confirmación para eliminar la cuenta: hay que escribir ELIMINAR. */
 function DeleteAccountDialog({ onCancel }: { onCancel: () => void }) {
+  const t = useT();
   const router = useRouter();
   const titleId = useId();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const ready = text.trim().toUpperCase() === "ELIMINAR";
+  const ready = text.trim().toUpperCase() === t.account.deleteWord;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && !busy && onCancel();
@@ -194,7 +196,7 @@ function DeleteAccountDialog({ onCancel }: { onCancel: () => void }) {
       router.replace("/login");
       router.refresh();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo eliminar la cuenta. Intenta de nuevo.");
+      setError(err instanceof Error && err.message ? errorMessage(err) : t.account.deleteFailed);
       setBusy(false);
     }
   }
@@ -208,14 +210,14 @@ function DeleteAccountDialog({ onCancel }: { onCancel: () => void }) {
         className="w-full max-w-md space-y-4 rounded-t-[28px] border border-line bg-surface px-5 pb-[max(20px,env(safe-area-inset-bottom))] pt-6 sm:rounded-[28px]"
       >
         <h2 id={titleId} className="text-xl font-bold">
-          ¿Eliminar tu cuenta?
+          {t.account.deleteTitle}
         </h2>
         <p className="text-[15px] leading-[22px] text-muted">
-          Se borrarán para siempre todos tus videos, clips, transcripciones y proyectos. No se puede deshacer.
+          {t.account.deleteText}
         </p>
         <label className="block">
           <span className="mb-1.5 block text-sm text-muted">
-            Escribe <strong className="text-foreground">ELIMINAR</strong> para confirmar
+            {t.account.deleteTypePrefix} <strong className="text-foreground">{t.account.deleteWord}</strong> {t.account.deleteTypeSuffix}
           </span>
           <input
             value={text}
@@ -228,7 +230,7 @@ function DeleteAccountDialog({ onCancel }: { onCancel: () => void }) {
         {error ? <p className="text-sm text-[#FF5C5C]">{error}</p> : null}
         <div className="grid grid-cols-2 gap-3">
           <button type="button" onClick={onCancel} disabled={busy} className="h-12 rounded-2xl border border-line text-[15px] font-semibold disabled:opacity-40">
-            Cancelar
+            {t.common.cancel}
           </button>
           <button
             type="button"
@@ -236,7 +238,7 @@ function DeleteAccountDialog({ onCancel }: { onCancel: () => void }) {
             disabled={!ready || busy}
             className="h-12 rounded-2xl bg-[#FF5C5C] text-[15px] font-bold text-[#0A0C10] disabled:opacity-40"
           >
-            {busy ? "Eliminando…" : "Eliminar cuenta"}
+            {busy ? t.account.deleting : t.account.deleteAccount}
           </button>
         </div>
       </div>

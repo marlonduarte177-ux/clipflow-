@@ -1,7 +1,10 @@
+import { pageTitle } from "@/i18n/server";
 import { Suspense } from "react";
 import { UploadView } from "./upload-view";
 
-export const metadata = { title: "Subir video · ClipFlow" };
+export async function generateMetadata() {
+  return { title: await pageTitle("upload") };
+}
 
 export default function UploadPage() {
   return (

@@ -1,12 +1,16 @@
 import { Suspense } from "react";
 import { AuthCard } from "@/components/ui";
+import { getT, pageTitle } from "@/i18n/server";
 import { VerifyForm } from "./verify-form";
 
-export const metadata = { title: "Verificar email · ClipFlow" };
+export async function generateMetadata() {
+  return { title: await pageTitle("verify") };
+}
 
-export default function VerifyPage() {
+export default async function VerifyPage() {
+  const t = await getT();
   return (
-    <AuthCard title="Verifica tu email" subtitle="Escribe el código que te enviamos por email.">
+    <AuthCard title={t.auth.verifyTitle} subtitle={t.auth.verifySubtitle}>
       <Suspense>
         <VerifyForm />
       </Suspense>

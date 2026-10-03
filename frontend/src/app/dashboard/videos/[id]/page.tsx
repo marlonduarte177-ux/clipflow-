@@ -1,6 +1,9 @@
+import { pageTitle } from "@/i18n/server";
 import { VideoView } from "./video-view";
 
-export const metadata = { title: "Video · ClipFlow" };
+export async function generateMetadata() {
+  return { title: await pageTitle("video") };
+}
 
 export default async function VideoPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

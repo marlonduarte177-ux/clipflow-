@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   checkImportUrl,
+  translateMessage,
   DEFAULT_PRODUCT_CONFIG,
   FEATURES,
   resolveVideoMimeType,
@@ -17,12 +18,13 @@ import { DEFAULT_DURATION, DurationPicker, SubtitlePicker } from "@/components/c
 import { CheckIcon, CloseIcon, DownIcon, DownloadIcon, LinesIcon, UploadIcon } from "@/components/icons";
 import { RightsDialog } from "@/components/rights-dialog";
 import { Alert } from "@/components/ui";
+import { errorMessage } from "@/i18n/locale";
+import { useLocale, useT } from "@/i18n/provider";
 import { apiConfigured, apiFetch, formatBytes, formatDuration } from "@/lib/api";
 import { readVideoDuration, uploadVideo, type UploadProgress } from "@/lib/uploader";
 
 // Límites mostrados al usuario; la API los vuelve a comprobar siempre.
 const LIMITS = DEFAULT_PRODUCT_CONFIG.upload;
-const DEFAULT_PROJECT_NAME = "Mis videos";
 
 type Phase = "idle" | "uploading" | "uploaded" | "starting" | "error";
 
@@ -32,6 +34,8 @@ type Phase = "idle" | "uploading" | "uploaded" | "starting" | "error";
  * terminó, el procesamiento empieza solo en cuanto termine.
  */
 export function UploadView() {
+  const t = useT();
+  const { locale } = useLocale();
   const router = useRouter();
   const params = useSearchParams();
   const [projects, setProjects] = useState<ProjectDto[] | null>(null);
@@ -64,7 +68,7 @@ export function UploadView() {
         setProjects(r.projects);
         setProjectId((current) => current || r.projects[0]?.id || "");
       })
-      .catch((err: Error) => setError(err.message));
+      .catch((err: Error) => setError(errorMessage(err)));
   }, []);
 
   // Durante la subida: avisa antes de cerrar la pestaña y evita que la pantalla se apague
@@ -87,7 +91,7 @@ export function UploadView() {
 
   async function ensureProject(): Promise<string> {
     if (projectId) return projectId;
-    const created = await apiFetch<ProjectDto>("/projects", { method: "POST", body: { name: DEFAULT_PROJECT_NAME } });
+    const created = await apiFetch<ProjectDto>("/projects", { method: "POST", body: { name: t.upload.defaultProject } });
     setProjects((list) => [...(list ?? []), created]);
     setProjectId(created.id);
     return created.id;
@@ -99,16 +103,16 @@ export function UploadView() {
     if (!selected) return;
     setError("");
     if (!resolveVideoMimeType(selected.name, selected.type, LIMITS.allowedMimeTypes)) {
-      setError("Formato no admitido. Usa MP4, MOV, WEBM o MKV.");
+      setError(t.upload.unsupported);
       return;
     }
     if (selected.size > LIMITS.maxBytes) {
-      setError(`El archivo supera el máximo de ${formatBytes(LIMITS.maxBytes)}.`);
+      setError(t.upload.tooBig(formatBytes(LIMITS.maxBytes)));
       return;
     }
     const seconds = await readVideoDuration(selected);
     if (seconds && seconds > LIMITS.maxDurationSeconds) {
-      setError(`El video dura ${formatDuration(seconds)}; el máximo es ${formatDuration(LIMITS.maxDurationSeconds)}.`);
+      setError(t.upload.tooLong(formatDuration(seconds), formatDuration(LIMITS.maxDurationSeconds)));
       return;
     }
     setFile(selected);
@@ -141,7 +145,7 @@ export function UploadView() {
       router.push(`/dashboard/videos/${video.id}`);
     } catch (err) {
       if (controller.signal.aborted) return;
-      setError((err as Error).message);
+      setError(errorMessage(err));
       setPhase("error");
       // Libera la subida en S3 para no dejar partes huérfanas. (El tipo se fuerza: TS no ve la
       // asignación que hace onCreated dentro de la subida.)
@@ -153,7 +157,7 @@ export function UploadView() {
   function onImportClick(mode: "clips" | "download") {
     const checked = checkImportUrl(link);
     if (!checked.ok) {
-      setError(checked.message);
+      setError(translateMessage(checked.message, locale));
       return;
     }
     setError("");
@@ -174,7 +178,7 @@ export function UploadView() {
       });
       router.push(`/dashboard/videos/${video.id}`);
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
       setAskRights(false);
       setImporting(false);
     }
@@ -197,7 +201,7 @@ export function UploadView() {
   }
 
   if (!apiConfigured) {
-    return <Alert kind="error">La API todavía no está conectada a esta web (falta NEXT_PUBLIC_API_URL).</Alert>;
+    return <Alert kind="error">{t.common.apiNotConnected}</Alert>;
   }
 
   const percent = progress && progress.totalBytes > 0 ? Math.floor((progress.uploadedBytes / progress.totalBytes) * 100) : 0;
@@ -206,18 +210,18 @@ export function UploadView() {
   return (
     <div className="mx-auto max-w-xl space-y-6 pb-24 sm:pb-0">
       <div className="space-y-1.5">
-        <h1 className="text-[28px] font-bold tracking-tight">Nuevo video</h1>
+        <h1 className="text-[28px] font-bold tracking-tight">{t.upload.title}</h1>
         <p className="text-sm text-muted">
-          {file ? "Elige cómo quieres tus clips mientras el video se sube." : "Sube un video largo y te damos sus mejores momentos listos para TikTok, Reels y Shorts."}
+          {file ? t.upload.subtitleFile : t.upload.subtitle}
         </p>
       </div>
 
       {!file ? (
-        <div role="tablist" aria-label="Origen del video" className="grid grid-cols-2 gap-1 rounded-2xl border border-line bg-surface p-1">
+        <div role="tablist" aria-label={t.upload.source} className="grid grid-cols-2 gap-1 rounded-2xl border border-line bg-surface p-1">
           {(
             [
-              ["file", "Archivo"],
-              ["link", "Enlace"],
+              ["file", t.upload.file],
+              ["link", t.upload.link],
             ] as const
           ).map(([id, label]) => (
             <button
@@ -240,7 +244,7 @@ export function UploadView() {
         <div className="space-y-2.5 rounded-[22px] border border-line bg-surface p-4">
           <label htmlFor="video-link" className="flex items-center gap-2 text-[15px] font-semibold">
             <LinesIcon size={18} className="text-accent" />
-            Enlace del video
+            {t.upload.linkLabel}
           </label>
           <input
             id="video-link"
@@ -264,12 +268,11 @@ export function UploadView() {
             className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-accent/50 text-[15px] font-semibold text-accent transition hover:bg-accent/10 disabled:opacity-40"
           >
             <DownloadIcon size={18} strokeWidth={2.4} />
-            Descargar solo el video
+            {t.upload.downloadOnly}
           </button>
           ) : null}
           <p className="text-xs leading-[17px] text-muted">
-            TikTok, Instagram, Facebook, Kick o Twitch (clips y videos guardados), o un enlace directo a un archivo de video. Lo procesamos en nuestros servidores: no gasta
-            tus datos. Hasta {formatDuration(LIMITS.maxDurationSeconds)}. Para YouTube, descarga el video y súbelo como archivo.
+            {t.upload.linkHint(formatDuration(LIMITS.maxDurationSeconds))}
           </p>
         </div>
       ) : file ? (
@@ -283,15 +286,15 @@ export function UploadView() {
               {formatBytes(file.size)}
               {videoSeconds ? ` · ${formatDuration(videoSeconds)}` : ""}
             </p>
-            <div className="h-1.5 overflow-hidden rounded-full bg-line" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label="Avance de la subida">
+            <div className="h-1.5 overflow-hidden rounded-full bg-line" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label={t.upload.ariaUpload}>
               <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${percent}%` }} />
             </div>
             <p className="text-xs text-muted">
-              {phase === "uploading" ? `Subiendo… ${percent} %` : phase === "error" ? "La subida se detuvo" : "Video subido"}
+              {phase === "uploading" ? t.upload.uploading(percent) : phase === "error" ? t.upload.stopped : t.upload.uploaded}
             </p>
           </div>
           {phase === "uploading" || phase === "uploaded" || phase === "error" ? (
-            <button onClick={onCancel} aria-label="Cancelar la subida" className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-line text-muted hover:text-foreground">
+            <button onClick={onCancel} aria-label={t.upload.cancelUpload} className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-line text-muted hover:text-foreground">
               <CloseIcon size={18} />
             </button>
           ) : null}
@@ -301,15 +304,15 @@ export function UploadView() {
           <span className="grid h-14 w-14 place-items-center rounded-[18px] bg-accent text-on-accent">
             <UploadIcon size={26} strokeWidth={2.4} />
           </span>
-          <span className="text-base font-semibold">Elegir video</span>
+          <span className="text-base font-semibold">{t.upload.choose}</span>
           <span className="text-xs text-muted">
-            MP4, MOV, WEBM o MKV · hasta {formatBytes(LIMITS.maxBytes)} · hasta {formatDuration(LIMITS.maxDurationSeconds)}
+            {t.upload.limits(formatBytes(LIMITS.maxBytes), formatDuration(LIMITS.maxDurationSeconds))}
           </span>
           <input type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska,.mkv" onChange={onFile} className="sr-only" />
         </label>
       )}
       {source === "file" && !file ? (
-        <p className="-mt-3 text-center text-xs text-muted">Al subir un video confirmas que es tuyo o que tienes permiso para usarlo.</p>
+        <p className="-mt-3 text-center text-xs text-muted">{t.upload.rightsNote}</p>
       ) : null}
 
       <Alert kind="error">{error}</Alert>
@@ -319,13 +322,13 @@ export function UploadView() {
 
       {projects && projects.length > 0 ? (
         <label className="relative flex min-h-[52px] items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-4">
-          <span className="text-sm text-muted">Proyecto</span>
+          <span className="text-sm text-muted">{t.upload.project}</span>
           <span className="flex items-center gap-1.5 text-sm font-semibold">
-            {project?.name ?? "Elegir"}
+            {project?.name ?? t.upload.chooseProject}
             <DownIcon size={16} />
           </span>
           <select
-            aria-label="Proyecto"
+            aria-label={t.upload.project}
             value={projectId}
             disabled={phase !== "idle"}
             onChange={(e) => setProjectId(e.target.value)}
@@ -348,14 +351,14 @@ export function UploadView() {
             disabled={source === "link" && !file ? !link.trim() || importing : !file || confirmed || phase === "error"}
             className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-accent text-[17px] font-bold text-on-accent transition hover:brightness-105 disabled:opacity-50"
           >
-            {confirmed ? (phase === "uploading" ? "Empieza al terminar la subida" : "Empezando…") : "Crear clips"}
+            {confirmed ? (phase === "uploading" ? t.upload.startsAfterUpload : t.upload.starting) : t.common.createClips}
           </button>
           <p className="text-center text-xs text-muted">
             {source === "link" && !file
-              ? "Lo procesamos nosotros: puedes cerrar la página cuando empiece."
+              ? t.upload.linkFooter
               : file && phase === "uploading"
-                ? "No bloquees el celular hasta que termine de subir."
-                : "Puedes cerrar la página cuando empiece el procesamiento."}
+                ? t.upload.keepAwake
+                : t.upload.canClose}
           </p>
         </div>
       </div>

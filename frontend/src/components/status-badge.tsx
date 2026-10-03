@@ -1,15 +1,18 @@
-import type { VideoStatus } from "@clipflow/shared";
+"use client";
 
-const LABELS: Record<VideoStatus, { text: string; className: string }> = {
-  pending_upload: { text: "Subida sin terminar", className: "border-yellow-500/40 text-yellow-200" },
-  importing: { text: "Importando", className: "border-accent/40 text-accent" },
-  uploaded: { text: "Subido", className: "border-accent/40 text-accent" },
-  ready: { text: "Listo", className: "border-accent/40 text-accent" },
-  rejected: { text: "Rechazado", className: "border-red-500/40 text-red-300" },
-  deleted: { text: "Eliminado", className: "border-line text-muted" },
+import type { VideoStatus } from "@clipflow/shared";
+import { useT } from "@/i18n/provider";
+
+const STYLES: Record<VideoStatus, string> = {
+  pending_upload: "border-yellow-500/40 text-yellow-200",
+  importing: "border-accent/40 text-accent",
+  uploaded: "border-accent/40 text-accent",
+  ready: "border-accent/40 text-accent",
+  rejected: "border-red-500/40 text-red-300",
+  deleted: "border-line text-muted",
 };
 
 export function VideoStatusBadge({ status }: { status: VideoStatus }) {
-  const label = LABELS[status];
-  return <span className={`rounded-full border px-2 py-0.5 text-xs ${label.className}`}>{label.text}</span>;
+  const t = useT();
+  return <span className={`rounded-full border px-2 py-0.5 text-xs ${STYLES[status]}`}>{t.status[status]}</span>;
 }
