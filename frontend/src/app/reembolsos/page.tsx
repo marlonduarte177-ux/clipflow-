@@ -1,7 +1,10 @@
 import { LegalPage } from "@/components/legal-page";
 import { LEGAL } from "@/lib/legal";
 
-export const metadata = { title: "Política de reembolsos · ClipFlow" };
+export const metadata = {
+  title: "Política de reembolsos · ClipFlow",
+  alternates: { languages: { es: "/reembolsos", en: "/en/refunds" } },
+};
 
 const mail = <a href={`mailto:${LEGAL.email}`}>{LEGAL.email}</a>;
 const { days, maxMinutesUsed } = LEGAL.refund;
@@ -9,6 +12,7 @@ const { days, maxMinutesUsed } = LEGAL.refund;
 export default function RefundsPage() {
   return (
     <LegalPage
+      doc="refunds"
       title="Política de reembolsos"
       intro={
         <p>

@@ -58,9 +58,21 @@ Al pasarse, la API responde 429 `daily_limit` con un mensaje claro. Se revisa al
   cobro. Los minutos de un procesamiento que falla se devuelven (se implementa con los planes).
 - Incluyen el texto que pide Paddle como comerciante registrado (Merchant of Record).
 - «Ayuda y soporte» y «Sugerir una función» abren un correo a soporte@clipflowia.com.
+- **En inglés** (para Paddle): `/en/terms`, `/en/privacy` y `/en/refunds`, con el mismo contenido. Cada
+  página tiene el enlace «English / Español» para cambiar de idioma.
+
+### Entorno de producción (decidido el 03/10/2026)
+
+Por ahora **el entorno actual (`staging`, con clipflowia.com) es el entorno real** de los clientes: no se
+crea un entorno `production` separado, para no duplicar el costo fijo de AWS. Cuando haya ingresos, se
+puede crear uno aparte y dejar `staging` solo para pruebas.
+- Hasta entonces, cada cambio que se despliega en `staging` llega directo a los clientes: probarlo antes
+  con cuidado.
+- Antes de lanzar, conviene activar en este entorno las protecciones que hoy solo tiene `production`
+  (protección contra borrado de la base de datos y de Cognito, y conservar el bucket).
 
 ## Pendiente
 
-- Revisar con Paddle si aceptan la política de 7 días / 15 minutos y si piden las páginas en inglés.
-- **Entorno de producción separado** o usar el actual como producción (por decidir).
+- Revisar con Paddle si aceptan la política de 7 días / 15 minutos.
+- Activar las protecciones de producción en el entorno actual (ver arriba).
 - **Planes y pagos** con Paddle (ver `docs/planes-y-creditos.md`).

@@ -2,13 +2,17 @@ import Link from "next/link";
 import { LegalPage } from "@/components/legal-page";
 import { LEGAL } from "@/lib/legal";
 
-export const metadata = { title: "Términos de uso · ClipFlow" };
+export const metadata = {
+  title: "Términos de uso · ClipFlow",
+  alternates: { languages: { es: "/terminos", en: "/en/terms" } },
+};
 
 const mail = <a href={`mailto:${LEGAL.email}`}>{LEGAL.email}</a>;
 
 export default function TermsPage() {
   return (
     <LegalPage
+      doc="terms"
       title="Términos de uso"
       intro={
         <p>

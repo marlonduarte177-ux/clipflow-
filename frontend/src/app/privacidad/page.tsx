@@ -1,13 +1,17 @@
 import { LegalPage } from "@/components/legal-page";
 import { LEGAL } from "@/lib/legal";
 
-export const metadata = { title: "Política de privacidad · ClipFlow" };
+export const metadata = {
+  title: "Política de privacidad · ClipFlow",
+  alternates: { languages: { es: "/privacidad", en: "/en/privacy" } },
+};
 
 const mail = <a href={`mailto:${LEGAL.email}`}>{LEGAL.email}</a>;
 
 export default function PrivacyPage() {
   return (
     <LegalPage
+      doc="privacy"
       title="Política de privacidad"
       intro={
         <p>

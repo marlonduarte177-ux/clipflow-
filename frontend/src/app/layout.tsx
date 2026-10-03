@@ -9,6 +9,7 @@ const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const instrumentSans = Instrument_Sans({ variable: "--font-instrument-sans", subsets: ["latin"], weight: "600" });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://clipflowia.com"),
   title: "ClipFlow",
   description: "Convierte videos largos en clips cortos para redes sociales.",
 };
