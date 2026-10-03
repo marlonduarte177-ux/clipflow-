@@ -154,7 +154,7 @@ export function ProjectsView() {
             placeholder="Ej.: Podcast semanal"
             className="min-w-0 flex-1 rounded-xl border border-line bg-background px-3 text-base outline-none focus:border-accent"
           />
-          <button type="submit" disabled={!name.trim()} className="h-11 rounded-xl bg-accent px-4 text-sm font-semibold text-black disabled:opacity-50">
+          <button type="submit" disabled={!name.trim()} className="h-11 rounded-xl bg-accent px-4 text-sm font-semibold text-on-accent disabled:opacity-50">
             Crear
           </button>
         </form>
@@ -169,7 +169,7 @@ export function ProjectsView() {
           </span>
           <p className="font-semibold">Todavía no hay videos aquí</p>
           <p className="max-w-xs text-sm text-muted">Sube un video largo y te damos sus mejores momentos listos para redes.</p>
-          <Link href="/dashboard/subir" className="mt-2 flex h-12 items-center gap-2 rounded-2xl bg-accent px-5 font-bold text-black">
+          <Link href="/dashboard/subir" className="mt-2 flex h-12 items-center gap-2 rounded-2xl bg-accent px-5 font-bold text-on-accent">
             <UploadIcon size={18} strokeWidth={2.4} />
             Subir video
           </Link>
@@ -241,7 +241,7 @@ function VideoState({ video, job }: { video: VideoDto; job: JobDto | undefined }
   if (job?.status === "completed") {
     return (
       <span className="flex items-center gap-2">
-        <span className="rounded-full bg-accent px-2.5 py-0.5 text-xs font-bold text-black">
+        <span className="rounded-full bg-accent px-2.5 py-0.5 text-xs font-bold text-on-accent">
           {video.clipCount ?? 0} {video.clipCount === 1 ? "clip listo" : "clips listos"}
         </span>
         <span className="text-xs text-muted">{formatDuration(video.durationSeconds)}</span>

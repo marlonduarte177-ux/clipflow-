@@ -16,7 +16,7 @@ export default function Home() {
           <Link href="/login" className="rounded-lg px-3 py-1.5 text-muted hover:text-foreground">
             Entrar
           </Link>
-          <Link href="/registro" className="rounded-lg bg-accent px-3 py-1.5 font-medium text-black">
+          <Link href="/registro" className="rounded-lg bg-accent px-3 py-1.5 font-medium text-on-accent">
             Crear cuenta
           </Link>
         </nav>
@@ -32,7 +32,7 @@ export default function Home() {
             subtítulos.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
-            <Link href="/registro" className="rounded-lg bg-accent px-5 py-3 font-medium text-black">
+            <Link href="/registro" className="rounded-lg bg-accent px-5 py-3 font-medium text-on-accent">
               Empezar
             </Link>
             <Link href="/login" className="rounded-lg border border-line px-5 py-3 text-muted hover:text-foreground">

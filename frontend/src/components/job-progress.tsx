@@ -118,7 +118,7 @@ export function JobProgressPanel({ job, subtitles, imported = false }: { job: Jo
         {steps.map((step) => (
           <li key={step.label} className="flex items-center gap-3">
             {step.state === "done" ? (
-              <span className="grid h-[26px] w-[26px] shrink-0 place-items-center rounded-full bg-accent text-black">
+              <span className="grid h-[26px] w-[26px] shrink-0 place-items-center rounded-full bg-accent text-on-accent">
                 <CheckIcon size={14} strokeWidth={3} />
               </span>
             ) : step.state === "active" ? (

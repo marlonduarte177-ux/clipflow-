@@ -133,7 +133,7 @@ export function ClipViewer({
               Clip {index + 1} de {clips.length}
             </span>
             {score != null ? (
-              <span className="rounded-full bg-accent px-3 py-1.5 text-[13px] font-bold text-black" title="Qué tan buen momento es, comparado con el resto del video">
+              <span className="rounded-full bg-accent px-3 py-1.5 text-[13px] font-bold text-on-accent" title="Qué tan buen momento es, comparado con el resto del video">
                 {score}
               </span>
             ) : (
@@ -151,7 +151,7 @@ export function ClipViewer({
           </div>
 
           <div className="grid grid-cols-2 gap-2.5">
-            <button onClick={download} disabled={busy !== null} className="flex h-[54px] items-center justify-center gap-2 rounded-2xl bg-accent text-base font-bold text-black disabled:opacity-60">
+            <button onClick={download} disabled={busy !== null} className="flex h-[54px] items-center justify-center gap-2 rounded-2xl bg-accent text-base font-bold text-on-accent disabled:opacity-60">
               <DownloadIcon size={20} strokeWidth={2.4} />
               {busy === "download" ? "Preparando…" : "Descargar"}
             </button>

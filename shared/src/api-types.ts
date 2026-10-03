@@ -4,6 +4,8 @@ export interface MeResponse {
   /** Identificador interno del usuario en ClipFlow. */
   userId: string;
   email: string | null;
+  /** Créditos disponibles, en minutos de video (1 crédito = 1 minuto). */
+  creditMinutes: number;
 }
 
 export interface ProjectDto {

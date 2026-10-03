@@ -227,7 +227,7 @@ export function UploadView() {
                 setSource(id);
                 setError("");
               }}
-              className={`h-10 rounded-xl text-sm font-semibold transition ${source === id ? "bg-accent text-black" : "text-muted hover:text-foreground"}`}
+              className={`h-10 rounded-xl text-sm font-semibold transition ${source === id ? "bg-accent text-on-accent" : "text-muted hover:text-foreground"}`}
             >
               {label}
             </button>
@@ -295,7 +295,7 @@ export function UploadView() {
         </div>
       ) : (
         <label className="flex cursor-pointer flex-col items-center gap-3 rounded-[22px] border-2 border-dashed border-[#2b3140] bg-surface px-6 py-10 text-center transition hover:border-accent">
-          <span className="grid h-14 w-14 place-items-center rounded-[18px] bg-accent text-black">
+          <span className="grid h-14 w-14 place-items-center rounded-[18px] bg-accent text-on-accent">
             <UploadIcon size={26} strokeWidth={2.4} />
           </span>
           <span className="text-base font-semibold">Elegir video</span>
@@ -343,7 +343,7 @@ export function UploadView() {
           <button
             onClick={source === "link" && !file ? () => onImportClick("clips") : onCreateClips}
             disabled={source === "link" && !file ? !link.trim() || importing : !file || confirmed || phase === "error"}
-            className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-accent text-[17px] font-bold text-black transition hover:brightness-105 disabled:opacity-50"
+            className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-accent text-[17px] font-bold text-on-accent transition hover:brightness-105 disabled:opacity-50"
           >
             {confirmed ? (phase === "uploading" ? "Empieza al terminar la subida" : "Empezando…") : "Crear clips"}
           </button>

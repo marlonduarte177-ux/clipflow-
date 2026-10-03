@@ -8,6 +8,8 @@ import { runWithAmplifyServerContext } from "./amplify-server";
 export interface SessionUser {
   userId: string;
   email: string;
+  /** Nombre guardado en Cognito (atributo "name"), si lo hay. */
+  name: string | null;
 }
 
 /** Devuelve el usuario de la sesión actual o redirige a /login. Usar en páginas protegidas. */
@@ -21,7 +23,7 @@ export async function requireUser(): Promise<SessionUser> {
         const userId = session.tokens?.accessToken.payload.sub;
         if (!userId) return null;
         const attributes = await fetchUserAttributes(contextSpec);
-        return { userId, email: attributes.email ?? "" };
+        return { userId, email: attributes.email ?? "", name: attributes.name?.trim() || null };
       } catch {
         return null;
       }
