@@ -123,7 +123,7 @@ export function jobRoutes(deps: { db: Database; auth: preHandlerHookHandler; que
       } else {
         job = await resetJobForRetry(db, existing.id, userId);
       }
-      if (!job) return sendError(reply, 409, "not_retryable", "Solo se pueden reintentar trabajos fallidos o cancelados.");
+      if (!job) return sendError(reply, 409, "not_retryable", "Solo se pueden reintentar trabajos fallidos, cancelados o que terminaron sin análisis de IA.");
       if (!(await enqueue(queue, job, request.log))) {
         return sendError(reply, 503, "queue_unavailable", "No se pudo enviar a procesar. Inténtalo en unos minutos.");
       }

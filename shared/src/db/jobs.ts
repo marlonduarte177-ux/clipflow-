@@ -182,12 +182,16 @@ export async function requestCancel(db: DbExecutor, jobId: string, userId: strin
   return row;
 }
 
-/** Reintento pedido por el usuario: solo para trabajos fallidos o cancelados. Reinicia los intentos. */
+/**
+ * Reintento pedido por el usuario: trabajos fallidos, cancelados o terminados sin análisis de IA.
+ * Reinicia los intentos.
+ */
 export async function resetJobForRetry(db: DbExecutor, jobId: string, userId: string): Promise<Job | undefined> {
   const [row] = await db
     .update(processingJobs)
     .set({
       status: "queued",
+      result: null,
       stage: null,
       progress: 0,
       attempts: 0,
@@ -204,7 +208,17 @@ export async function resetJobForRetry(db: DbExecutor, jobId: string, userId: st
       and(
         eq(processingJobs.id, jobId),
         eq(processingJobs.userId, userId),
-        or(eq(processingJobs.status, "failed"), eq(processingJobs.status, "cancelled")),
+        or(
+          eq(processingJobs.status, "failed"),
+          eq(processingJobs.status, "cancelled"),
+          // Terminó, pero la IA no pudo analizarlo (error de OpenAI, sin clave): se puede volver a
+          // analizar. Se usa el video guardado y, si ya se transcribió, la transcripción guardada.
+          and(
+            eq(processingJobs.status, "completed"),
+            sql`coalesce(${processingJobs.params}->>'downloadOnly', 'false') <> 'true'`,
+            sql`${processingJobs.result}->>'ai' in ('unavailable', 'disabled')`,
+          ),
+        ),
       ),
     )
     .returning();

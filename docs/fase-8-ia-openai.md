@@ -259,3 +259,13 @@ Guarda los segmentos con los tiempos de cada palabra, el idioma y el tramo de au
 - Cada reutilización ahorra la transcripción entera (~0,90 USD en un video de 2,5 h).
 - En el resultado del trabajo, `costs.transcriptionUsd` queda en 0 cuando se reutiliza, y el log dice
   "transcripción reutilizada (sin costo)".
+
+## Volver a analizar con IA (03/10/2026)
+
+Si un video terminó **sin análisis de IA** (la IA falló o faltaba la clave), la página del video muestra
+el botón **«Volver a analizar con IA»**.
+- Usa el **video ya guardado en S3**: no se vuelve a pegar el enlace ni a descargar.
+- Si la transcripción se había hecho, **se reutiliza la guardada**: solo se paga el análisis de texto.
+- Reinicia el mismo trabajo (`POST /jobs/:id/retry`): los clips nuevos reemplazan a los anteriores.
+- No aparece si el video no tiene habla o audio (volver a analizarlo no cambiaría nada), ni en
+  «Descargar solo el video».

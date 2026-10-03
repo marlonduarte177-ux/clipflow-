@@ -293,6 +293,20 @@ export function VideoView({ videoId }: { videoId: string }) {
       {job?.status === "completed" && !downloadReady ? (
         <section className="space-y-4">
           {result && result.ai !== "used" ? <AiNote result={result} /> : null}
+          {result && (result.ai === "unavailable" || result.ai === "disabled") ? (
+            <div className="space-y-1.5">
+              <button
+                onClick={() => jobAction("retry")}
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-accent font-bold text-on-accent"
+              >
+                <RetryIcon size={18} />
+                Volver a analizar con IA
+              </button>
+              <p className="text-center text-xs text-muted">
+                Usamos el video que ya está guardado{result.language ? " y su transcripción: no se vuelve a pagar" : ""}.
+              </p>
+            </div>
+          ) : null}
           {result?.chat === "used" ? (
             <p className="rounded-2xl border border-line bg-surface px-4 py-3 text-[13px] leading-[18px] text-muted">
               También se usó el chat del directo de Twitch para encontrar los momentos donde más reaccionó la gente.
