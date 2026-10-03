@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { LegalFooter } from "@/components/legal-page";
 import { Logo } from "@/components/ui";
 
 const STEPS = [
@@ -57,7 +58,7 @@ export default function Home() {
         </section>
       </main>
 
-      <footer className="border-t border-line px-4 py-6 text-sm text-muted sm:px-8">© ClipFlow</footer>
+      <LegalFooter />
     </div>
   );
 }

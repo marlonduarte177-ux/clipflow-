@@ -48,8 +48,19 @@ Al pasarse, la API responde 429 `daily_limit` con un mensaje claro. Se revisa al
 2. **Actions → Deploy → staging**.
 3. Llegará un correo de **AWS Notifications** → **Confirm subscription**. Sin confirmar, no llegan alertas.
 
+### Páginas legales (públicas)
+
+- `/terminos`, `/privacidad` y `/reembolsos`, enlazadas desde el pie de la página de inicio, el registro
+  («Al crear tu cuenta aceptas…») y la página Cuenta. Los datos (responsable, país, correo, precios y
+  condiciones de reembolso) están en un solo lugar: `frontend/src/lib/legal.ts`.
+- Responsable: Marlon Duarte, Costa Rica. Contacto: soporte@clipflowia.com.
+- **Reembolso:** dentro de los 7 días del cobro, si se procesaron como máximo 15 minutos de video desde ese
+  cobro. Los minutos de un procesamiento que falla se devuelven (se implementa con los planes).
+- Incluyen el texto que pide Paddle como comerciante registrado (Merchant of Record).
+- «Ayuda y soporte» y «Sugerir una función» abren un correo a soporte@clipflowia.com.
+
 ## Pendiente
 
-- **Términos de uso, Política de privacidad y Política de reembolsos** publicadas (las pide Paddle).
+- Revisar con Paddle si aceptan la política de 7 días / 15 minutos y si piden las páginas en inglés.
 - **Entorno de producción separado** o usar el actual como producción (por decidir).
 - **Planes y pagos** con Paddle (ver `docs/planes-y-creditos.md`).
