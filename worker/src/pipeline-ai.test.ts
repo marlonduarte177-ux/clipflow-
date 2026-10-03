@@ -40,6 +40,7 @@ class FakeAI implements AIAnalysisProvider {
   readonly name = "fake";
   receivedChunks: AudioChunk[] = [];
   analyzeCalls = 0;
+  analyzeOptions: { targetClipSeconds?: number } | undefined;
   constructor(
     private readonly fail = false,
     private readonly segments: TranscriptSegment[] = SEGMENTS,
@@ -57,8 +58,9 @@ class FakeAI implements AIAnalysisProvider {
     this.receivedChunks = chunks;
     return { segments: this.segments, language: "spanish", usage: { audioSeconds: 40, estimatedCostUsd: 0.004 } };
   }
-  async analyze() {
+  async analyze(_segments: TranscriptSegment[], _duration: number, options?: { targetClipSeconds?: number }) {
     this.analyzeCalls++;
+    this.analyzeOptions = options;
     if (this.failAnalysis) throw new AIProviderError("OpenAI devolvió JSON inválido", true);
     // El contenido importante está en una parte SILENCIOSA (2–12 s): sin IA no se elegiría.
     return {
@@ -152,15 +154,19 @@ describe("procesamiento con IA", () => {
     const deps = { ...makeDeps(db, root, path.join(root, "work")), ai: fakeAI };
     const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
 
-    expect(result).toMatchObject({ ai: "used", language: "spanish" });
+    expect(result).toMatchObject({ ai: "used", language: "spanish", selection: "ai" });
+    // La IA sabe qué largo eligió el usuario (guía) y decide el momento.
+    expect(fakeAI.analyzeOptions?.targetClipSeconds).toBeGreaterThan(0);
     // Solo se envía audio, en trozos, que cubren el video.
     const total = fakeAI.receivedChunks.reduce((s, c) => s + c.durationSeconds, 0);
     expect(total).toBeGreaterThan(38);
     expect(fakeAI.receivedChunks.every((c) => c.path.endsWith(".mp3"))).toBe(true);
 
     const clipRows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
+    // El clip es el momento de la IA (2–12 s), llevado hacia afuera a frases completas: 0–15 s.
     const hook = clipRows.find((c) => c.startSeconds <= 2 && c.endSeconds >= 12);
     expect(hook).toBeDefined();
+    expect([hook!.startSeconds, hook!.endSeconds]).toEqual([0, 15]);
     expect(hook!.scoreBreakdown).toHaveProperty("speech");
     // Bordes en frases completas (múltiplos de 5 s en la transcripción de prueba).
     for (const c of clipRows) {

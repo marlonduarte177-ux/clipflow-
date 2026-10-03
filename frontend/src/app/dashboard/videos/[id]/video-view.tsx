@@ -176,7 +176,7 @@ export function VideoView({ videoId }: { videoId: string }) {
   }
   const summary = (downloadReady ? [formatBytes(video.sizeBytes), formatDuration(video.durationSeconds), origin] : [
     job?.status === "completed" ? t.video.clips(counts.all) : video.sizeBytes > 0 ? formatBytes(video.sizeBytes) : origin,
-    job?.params.clipDurationSeconds ? t.video.of(job.params.clipDurationSeconds) : formatDuration(video.durationSeconds),
+    result?.selection === "ai" ? t.video.aiPicked : job?.params.clipDurationSeconds ? t.video.of(job.params.clipDurationSeconds) : formatDuration(video.durationSeconds),
     result?.ai === "used" && style !== "none" ? t.video.subtitlesIn(language ?? t.video.itsLanguage) : null,
   ])
     .filter(Boolean)

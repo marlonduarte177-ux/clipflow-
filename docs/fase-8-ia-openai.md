@@ -269,3 +269,33 @@ el botón **«Volver a analizar con IA»**.
 - Reinicia el mismo trabajo (`POST /jobs/:id/retry`): los clips nuevos reemplazan a los anteriores.
 - No aparece si el video no tiene habla o audio (volver a analizarlo no cambiaría nada), ni en
   «Descargar solo el video».
+
+## La IA decide los momentos en videos con voz (03/10/2026)
+
+**Antes:** la IA marcaba sus momentos, pero eso era solo una señal más (35 %) mezclada con volumen, acción y
+movimiento, y el clip siempre duraba exactamente lo elegido. Un dato buenísimo dicho en voz baja podía
+quedar fuera, y una historia de 50 s se cortaba a 30 s.
+
+**Ahora**, en videos con voz y análisis de IA (podcasts, entrevistas, streams hablados, tutoriales):
+- **Cada clip es un momento que eligió la IA, con su propio inicio y final**
+  (`selectAiMoments`, `shared/src/analysis/ai-moments.ts`).
+- **Instrucción a la IA:** busca sobre todo datos curiosos, consejos y explicaciones, opiniones fuertes,
+  anécdotas con cierre, frases memorables, humor y reacciones. Ignora saludos, pedidos de suscripción,
+  lectura de donaciones y relleno. Cada momento empieza donde arranca la idea y termina cuando se cierra.
+- **Largo:** la duración elegida es una **guía**.
+  - Con 30 s, la IA apunta a unos 30 s, entre 15 y 60 s si la idea lo necesita. En general, de la mitad al
+    doble, siempre entre 8 y 90 s (`aiClipBounds`).
+  - Lo que se pase de esos límites se alarga o se recorta.
+- **Bordes:** se mueven **hacia afuera** hasta frases completas (máx. 4 s), así nunca se recorta la idea.
+- **Orden y puntaje:** 80 % la fuerza que le dio la IA y 20 % la reacción (volumen, acción, movimiento,
+  chat de Twitch, imágenes). La reacción desempata, pero no manda.
+  - Se descartan los momentos con fuerza menor a 0,5.
+  - El tope es de 15 clips, sin solaparse.
+- **Momentos sin habla:** si sobra lugar, se suman hasta 3 tramos muy fuertes solo por señales donde casi
+  no se habla (p. ej. una jugada con gritos), siempre por debajo de los de la IA. En un podcast (todo
+  hablado) no se agregan.
+- **Sin voz o sin IA** (gameplay, música, IA caída): sigue el sistema por señales con ventanas del largo
+  elegido.
+- **Resultado:** `result.selection` dice `"ai"` o `"signals"`. En la web, el resumen del video dice
+  «momentos elegidos por la IA».
+- **Costo:** igual que antes: la IA ya hacía este análisis; ahora se aprovecha mejor.

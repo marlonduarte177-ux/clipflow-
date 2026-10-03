@@ -76,3 +76,12 @@ describe("visión", () => {
     expect(bestFrameLabel(frames, 8, 10)).toBeNull(); // 0.4: no merece título
   });
 });
+
+describe("snapToSentences hacia afuera (momentos de la IA)", () => {
+  it("empieza en la frase de antes y termina en la de después, sin recortar la idea", () => {
+    const segments = [0, 5, 10, 15].map((s) => ({ startSeconds: s, endSeconds: s + 5, text: "x" }));
+    const moment = { startSeconds: 2, endSeconds: 12, score: 1, breakdown: {} };
+    expect(snapToSentences(moment, segments, { videoDurationSeconds: 20 })).toMatchObject({ startSeconds: 0, endSeconds: 10 });
+    expect(snapToSentences(moment, segments, { videoDurationSeconds: 20, outward: true })).toMatchObject({ startSeconds: 0, endSeconds: 15 });
+  });
+});

@@ -69,7 +69,12 @@ export interface AIAnalysisProvider {
   /** Transcribe el audio con tiempos por frase. */
   transcribe(chunks: AudioChunk[]): Promise<{ segments: TranscriptSegment[]; language: string | null; usage: AIUsage }>;
   /** Lee la transcripción y marca los mejores momentos por su contenido. */
-  analyze(segments: TranscriptSegment[], durationSeconds: number): Promise<{ highlights: ContentHighlight[]; usage: AIUsage }>;
+  /** `targetClipSeconds`: duración que eligió el usuario, como guía del largo de cada momento. */
+  analyze(
+    segments: TranscriptSegment[],
+    durationSeconds: number,
+    options?: { targetClipSeconds?: number },
+  ): Promise<{ highlights: ContentHighlight[]; usage: AIUsage }>;
   /** Analiza fotogramas (opcional: solo proveedores con visión). */
   analyzeFrames?(
     sheets: FrameSheet[],
