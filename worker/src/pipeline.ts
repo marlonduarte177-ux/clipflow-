@@ -8,6 +8,7 @@ import {
   fullTranscriptKey,
   transcriptCacheKey,
   segmentsForRange,
+  selectAiMoments,
   selectMoments,
   snapToSentences,
   speechSignalFromHighlights,
@@ -394,11 +395,17 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     //    La IA de imágenes prepara sus hojas en paralelo, pero no envía nada a OpenAI hasta que
     //    termina el análisis de texto: comparten el límite por minuto de la cuenta y el análisis de
     //    texto (el que elige los momentos) tiene prioridad.
+    // Duración elegida: guía a la IA sobre el largo de cada momento y fija el de los clips por señales.
+    const params = job.params as JobParams;
+    const clipDuration = deps.product.clipDurationsSeconds.includes(params.clipDurationSeconds ?? -1)
+      ? params.clipDurationSeconds!
+      : deps.product.defaultClipDurationSeconds;
     const aiPromise = runAI(deps, info, input, dir, controller.signal, async (f) => void (await report("ai")(f)), {
       userId: job.userId,
       videoId: video.id,
       jobId: job.id,
       sourceUrl: video.sourceUrl,
+      targetClipSeconds: clipDuration,
     });
     const chatPromise = readTwitchChat(deps, video.sourceUrl, info.durationSeconds, controller.signal, job.id);
     const [raw, ai, vision, chat] = await Promise.all([
@@ -424,22 +431,37 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     await progress("analyzing", 1, true);
 
     step = "elegir los momentos";
-    // 3. Elegir momentos con el score configurable (sin forzar una cantidad).
-    const params = job.params as JobParams;
-    const clipDuration = deps.product.clipDurationsSeconds.includes(params.clipDurationSeconds ?? -1)
-      ? params.clipDurationSeconds!
-      : deps.product.defaultClipDurationSeconds;
-    const moments = selectMoments({
-      durationSeconds: info.durationSeconds,
-      signals,
-      weights: deps.product.scoreWeights,
-      clipDurationSeconds: clipDuration,
-      minScore: deps.product.minClipScore,
-      maxClips: deps.product.maxClipsPerVideo,
-    });
+    // 3. Elegir momentos (sin forzar una cantidad):
+    //    - con voz y análisis de IA (podcasts, entrevistas, streams hablados), la IA decide: cada clip es
+    //      un momento que ella eligió, con su inicio y su final; las demás señales solo desempatan;
+    //    - sin voz o sin IA (gameplay, música, IA caída), score por señales con ventanas del largo elegido.
+    const aiMoments = ai.status === "used" && ai.highlights?.length
+      ? selectAiMoments({
+          highlights: ai.highlights,
+          durationSeconds: info.durationSeconds,
+          signals,
+          weights: deps.product.scoreWeights,
+          clipDurationSeconds: clipDuration,
+          maxClips: deps.product.maxClipsPerVideo,
+          segments: ai.segments,
+        })
+      : [];
+    const selection = aiMoments.length ? "ai" : "signals";
+    const moments = aiMoments.length
+      ? aiMoments
+      : selectMoments({
+          durationSeconds: info.durationSeconds,
+          signals,
+          weights: deps.product.scoreWeights,
+          clipDurationSeconds: clipDuration,
+          minScore: deps.product.minClipScore,
+          maxClips: deps.product.maxClipsPerVideo,
+        });
     // Con transcripción: el clip empieza y termina en frases completas.
     const finalMoments = ai.segments.length
-      ? moments.map((m) => snapToSentences(m, ai.segments, { videoDurationSeconds: info.durationSeconds }))
+      ? moments.map((m) =>
+          snapToSentences(m, ai.segments, { videoDurationSeconds: info.durationSeconds, outward: selection === "ai" }),
+        )
       : moments;
     let titles: (string | null)[] = finalMoments.map(() => null);
     if (deps.ai && ai.segments.length && finalMoments.length) {
@@ -454,7 +476,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     // Sin título de la transcripción (p. ej. gameplay sin voz): lo que se ve en el mejor fotograma.
     titles = titles.map((t, i) => t ?? bestFrameLabel(vision.frames, finalMoments[i]!.startSeconds, finalMoments[i]!.endSeconds));
     deps.log.info(
-      { jobId: job.id, moments: finalMoments.length, clipDuration, ai: ai.status, vision: vision.status, chat: chat.status },
+      { jobId: job.id, moments: finalMoments.length, selection, clipDuration, ai: ai.status, vision: vision.status, chat: chat.status },
       "momentos elegidos",
     );
     await progress("detecting_moments", 1, true);
@@ -692,6 +714,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     const usd = (n: number) => Math.round(n * 1_000_000) / 1_000_000;
     return {
       clipCount: outputs.length,
+      selection,
       ai: ai.status,
       ...(ai.reason ? { aiReason: ai.reason } : {}),
       language: ai.language,
@@ -829,7 +852,7 @@ async function runAI(
   dir: string,
   signal: AbortSignal,
   onProgress: (fraction: number) => Promise<void>,
-  ids: { userId: string; videoId: string; jobId: string; sourceUrl?: string | null },
+  ids: { userId: string; videoId: string; jobId: string; sourceUrl?: string | null; targetClipSeconds?: number },
 ): Promise<AIOutcome> {
   const empty = { segments: [], language: null, usage: {}, transcribeCostUsd: 0 };
   if (!deps.ai) return { ...empty, status: "disabled", reason: deps.aiDisabledReason ?? "IA no configurada" };
@@ -909,7 +932,7 @@ async function runAI(
       };
     }
     step = "el análisis de momentos";
-    const analysis = await deps.ai.analyze(transcript.segments, info.durationSeconds);
+    const analysis = await deps.ai.analyze(transcript.segments, info.durationSeconds, { targetClipSeconds: ids.targetClipSeconds });
     const usage: AIUsage = { ...transcript.usage };
     const transcribeCostUsd = transcript.usage.estimatedCostUsd ?? 0;
     addUsage(usage, analysis.usage);

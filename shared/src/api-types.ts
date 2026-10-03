@@ -115,6 +115,8 @@ export interface JobResult {
   ai: "used" | "no_speech" | "disabled" | "unavailable" | "no_audio";
   aiReason?: string;
   language?: string | null;
+  /** Cómo se eligieron los momentos: "ai" = los eligió la IA (videos con voz); "signals" = por volumen, acción y movimiento. */
+  selection?: "ai" | "signals";
   /** Análisis de imágenes con IA (experimental). */
   vision?: "used" | "disabled" | "unavailable";
   /** Por qué no se pudo usar el análisis de imágenes, o si quedó incompleto. */

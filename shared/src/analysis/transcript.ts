@@ -24,7 +24,12 @@ export function speechSignalFromHighlights(highlights: ContentHighlight[], durat
 export function snapToSentences(
   moment: Moment,
   segments: TranscriptSegment[],
-  options: { maxShiftSeconds?: number; videoDurationSeconds: number },
+  options: {
+    maxShiftSeconds?: number;
+    videoDurationSeconds: number;
+    /** Solo hacia afuera: empieza en la frase de antes y termina en la de después (no recorta la idea). */
+    outward?: boolean;
+  },
 ): Moment {
   const maxShift = options.maxShiftSeconds ?? 4;
   if (segments.length === 0) return moment;
@@ -36,8 +41,16 @@ export function snapToSentences(
       return best === null || Math.abs(c - target) < Math.abs(best - target) ? c : best;
     }, null);
 
-  const start = Math.max(0, nearest(moment.startSeconds, starts) ?? moment.startSeconds);
-  const end = Math.min(options.videoDurationSeconds, nearest(moment.endSeconds, ends) ?? moment.endSeconds);
+  const outwardStart = (target: number) => nearest(target, starts.filter((s) => s <= target + 0.25));
+  const outwardEnd = (target: number) => nearest(target, ends.filter((e) => e >= target - 0.25));
+  const start = Math.max(
+    0,
+    (options.outward ? outwardStart(moment.startSeconds) : null) ?? nearest(moment.startSeconds, starts) ?? moment.startSeconds,
+  );
+  const end = Math.min(
+    options.videoDurationSeconds,
+    (options.outward ? outwardEnd(moment.endSeconds) : null) ?? nearest(moment.endSeconds, ends) ?? moment.endSeconds,
+  );
   if (end - start < 3) return moment; // ajuste absurdo: se deja como estaba
   return { ...moment, startSeconds: round3(start), endSeconds: round3(end) };
 }

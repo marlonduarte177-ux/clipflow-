@@ -111,7 +111,7 @@ const es = {
   },
   options: {
     duration: "Duración de cada clip",
-    durationHint: "Aproximada: se ajusta unos segundos para no cortar frases a la mitad.",
+    durationHint: "Aproximada: si hay voz, la IA ajusta el largo para que cada idea quede completa.",
     subtitles: "Subtítulos en el video",
     highlight: "Resaltado",
     classic: "Clásico",
@@ -231,6 +231,7 @@ const es = {
     from: (host: string) => `desde ${host}`,
     clips: (n: number) => `${n} clips`,
     of: (s: number) => `de ${s} s`,
+    aiPicked: "momentos elegidos por la IA",
     subtitlesIn: (language: string) => `subtítulos en ${language.toLowerCase()}`,
     itsLanguage: "su idioma",
     backToVideos: "Volver a Mis videos",
@@ -462,7 +463,7 @@ const en: Messages = {
   },
   options: {
     duration: "Length of each clip",
-    durationHint: "Approximate: adjusted by a few seconds so sentences aren't cut in half.",
+    durationHint: "Approximate: when there is speech, the AI adjusts the length so each idea is complete.",
     subtitles: "Captions on the video",
     highlight: "Highlight",
     classic: "Classic",
@@ -582,6 +583,7 @@ const en: Messages = {
     from: (host: string) => `from ${host}`,
     clips: (n: number) => `${n} clips`,
     of: (s: number) => `${s} s each`,
+    aiPicked: "moments picked by AI",
     subtitlesIn: (language: string) => `captions in ${language}`,
     itsLanguage: "its language",
     backToVideos: "Back to My videos",
