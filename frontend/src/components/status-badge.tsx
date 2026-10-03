@@ -2,7 +2,7 @@ import type { VideoStatus } from "@clipflow/shared";
 
 const LABELS: Record<VideoStatus, { text: string; className: string }> = {
   pending_upload: { text: "Subida sin terminar", className: "border-yellow-500/40 text-yellow-200" },
-  importing: { text: "Descargando", className: "border-accent/40 text-accent" },
+  importing: { text: "Importando", className: "border-accent/40 text-accent" },
   uploaded: { text: "Subido", className: "border-accent/40 text-accent" },
   ready: { text: "Listo", className: "border-accent/40 text-accent" },
   rejected: { text: "Rechazado", className: "border-red-500/40 text-red-300" },

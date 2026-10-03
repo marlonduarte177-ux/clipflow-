@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ClipDto, ClipListResponse, JobDto, JobListResponse, SubtitleStyle, VideoDownloadResponse, VideoDto } from "@clipflow/shared";
+import { FEATURES, type ClipDto, type ClipListResponse, type JobDto, type JobListResponse, type SubtitleStyle, type VideoDownloadResponse, type VideoDto } from "@clipflow/shared";
 import { ClipViewer, FullTranscript, scoreOf } from "@/components/clip-viewer";
 import { DEFAULT_DURATION, DurationPicker, SubtitlePicker } from "@/components/clip-options";
 import { BackIcon, CheckIcon, DownloadIcon, RetryIcon, ShareIcon, TrashIcon } from "@/components/icons";
@@ -239,6 +239,8 @@ export function VideoView({ videoId }: { videoId: string }) {
 
       {downloadReady ? (
         <div className="mx-auto max-w-xl space-y-7">
+          {/* Con «Descargar solo el video» desactivado, de los videos ya bajados solo se pueden crear clips. */}
+          {FEATURES.downloadOnly ? (
           <div className="space-y-4 rounded-[22px] border border-line bg-surface p-5">
             <div className="flex items-center gap-3">
               <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-accent text-on-accent">
@@ -271,11 +273,12 @@ export function VideoView({ videoId }: { videoId: string }) {
             </div>
             {note ? <p className="text-xs text-muted">{note}</p> : null}
           </div>
+          ) : null}
 
           <div className="space-y-5">
             <div className="space-y-1">
               <h2 className="text-lg font-bold">¿Quieres clips de este video?</h2>
-              <p className="text-sm text-muted">Usamos el video que ya descargamos: no hay que volver a pegar el enlace.</p>
+              <p className="text-sm text-muted">Usamos el video que ya tenemos: no hay que volver a pegar el enlace.</p>
             </div>
             <DurationPicker value={clipSeconds} onChange={setClipSeconds} />
             <SubtitlePicker value={subtitleStyle} onChange={setSubtitleStyle} />

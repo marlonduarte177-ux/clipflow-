@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   checkImportUrl,
   DEFAULT_PRODUCT_CONFIG,
+  FEATURES,
   resolveVideoMimeType,
   type ImportVideoResponse,
   type ProjectDto,
@@ -254,7 +255,8 @@ export function UploadView() {
             placeholder="https://www.tiktok.com/@…/video/…"
             className="h-12 w-full rounded-xl border border-line bg-background px-3.5 text-base outline-none focus:border-accent"
           />
-          {/* Otra acción con el mismo enlace: bajar el video tal cual, sin clips. */}
+          {/* Otra acción con el mismo enlace: bajar el video tal cual, sin clips (si está activada). */}
+          {FEATURES.downloadOnly ? (
           <button
             type="button"
             onClick={() => onImportClick("download")}
@@ -264,9 +266,10 @@ export function UploadView() {
             <DownloadIcon size={18} strokeWidth={2.4} />
             Descargar solo el video
           </button>
+          ) : null}
           <p className="text-xs leading-[17px] text-muted">
-            TikTok, Instagram, Facebook, Kick o Twitch (clips y videos guardados), o un enlace directo a un archivo de video. Lo descargamos nosotros: no gasta tus
-            datos. Hasta {formatDuration(LIMITS.maxDurationSeconds)}. Para YouTube, descarga el video y súbelo como archivo.
+            TikTok, Instagram, Facebook, Kick o Twitch (clips y videos guardados), o un enlace directo a un archivo de video. Lo procesamos en nuestros servidores: no gasta
+            tus datos. Hasta {formatDuration(LIMITS.maxDurationSeconds)}. Para YouTube, descarga el video y súbelo como archivo.
           </p>
         </div>
       ) : file ? (
@@ -349,7 +352,7 @@ export function UploadView() {
           </button>
           <p className="text-center text-xs text-muted">
             {source === "link" && !file
-              ? "Lo descargamos nosotros: puedes cerrar la página cuando empiece."
+              ? "Lo procesamos nosotros: puedes cerrar la página cuando empiece."
               : file && phase === "uploading"
                 ? "No bloquees el celular hasta que termine de subir."
                 : "Puedes cerrar la página cuando empiece el procesamiento."}
