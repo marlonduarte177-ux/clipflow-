@@ -220,7 +220,7 @@ export function VideoView({ videoId }: { videoId: string }) {
             {job.status === "failed" ? (job.params.downloadOnly ? "No se pudo descargar el video" : "No se pudo procesar el video") : "Procesamiento cancelado"}
           </p>
           {job.errorMessage ? <p className="text-sm text-muted">{job.errorMessage}</p> : null}
-          <button onClick={() => jobAction("retry")} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-accent font-bold text-black">
+          <button onClick={() => jobAction("retry")} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-accent font-bold text-on-accent">
             <RetryIcon size={18} />
             Reintentar
           </button>
@@ -231,7 +231,7 @@ export function VideoView({ videoId }: { videoId: string }) {
         <div className="mx-auto max-w-xl space-y-6">
           <DurationPicker value={clipSeconds} onChange={setClipSeconds} />
           <SubtitlePicker value={subtitleStyle} onChange={setSubtitleStyle} />
-          <button onClick={startProcessing} className="h-14 w-full rounded-2xl bg-accent text-[17px] font-bold text-black">
+          <button onClick={startProcessing} className="h-14 w-full rounded-2xl bg-accent text-[17px] font-bold text-on-accent">
             Crear clips
           </button>
         </div>
@@ -241,7 +241,7 @@ export function VideoView({ videoId }: { videoId: string }) {
         <div className="mx-auto max-w-xl space-y-7">
           <div className="space-y-4 rounded-[22px] border border-line bg-surface p-5">
             <div className="flex items-center gap-3">
-              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-accent text-black">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-accent text-on-accent">
                 <CheckIcon size={20} strokeWidth={3} />
               </span>
               <div className="min-w-0">
@@ -253,7 +253,7 @@ export function VideoView({ videoId }: { videoId: string }) {
               <button
                 onClick={downloadOriginal}
                 disabled={saving !== null}
-                className="flex h-[54px] items-center justify-center gap-2 rounded-2xl bg-accent text-base font-bold text-black disabled:opacity-60"
+                className="flex h-[54px] items-center justify-center gap-2 rounded-2xl bg-accent text-base font-bold text-on-accent disabled:opacity-60"
               >
                 <DownloadIcon size={20} strokeWidth={2.4} />
                 {saving === "download" ? "Preparando…" : "Descargar"}
@@ -279,7 +279,7 @@ export function VideoView({ videoId }: { videoId: string }) {
             </div>
             <DurationPicker value={clipSeconds} onChange={setClipSeconds} />
             <SubtitlePicker value={subtitleStyle} onChange={setSubtitleStyle} />
-            <button onClick={startProcessing} className="h-14 w-full rounded-2xl bg-accent text-[17px] font-bold text-black">
+            <button onClick={startProcessing} className="h-14 w-full rounded-2xl bg-accent text-[17px] font-bold text-on-accent">
               Crear clips
             </button>
           </div>
@@ -313,7 +313,7 @@ export function VideoView({ videoId }: { videoId: string }) {
                 aria-selected={filter === id}
                 onClick={() => setFilter(id)}
                 className={`h-9 shrink-0 rounded-full border px-3.5 text-[13px] ${
-                  filter === id ? "border-accent bg-accent font-semibold text-black" : "border-line bg-surface font-medium"
+                  filter === id ? "border-accent bg-accent font-semibold text-on-accent" : "border-line bg-surface font-medium"
                 }`}
               >
                 {label}
@@ -348,7 +348,7 @@ export function VideoView({ videoId }: { videoId: string }) {
                           />
                         ) : null}
                         {score != null ? (
-                          <span className="absolute left-2.5 top-2.5 rounded-full bg-accent px-2 py-0.5 text-xs font-bold text-black">{score}</span>
+                          <span className="absolute left-2.5 top-2.5 rounded-full bg-accent px-2 py-0.5 text-xs font-bold text-on-accent">{score}</span>
                         ) : null}
                         {clip.status === "approved" ? (
                           <span className="absolute right-2.5 top-2.5 grid h-6 w-6 place-items-center rounded-full bg-background text-accent">

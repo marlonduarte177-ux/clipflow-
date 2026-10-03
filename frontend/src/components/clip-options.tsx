@@ -29,7 +29,7 @@ export function DurationPicker({
             aria-pressed={value === d}
             onClick={() => onChange(d)}
             className={`h-11 rounded-xl border text-sm font-semibold transition disabled:opacity-50 ${
-              value === d ? "border-accent bg-accent text-black" : "border-line bg-surface text-foreground hover:border-[#3a4256]"
+              value === d ? "border-accent bg-accent text-on-accent" : "border-line bg-surface text-foreground hover:border-[#3a4256]"
             }`}
           >
             {d} s

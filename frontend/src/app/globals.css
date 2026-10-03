@@ -1,15 +1,17 @@
 @import "tailwindcss";
 
-/* Identidad de ClipFlow: oscuro, minimalista, acento lima. */
+/* Identidad de ClipFlow: oscuro, minimalista, acento naranja. */
 /* La página ya es oscura: los navegadores no deben aplicar su propio "modo oscuro/claro". */
 :root {
   color-scheme: dark;
-  --background: #0b0d12;
+  --background: #0a0c10;
   --surface: #12151c;
   --line: #232835;
   --foreground: #eef0f4;
   --muted: #8b93a7;
-  --accent: #c6f432;
+  --accent: #ff5a1f;
+  /* Texto e íconos encima del naranja. */
+  --on-accent: #0a0c10;
 }
 
 @theme inline {
@@ -19,7 +21,9 @@
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
   --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
   --font-sans: var(--font-geist-sans);
+  --font-brand: var(--font-instrument-sans);
 }
 
 body {

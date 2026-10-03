@@ -69,7 +69,7 @@ export function RightsDialog({
             type="button"
             onClick={onConfirm}
             disabled={busy}
-            className="h-12 rounded-2xl bg-accent text-[15px] font-bold text-black disabled:opacity-40"
+            className="h-12 rounded-2xl bg-accent text-[15px] font-bold text-on-accent disabled:opacity-40"
           >
             {busy ? (action === "descargar" ? "Descargando…" : "Importando…") : accept}
           </button>

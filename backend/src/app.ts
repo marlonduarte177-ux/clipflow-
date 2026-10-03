@@ -1,7 +1,8 @@
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import type { MeResponse, ProductConfig } from "@clipflow/shared";
-import type { Database } from "@clipflow/shared/db";
+import { getCreditBalance, type Database } from "@clipflow/shared/db";
+import { accountRoutes } from "./account.js";
 import type { ApiConfig } from "./config.js";
 import { requireAuth, type EmailLookup, type TokenVerifier } from "./auth.js";
 import { clipRoutes } from "./clips.js";
@@ -88,8 +89,10 @@ export async function buildApp({ config, verifyToken, lookupEmail, db, storage, 
 
   // Protegido: devuelve el usuario de ClipFlow asociado al token.
   app.get("/me", { preHandler: auth }, async (request): Promise<MeResponse> => {
-    return { userId: request.user!.id, email: request.user!.email };
+    const creditMinutes = await getCreditBalance(db, request.user!.id);
+    return { userId: request.user!.id, email: request.user!.email, creditMinutes };
   });
+  await app.register(accountRoutes({ db, auth, storage }));
 
   await app.register(projectRoutes({ db, auth, storage }));
   await app.register(

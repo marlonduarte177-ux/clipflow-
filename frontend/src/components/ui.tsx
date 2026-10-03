@@ -1,16 +1,7 @@
-import Link from "next/link";
 import type { ComponentProps, ReactNode } from "react";
+import { Logo } from "./logo";
 
-export function Logo() {
-  return (
-    <Link href="/" className="flex items-center gap-2 text-lg font-semibold tracking-tight">
-      <span className="grid h-8 w-8 place-items-center rounded-lg bg-accent text-sm font-bold text-black">
-        CF
-      </span>
-      ClipFlow
-    </Link>
-  );
-}
+export { Logo };
 
 export function AuthCard({ title, subtitle, children }: { title: string; subtitle?: string; children: ReactNode }) {
   return (
@@ -44,7 +35,7 @@ export function SubmitButton({ loading, children }: { loading: boolean; children
     <button
       type="submit"
       disabled={loading}
-      className="w-full rounded-lg bg-accent px-4 py-2.5 font-medium text-black transition hover:brightness-110 disabled:opacity-60"
+      className="w-full rounded-lg bg-accent px-4 py-2.5 font-medium text-on-accent transition hover:brightness-110 disabled:opacity-60"
     >
       {loading ? "Un momento…" : children}
     </button>

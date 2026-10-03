@@ -9,8 +9,8 @@ const isAccount = (path: string) => path.startsWith("/dashboard/cuenta");
 const isUpload = (path: string) => path.startsWith("/dashboard/subir");
 
 /**
- * Barra inferior en el celular: "Mis videos", "Subir video" (botón verde con la forma del logo)
- * y "Cuenta". La sección actual se marca en verde.
+ * Barra inferior en el celular: "Mis videos", "Subir video" (botón naranja)
+ * y "Cuenta". La sección actual se marca en naranja.
  */
 export function BottomNav() {
   const path = usePathname();
@@ -32,7 +32,7 @@ export function BottomNav() {
         aria-current={isUpload(path) ? "page" : undefined}
         className="-mt-5 flex w-20 flex-col items-center gap-1.5 text-[11px] font-semibold text-foreground"
       >
-        <span className="grid h-[58px] w-[58px] place-items-center rounded-[18px] bg-accent text-black shadow-[0_0_0_5px_#0e1118]">
+        <span className="grid h-[58px] w-[58px] place-items-center rounded-[18px] bg-accent text-on-accent shadow-[0_0_0_5px_#0e1118]">
           <UploadIcon size={26} strokeWidth={2.4} />
         </span>
         Subir video
@@ -59,7 +59,7 @@ export function TopNav() {
       <Link href="/dashboard/cuenta" className={link(isAccount(path))}>
         Cuenta
       </Link>
-      <Link href="/dashboard/subir" className="ml-2 flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-black">
+      <Link href="/dashboard/subir" className="ml-2 flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-on-accent">
         <UploadIcon size={18} strokeWidth={2.4} />
         Subir video
       </Link>

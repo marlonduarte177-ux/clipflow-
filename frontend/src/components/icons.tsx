@@ -128,3 +128,55 @@ export const BlockIcon = (p: IconProps) => (
     <path d="M5.6 5.6l12.8 12.8" />
   </Icon>
 );
+export const MailIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="5" width="18" height="14" rx="2.5" />
+    <path d="M4 7l8 6 8-6" />
+  </Icon>
+);
+export const CrownIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3.5 8l4.5 4 4-6 4 6 4.5-4-2 10h-13z" />
+  </Icon>
+);
+export const BoltIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M13 3L5 13.5h6L10 21l8-10.5h-6z" />
+  </Icon>
+);
+export const LinkIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M10 14a4 4 0 005.7 0l3.1-3.1a4 4 0 00-5.7-5.7L11.6 6.7" />
+    <path d="M14 10a4 4 0 00-5.7 0l-3.1 3.1a4 4 0 005.7 5.7l1.5-1.5" />
+  </Icon>
+);
+export const HelpIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M9.6 9.3a2.5 2.5 0 014.8.9c0 1.7-2.4 2.2-2.4 3.6" />
+    <path d="M12 17.2h.01" />
+  </Icon>
+);
+export const BulbIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M9 18h6M10 21h4" />
+    <path d="M12 3a6 6 0 00-3.6 10.8c.7.6 1.1 1.3 1.1 2.2h5c0-.9.4-1.6 1.1-2.2A6 6 0 0012 3z" />
+  </Icon>
+);
+export const ShieldIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.3-7.5 9.5-4.3-1.2-7.5-4.9-7.5-9.5V6z" />
+  </Icon>
+);
+export const DocumentIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z" />
+    <path d="M14 3v5h5M9 13h6M9 17h6" />
+  </Icon>
+);
+export const LogoutIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M10 4H6a2 2 0 00-2 2v12a2 2 0 002 2h4" />
+    <path d="M14 8l4 4-4 4M18 12H9" />
+  </Icon>
+);
