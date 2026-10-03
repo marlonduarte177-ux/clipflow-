@@ -1,6 +1,9 @@
+import { pageTitle } from "@/i18n/server";
 import { ProjectsView } from "./projects-view";
 
-export const metadata = { title: "Mis videos · ClipFlow" };
+export async function generateMetadata() {
+  return { title: await pageTitle("videos") };
+}
 
 export default function DashboardPage() {
   return <ProjectsView />;

@@ -1,35 +1,21 @@
-/** Whisper informa el idioma en inglés ("spanish"); se muestra en español. */
-const NAMES: Record<string, string> = {
-  spanish: "Español",
-  english: "Inglés",
-  portuguese: "Portugués",
-  french: "Francés",
-  italian: "Italiano",
-  german: "Alemán",
-  catalan: "Catalán",
-  dutch: "Neerlandés",
-  russian: "Ruso",
-  japanese: "Japonés",
-  korean: "Coreano",
-  chinese: "Chino",
-  arabic: "Árabe",
-  hindi: "Hindi",
-  turkish: "Turco",
-  polish: "Polaco",
-  ukrainian: "Ucraniano",
-  galician: "Gallego",
-  basque: "Euskera",
-  es: "Español",
-  en: "Inglés",
-  pt: "Portugués",
-  fr: "Francés",
-  it: "Italiano",
-  de: "Alemán",
+/** Códigos cortos que también puede informar Whisper. */
+const CODES: Record<string, string> = {
+  es: "spanish",
+  en: "english",
+  pt: "portuguese",
+  fr: "french",
+  it: "italian",
+  de: "german",
 };
 
-export function languageName(language: string | null | undefined): string | null {
+/**
+ * Whisper informa el idioma en inglés ("spanish"); se muestra en el idioma de la app con `names`
+ * (los textos de `t.languages`).
+ */
+export function languageName(language: string | null | undefined, names: Record<string, string>): string | null {
   if (!language) return null;
-  const key = language.trim().toLowerCase();
-  if (!key) return null;
-  return NAMES[key] ?? key.charAt(0).toUpperCase() + key.slice(1);
+  const raw = language.trim().toLowerCase();
+  if (!raw) return null;
+  const key = CODES[raw] ?? raw;
+  return names[key] ?? key.charAt(0).toUpperCase() + key.slice(1);
 }

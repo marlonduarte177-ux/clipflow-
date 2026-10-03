@@ -27,7 +27,7 @@ export function Logo({ size = 23, href = "/" }: { size?: number; href?: string |
   );
   if (href === null) return content;
   return (
-    <Link href={href} aria-label="clipflow, inicio" className="inline-flex">
+    <Link href={href} aria-label="clipflow" className="inline-flex">
       {content}
     </Link>
   );

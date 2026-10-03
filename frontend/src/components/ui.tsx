@@ -1,4 +1,7 @@
+"use client";
+
 import type { ComponentProps, ReactNode } from "react";
+import { useT } from "@/i18n/provider";
 import { Logo } from "./logo";
 
 export { Logo };
@@ -31,13 +34,14 @@ export function Field({ label, ...props }: { label: string } & ComponentProps<"i
 }
 
 export function SubmitButton({ loading, children }: { loading: boolean; children: ReactNode }) {
+  const t = useT();
   return (
     <button
       type="submit"
       disabled={loading}
       className="w-full rounded-lg bg-accent px-4 py-2.5 font-medium text-on-accent transition hover:brightness-110 disabled:opacity-60"
     >
-      {loading ? "Un momento…" : children}
+      {loading ? t.common.oneMoment : children}
     </button>
   );
 }
@@ -53,10 +57,5 @@ export function Alert({ kind, children }: { kind: "error" | "info"; children: Re
 }
 
 export function NotConfigured() {
-  return (
-    <Alert kind="error">
-      La autenticación todavía no está configurada. Faltan las variables NEXT_PUBLIC_COGNITO_USER_POOL_ID y
-      NEXT_PUBLIC_COGNITO_CLIENT_ID (ver .env.example).
-    </Alert>
-  );
+  return <Alert kind="error">{useT().common.authNotConfigured}</Alert>;
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MESSAGES } from "@/i18n/messages";
 import { languageName } from "./language";
 import { clock, parseVtt } from "./vtt";
 
@@ -21,10 +22,13 @@ describe("transcripción (WebVTT)", () => {
     expect(clock(3725)).toBe("1:02:05");
   });
 
-  it("muestra el idioma en español", () => {
-    expect(languageName("spanish")).toBe("Español");
-    expect(languageName("English")).toBe("Inglés");
-    expect(languageName("swahili")).toBe("Swahili");
-    expect(languageName(null)).toBeNull();
+  it("muestra el idioma detectado en el idioma de la app", () => {
+    const es = MESSAGES.es.languages;
+    expect(languageName("spanish", es)).toBe("Español");
+    expect(languageName("English", es)).toBe("Inglés");
+    expect(languageName("pt", es)).toBe("Portugués");
+    expect(languageName("swahili", es)).toBe("Swahili");
+    expect(languageName(null, es)).toBeNull();
+    expect(languageName("spanish", MESSAGES.en.languages)).toBe("Spanish");
   });
 });

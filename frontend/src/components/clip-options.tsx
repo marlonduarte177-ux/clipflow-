@@ -1,6 +1,7 @@
 "use client";
 
 import { DEFAULT_PRODUCT_CONFIG, type SubtitleStyle } from "@clipflow/shared";
+import { useT } from "@/i18n/provider";
 import { BlockIcon } from "./icons";
 
 export const CLIP_DURATIONS = DEFAULT_PRODUCT_CONFIG.clipDurationsSeconds;
@@ -16,10 +17,11 @@ export function DurationPicker({
   onChange: (seconds: number) => void;
   disabled?: boolean;
 }) {
+  const t = useT();
   return (
     <fieldset className="space-y-2.5" disabled={disabled}>
       <legend className="flex w-full items-baseline justify-between">
-        <span className="text-[15px] font-semibold">Duración de cada clip</span>
+        <span className="text-[15px] font-semibold">{t.options.duration}</span>
       </legend>
       <div className="grid grid-cols-5 gap-2">
         {CLIP_DURATIONS.map((d) => (
@@ -36,16 +38,12 @@ export function DurationPicker({
           </button>
         ))}
       </div>
-      <p className="text-xs text-muted">Aproximada: se ajusta unos segundos para no cortar frases a la mitad.</p>
+      <p className="text-xs text-muted">{t.options.durationHint}</p>
     </fieldset>
   );
 }
 
-const STYLES: { id: SubtitleStyle; label: string }[] = [
-  { id: "highlight", label: "Resaltado" },
-  { id: "classic", label: "Clásico" },
-  { id: "none", label: "Sin subtítulos" },
-];
+const STYLES: SubtitleStyle[] = ["highlight", "classic", "none"];
 
 /** Estilo de los subtítulos dibujados en el video, con una vista previa de cada uno. */
 export function SubtitlePicker({
@@ -57,11 +55,12 @@ export function SubtitlePicker({
   onChange: (style: SubtitleStyle) => void;
   disabled?: boolean;
 }) {
+  const t = useT();
   return (
     <fieldset className="space-y-2.5" disabled={disabled}>
-      <legend className="text-[15px] font-semibold">Subtítulos en el video</legend>
+      <legend className="text-[15px] font-semibold">{t.options.subtitles}</legend>
       <div className="grid grid-cols-3 gap-2.5">
-        {STYLES.map((s) => (
+        {STYLES.map((id) => ({ id, label: t.options[id] })).map((s) => (
           <button
             key={s.id}
             type="button"
@@ -74,10 +73,10 @@ export function SubtitlePicker({
             <span className="flex h-[88px] items-end justify-center rounded-xl bg-[#1b1f2a] pb-3">
               {s.id === "highlight" ? (
                 <span className="text-[13px] font-extrabold tracking-wide text-white [text-shadow:0_1px_2px_#000]">
-                  ESTO ES <span className="text-accent">CLAVE</span>
+                  {t.options.previewHighlight[0]} <span className="text-accent">{t.options.previewHighlight[1]}</span>
                 </span>
               ) : s.id === "classic" ? (
-                <span className="rounded bg-black/65 px-1.5 py-0.5 text-xs font-semibold text-white">Esto es clave</span>
+                <span className="rounded bg-black/65 px-1.5 py-0.5 text-xs font-semibold text-white">{t.options.previewClassic}</span>
               ) : (
                 <BlockIcon size={22} className="text-[#5b6377]" />
               )}
@@ -86,7 +85,7 @@ export function SubtitlePicker({
           </button>
         ))}
       </div>
-      <p className="text-xs text-muted">También recibes los subtítulos en archivo (.srt) para editarlos.</p>
+      <p className="text-xs text-muted">{t.options.srtHint}</p>
     </fieldset>
   );
 }

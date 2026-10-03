@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
-import { FEATURES, type JobDto, type JobListResponse, type ProjectDto, type ProjectListResponse, type VideoDto, type VideoListResponse } from "@clipflow/shared";
+import { FEATURES, translateMessage, type JobDto, type JobListResponse, type ProjectDto, type ProjectListResponse, type VideoDto, type VideoListResponse } from "@clipflow/shared";
 import { DownIcon, NextIcon, PlusIcon, TrashIcon, UploadIcon, VideosIcon } from "@/components/icons";
 import { isActive, JobProgress } from "@/components/job-progress";
 import { Alert } from "@/components/ui";
+import { errorMessage } from "@/i18n/locale";
+import { useLocale, useT } from "@/i18n/provider";
 import { apiConfigured, apiFetch, formatDuration } from "@/lib/api";
 
 async function fetchAll() {
@@ -22,6 +24,7 @@ async function fetchAll() {
 
 /** Inicio: tus videos, con su estado, y acceso a sus clips. */
 export function ProjectsView() {
+  const t = useT();
   const [projects, setProjects] = useState<ProjectDto[] | null>(null);
   const [videos, setVideos] = useState<VideoDto[]>([]);
   const [jobs, setJobs] = useState<Record<string, JobDto>>({});
@@ -43,7 +46,7 @@ export function ProjectsView() {
     let active = true;
     fetchAll()
       .then((data) => active && show(data))
-      .catch((err: Error) => active && setError(err.message));
+      .catch((err: Error) => active && setError(errorMessage(err)));
     return () => {
       active = false;
     };
@@ -64,15 +67,15 @@ export function ProjectsView() {
   async function onDelete(video: VideoDto) {
     const question =
       video.status === "pending_upload"
-        ? `¿Descartar la subida sin terminar de "${video.originalFilename}"?`
-        : `¿Eliminar "${video.originalFilename}" y todos sus clips? No se puede deshacer.`;
+        ? t.projects.confirmDiscard(video.originalFilename)
+        : t.projects.confirmDelete(video.originalFilename);
     if (!window.confirm(question)) return;
     setBusy(video.id);
     try {
       await apiFetch(`/videos/${video.id}`, { method: "DELETE" });
       show(await fetchAll());
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setBusy(null);
     }
@@ -87,12 +90,12 @@ export function ProjectsView() {
       show(await fetchAll());
       setProjectFilter(project.id);
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     }
   }
 
   if (!apiConfigured) {
-    return <Alert kind="error">La API todavía no está conectada a esta web (falta NEXT_PUBLIC_API_URL).</Alert>;
+    return <Alert kind="error">{t.common.apiNotConnected}</Alert>;
   }
 
   const shown = projectFilter === "all" ? videos : videos.filter((v) => v.projectId === projectFilter);
@@ -103,24 +106,24 @@ export function ProjectsView() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="space-y-1">
-          <h1 className="text-[28px] font-bold tracking-tight">Tus videos</h1>
+          <h1 className="text-[28px] font-bold tracking-tight">{t.projects.title}</h1>
           <p className="text-sm text-muted">
-            {projects === null ? "Cargando…" : `${shown.length} ${shown.length === 1 ? "video" : "videos"} · ${readyClips} clips listos`}
+            {projects === null ? t.common.loading : t.projects.summary(shown.length, readyClips)}
           </p>
         </div>
         {projects && projects.length > 0 ? (
           <div className="flex items-center gap-2">
             <label className="relative flex h-9 items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-[13px]">
-              <span className="text-muted">Proyecto:</span>
-              <span className="max-w-[9rem] truncate font-semibold">{selected?.name ?? "Todos"}</span>
+              <span className="text-muted">{t.projects.project}</span>
+              <span className="max-w-[9rem] truncate font-semibold">{selected?.name ?? t.projects.all}</span>
               <DownIcon size={14} />
               <select
-                aria-label="Filtrar por proyecto"
+                aria-label={t.projects.filter}
                 value={projectFilter}
                 onChange={(e) => setProjectFilter(e.target.value)}
                 className="absolute inset-0 cursor-pointer opacity-0"
               >
-                <option value="all">Todos</option>
+                <option value="all">{t.projects.all}</option>
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
@@ -130,8 +133,8 @@ export function ProjectsView() {
             </label>
             <button
               onClick={() => setCreating((v) => !v)}
-              aria-label="Nuevo proyecto"
-              title="Nuevo proyecto"
+              aria-label={t.projects.newProject}
+              title={t.projects.newProject}
               className="grid h-9 w-9 place-items-center rounded-full border border-line bg-surface"
             >
               <PlusIcon size={16} />
@@ -143,7 +146,7 @@ export function ProjectsView() {
       {creating ? (
         <form onSubmit={onCreateProject} className="flex gap-2 rounded-2xl border border-line bg-surface p-3">
           <label className="sr-only" htmlFor="new-project">
-            Nombre del proyecto
+            {t.projects.projectName}
           </label>
           <input
             id="new-project"
@@ -151,11 +154,11 @@ export function ProjectsView() {
             maxLength={120}
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Ej.: Podcast semanal"
+            placeholder={t.projects.placeholder}
             className="min-w-0 flex-1 rounded-xl border border-line bg-background px-3 text-base outline-none focus:border-accent"
           />
           <button type="submit" disabled={!name.trim()} className="h-11 rounded-xl bg-accent px-4 text-sm font-semibold text-on-accent disabled:opacity-50">
-            Crear
+            {t.projects.create}
           </button>
         </form>
       ) : null}
@@ -167,11 +170,11 @@ export function ProjectsView() {
           <span className="grid h-14 w-14 place-items-center rounded-[18px] bg-surface text-muted">
             <VideosIcon size={26} />
           </span>
-          <p className="font-semibold">Todavía no hay videos aquí</p>
-          <p className="max-w-xs text-sm text-muted">Sube un video largo y te damos sus mejores momentos listos para redes.</p>
+          <p className="font-semibold">{t.projects.emptyTitle}</p>
+          <p className="max-w-xs text-sm text-muted">{t.projects.emptyText}</p>
           <Link href="/dashboard/subir" className="mt-2 flex h-12 items-center gap-2 rounded-2xl bg-accent px-5 font-bold text-on-accent">
             <UploadIcon size={18} strokeWidth={2.4} />
-            Subir video
+            {t.projects.upload}
           </Link>
         </div>
       ) : null}
@@ -212,7 +215,7 @@ export function ProjectsView() {
                 <button
                   onClick={() => onDelete(video)}
                   disabled={busy === video.id}
-                  aria-label={pending ? `Descartar ${video.originalFilename}` : `Eliminar ${video.originalFilename}`}
+                  aria-label={pending ? t.projects.discardAria(video.originalFilename) : t.projects.deleteAria(video.originalFilename)}
                   className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-[#5b6377] hover:text-red-300 disabled:opacity-50"
                 >
                   <TrashIcon size={18} />
@@ -227,13 +230,15 @@ export function ProjectsView() {
 }
 
 function VideoState({ video, job }: { video: VideoDto; job: JobDto | undefined }) {
-  if (video.status === "pending_upload") return <span className="text-xs text-yellow-200">Subida sin terminar</span>;
-  if (video.status === "rejected") return <span className="text-xs text-red-300">{video.rejectionReason ?? "Video rechazado"}</span>;
+  const t = useT();
+  const { locale } = useLocale();
+  if (video.status === "pending_upload") return <span className="text-xs text-yellow-200">{t.projects.pending}</span>;
+  if (video.status === "rejected") return <span className="text-xs text-red-300">{translateMessage(video.rejectionReason, locale) ?? t.projects.rejected}</span>;
   if (job && isActive(job)) return <JobProgress job={job} />;
   if (job?.status === "completed" && job.result?.downloadOnly) {
     return (
       <span className="flex items-center gap-2">
-        <span className="whitespace-nowrap rounded-full border border-accent/60 px-2.5 py-0.5 text-xs font-bold text-accent">{FEATURES.downloadOnly ? "Listo para descargar" : "Listo para crear clips"}</span>
+        <span className="whitespace-nowrap rounded-full border border-accent/60 px-2.5 py-0.5 text-xs font-bold text-accent">{FEATURES.downloadOnly ? t.projects.readyDownload : t.projects.readyClips}</span>
         <span className="text-xs text-muted">{formatDuration(video.durationSeconds)}</span>
       </span>
     );
@@ -242,12 +247,12 @@ function VideoState({ video, job }: { video: VideoDto; job: JobDto | undefined }
     return (
       <span className="flex items-center gap-2">
         <span className="rounded-full bg-accent px-2.5 py-0.5 text-xs font-bold text-on-accent">
-          {video.clipCount ?? 0} {video.clipCount === 1 ? "clip listo" : "clips listos"}
+          {t.projects.clipsReady(video.clipCount ?? 0)}
         </span>
         <span className="text-xs text-muted">{formatDuration(video.durationSeconds)}</span>
       </span>
     );
   }
   if (job) return <JobProgress job={job} />;
-  return <span className="text-xs text-muted">Listo para crear clips</span>;
+  return <span className="text-xs text-muted">{t.projects.readyClips}</span>;
 }

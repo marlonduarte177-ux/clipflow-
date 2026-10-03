@@ -1,53 +1,44 @@
 import Link from "next/link";
 import { LegalFooter } from "@/components/legal-page";
 import { Logo } from "@/components/ui";
+import { getLocale, getT } from "@/i18n/server";
 
-const STEPS = [
-  { title: "Sube tu video", text: "Directo desde tu navegador, incluso archivos largos." },
-  { title: "ClipFlow lo analiza", text: "Transcribe el audio y detecta los momentos con más interés." },
-  { title: "Revisa tus clips", text: "Verticales 9:16, con subtítulos. Aprueba, edita y descarga." },
-];
-
-export default function Home() {
+export default async function Home() {
+  const [t, locale] = await Promise.all([getT(), getLocale()]);
   return (
     <div className="flex flex-1 flex-col">
       <header className="flex items-center justify-between px-4 py-4 sm:px-8">
         <Logo />
         <nav className="flex items-center gap-2 text-sm">
           <Link href="/login" className="rounded-lg px-3 py-1.5 text-muted hover:text-foreground">
-            Entrar
+            {t.home.signIn}
           </Link>
           <Link href="/registro" className="rounded-lg bg-accent px-3 py-1.5 font-medium text-on-accent">
-            Crear cuenta
+            {t.home.signUp}
           </Link>
         </nav>
       </header>
 
       <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 sm:px-8">
         <section className="py-16 sm:py-24">
-          <h1 className="max-w-2xl text-4xl font-semibold leading-tight tracking-tight sm:text-6xl">
-            De un video largo a clips listos para redes.
-          </h1>
-          <p className="mt-5 max-w-xl text-lg text-muted">
-            ClipFlow encuentra los mejores momentos de tus videos y los convierte en clips verticales con
-            subtítulos.
-          </p>
+          <h1 className="max-w-2xl text-4xl font-semibold leading-tight tracking-tight sm:text-6xl">{t.home.title}</h1>
+          <p className="mt-5 max-w-xl text-lg text-muted">{t.home.subtitle}</p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Link href="/registro" className="rounded-lg bg-accent px-5 py-3 font-medium text-on-accent">
-              Empezar
+              {t.home.start}
             </Link>
             <Link href="/login" className="rounded-lg border border-line px-5 py-3 text-muted hover:text-foreground">
-              Ya tengo cuenta
+              {t.home.haveAccount}
             </Link>
           </div>
         </section>
 
         <section aria-labelledby="como-funciona" className="pb-20">
           <h2 id="como-funciona" className="text-sm font-medium uppercase tracking-widest text-muted">
-            Cómo funciona
+            {t.home.how}
           </h2>
           <ol className="mt-6 grid gap-4 sm:grid-cols-3">
-            {STEPS.map((step, i) => (
+            {t.home.steps.map((step, i) => (
               <li key={step.title} className="rounded-2xl border border-line bg-surface p-5">
                 <span className="text-sm text-accent">{i + 1}</span>
                 <h3 className="mt-2 font-medium">{step.title}</h3>
@@ -58,7 +49,7 @@ export default function Home() {
         </section>
       </main>
 
-      <LegalFooter />
+      <LegalFooter lang={locale} />
     </div>
   );
 }

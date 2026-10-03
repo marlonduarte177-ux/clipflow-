@@ -4,10 +4,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { confirmSignUp, resendSignUpCode } from "aws-amplify/auth";
 import { Alert, Field, NotConfigured, SubmitButton } from "@/components/ui";
+import { useT } from "@/i18n/provider";
 import { authConfigured } from "@/lib/amplify-config";
 import { authErrorMessage } from "@/lib/auth-errors";
 
 export function VerifyForm() {
+  const t = useT();
   const router = useRouter();
   const params = useSearchParams();
   const [email, setEmail] = useState(params.get("email") ?? "");
@@ -38,7 +40,7 @@ export function VerifyForm() {
     setInfo("");
     try {
       await resendSignUpCode({ username: email.trim() });
-      setInfo("Te enviamos un código nuevo. Revisa también la carpeta de spam.");
+      setInfo(t.auth.resent);
     } catch (err) {
       setError(authErrorMessage(err));
     }
@@ -46,9 +48,9 @@ export function VerifyForm() {
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      <Field label="Email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+      <Field label={t.auth.email} type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
       <Field
-        label="Código"
+        label={t.auth.code}
         inputMode="numeric"
         autoComplete="one-time-code"
         required
@@ -57,9 +59,9 @@ export function VerifyForm() {
       />
       <Alert kind="error">{error}</Alert>
       <Alert kind="info">{info}</Alert>
-      <SubmitButton loading={loading}>Verificar</SubmitButton>
+      <SubmitButton loading={loading}>{t.auth.verify}</SubmitButton>
       <button type="button" onClick={onResend} disabled={!email} className="w-full text-sm text-muted hover:text-foreground disabled:opacity-50">
-        Reenviar código
+        {t.auth.resend}
       </button>
     </form>
   );

@@ -1,17 +1,19 @@
 import { fetchAuthSession } from "aws-amplify/auth";
-import type { ApiErrorResponse } from "@clipflow/shared";
+import { translateMessage, type ApiErrorResponse } from "@clipflow/shared";
+import { clientLocale } from "@/i18n/locale";
 
 /** URL pública de la API (no es secreta). */
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "");
 export const apiConfigured = API_URL !== "";
 
+/** Error de la API con el mensaje ya traducido al idioma de la app (el servidor responde en español). */
 export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
     readonly code: string,
   ) {
-    super(message);
+    super(translateMessage(message, clientLocale()));
     this.name = "ApiError";
   }
 }

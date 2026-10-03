@@ -5,10 +5,14 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { signUp } from "aws-amplify/auth";
 import { Alert, AuthCard, Field, NotConfigured, SubmitButton } from "@/components/ui";
+import { LEGAL_PATHS } from "@/components/legal-page";
+import { useLocale, useT } from "@/i18n/provider";
 import { authConfigured } from "@/lib/amplify-config";
 import { authErrorMessage } from "@/lib/auth-errors";
 
 export default function RegisterPage() {
+  const t = useT();
+  const { locale } = useLocale();
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -20,7 +24,7 @@ export default function RegisterPage() {
     event.preventDefault();
     setError("");
     if (password !== confirm) {
-      setError("Las contraseñas no coinciden.");
+      setError(t.auth.passwordsDontMatch);
       return;
     }
     setLoading(true);
@@ -36,14 +40,14 @@ export default function RegisterPage() {
   }
 
   return (
-    <AuthCard title="Crea tu cuenta" subtitle="Te enviaremos un código para verificar tu email.">
+    <AuthCard title={t.auth.registerTitle} subtitle={t.auth.registerSubtitle}>
       {!authConfigured ? (
         <NotConfigured />
       ) : (
         <form onSubmit={onSubmit} className="space-y-4">
-          <Field label="Email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+          <Field label={t.auth.email} type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
           <Field
-            label="Contraseña"
+            label={t.auth.password}
             type="password"
             autoComplete="new-password"
             required
@@ -51,9 +55,9 @@ export default function RegisterPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
-          <p className="-mt-2 text-xs text-muted">Mínimo 10 caracteres, con mayúsculas, minúsculas y números.</p>
+          <p className="-mt-2 text-xs text-muted">{t.auth.passwordHint}</p>
           <Field
-            label="Repite la contraseña"
+            label={t.auth.repeatPassword}
             type="password"
             autoComplete="new-password"
             required
@@ -61,22 +65,22 @@ export default function RegisterPage() {
             onChange={(e) => setConfirm(e.target.value)}
           />
           <Alert kind="error">{error}</Alert>
-          <SubmitButton loading={loading}>Crear cuenta</SubmitButton>
+          <SubmitButton loading={loading}>{t.auth.createAccount}</SubmitButton>
           <p className="text-center text-xs leading-[18px] text-muted">
-            Al crear tu cuenta aceptas los{" "}
-            <Link href="/terminos" className="text-foreground underline">
-              Términos de uso
+            {t.auth.acceptPrefix}{" "}
+            <Link href={LEGAL_PATHS.terms[locale]} className="text-foreground underline">
+              {t.auth.terms}
             </Link>{" "}
-            y la{" "}
-            <Link href="/privacidad" className="text-foreground underline">
-              Política de privacidad
+            {t.auth.and}{" "}
+            <Link href={LEGAL_PATHS.privacy[locale]} className="text-foreground underline">
+              {t.auth.privacy}
             </Link>
             .
           </p>
           <p className="text-center text-sm text-muted">
-            ¿Ya tienes cuenta?{" "}
+            {t.auth.haveAccount}{" "}
             <Link href="/login" className="text-foreground hover:underline">
-              Inicia sesión
+              {t.auth.signInLink}
             </Link>
           </p>
         </form>

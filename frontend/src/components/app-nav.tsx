@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useT } from "@/i18n/provider";
 import { UploadIcon, UserIcon, VideosIcon } from "./icons";
 
 const isVideos = (path: string) => path === "/dashboard" || path.startsWith("/dashboard/videos");
@@ -13,19 +14,20 @@ const isUpload = (path: string) => path.startsWith("/dashboard/subir");
  * y "Cuenta". La sección actual se marca en naranja.
  */
 export function BottomNav() {
+  const t = useT();
   const path = usePathname();
   const tab = (active: boolean) =>
     `flex h-16 w-20 flex-col items-center gap-1 text-[11px] ${active ? "font-semibold text-accent" : "font-medium text-muted"}`;
   const marker = (active: boolean) => <span className={`h-[3px] w-7 rounded-b ${active ? "bg-accent" : ""}`} />;
   return (
     <nav
-      aria-label="Navegación principal"
+      aria-label={t.nav.main}
       className="fixed inset-x-0 bottom-0 z-30 flex items-start justify-between border-t border-[#1e2330] bg-[#0e1118] px-8 pb-[max(16px,env(safe-area-inset-bottom))] sm:hidden"
     >
       <Link href="/dashboard" aria-current={isVideos(path) ? "page" : undefined} className={tab(isVideos(path))}>
         {marker(isVideos(path))}
         <VideosIcon size={24} className="mt-1.5" />
-        Mis videos
+        {t.nav.videos}
       </Link>
       <Link
         href="/dashboard/subir"
@@ -35,12 +37,12 @@ export function BottomNav() {
         <span className="grid h-[58px] w-[58px] place-items-center rounded-[18px] bg-accent text-on-accent shadow-[0_0_0_5px_#0e1118]">
           <UploadIcon size={26} strokeWidth={2.4} />
         </span>
-        Subir video
+        {t.nav.upload}
       </Link>
       <Link href="/dashboard/cuenta" aria-current={isAccount(path) ? "page" : undefined} className={tab(isAccount(path))}>
         {marker(isAccount(path))}
         <UserIcon size={24} className="mt-1.5" />
-        Cuenta
+        {t.nav.account}
       </Link>
     </nav>
   );
@@ -48,20 +50,21 @@ export function BottomNav() {
 
 /** Enlaces del encabezado en pantallas grandes. */
 export function TopNav() {
+  const t = useT();
   const path = usePathname();
   const link = (active: boolean) =>
     `rounded-lg px-3 py-2 text-sm ${active ? "bg-surface font-medium text-foreground" : "text-muted hover:text-foreground"}`;
   return (
-    <nav aria-label="Navegación principal" className="hidden items-center gap-1 sm:flex">
+    <nav aria-label={t.nav.main} className="hidden items-center gap-1 sm:flex">
       <Link href="/dashboard" className={link(isVideos(path))}>
-        Mis videos
+        {t.nav.videos}
       </Link>
       <Link href="/dashboard/cuenta" className={link(isAccount(path))}>
-        Cuenta
+        {t.nav.account}
       </Link>
       <Link href="/dashboard/subir" className="ml-2 flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-on-accent">
         <UploadIcon size={18} strokeWidth={2.4} />
-        Subir video
+        {t.nav.upload}
       </Link>
     </nav>
   );

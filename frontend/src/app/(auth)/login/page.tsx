@@ -1,12 +1,16 @@
 import { Suspense } from "react";
 import { AuthCard } from "@/components/ui";
+import { getT, pageTitle } from "@/i18n/server";
 import { LoginForm } from "./login-form";
 
-export const metadata = { title: "Iniciar sesión · ClipFlow" };
+export async function generateMetadata() {
+  return { title: await pageTitle("login") };
+}
 
-export default function LoginPage() {
+export default async function LoginPage() {
+  const t = await getT();
   return (
-    <AuthCard title="Inicia sesión" subtitle="Entra a tu cuenta de ClipFlow.">
+    <AuthCard title={t.auth.loginTitle} subtitle={t.auth.loginSubtitle}>
       <Suspense>
         <LoginForm />
       </Suspense>
