@@ -28,6 +28,8 @@ interface Variant {
   durationSeconds: number | null;
   clipCount: number | null;
   providers: { transcription?: string; analysis?: string; fallbackReason?: string } | null;
+  ai: string | null;
+  aiReason: string | null;
   costs: { transcriptionUsd: number; textUsd: number; visionUsd: number; computeUsd: number; totalUsd: number } | null;
   totalUsdPerMinute: number | null;
   aiUsdPerMinute: number | null;
@@ -114,6 +116,11 @@ export function CompareView() {
                     {v.providers?.fallbackReason ? (
                       <p className="rounded-lg border border-yellow-500/40 px-2 py-1 text-[11px] text-yellow-200">
                         {t.compare.fallback}: {v.providers.fallbackReason}
+                      </p>
+                    ) : null}
+                    {v.status === "completed" && v.ai !== "used" ? (
+                      <p className="rounded-lg border border-red-500/40 px-2 py-1 text-[11px] text-red-200">
+                        {t.compare.noAi}: {v.aiReason ?? v.ai ?? "—"}
                       </p>
                     ) : null}
                     <p className="text-sm font-semibold">{t.compare.clips(v.clipCount ?? 0)}</p>

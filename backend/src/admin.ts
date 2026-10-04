@@ -179,6 +179,7 @@ export function adminRoutes(deps: {
           clipCount: result?.clipCount ?? null,
           providers: result?.providers ?? null,
           ai: result?.ai ?? null,
+          aiReason: result?.aiReason ?? null,
           costs: costs ?? null,
           totalUsdPerMinute: costs && minutes > 0 ? costs.totalUsd / minutes : null,
           aiUsdPerMinute: aiUsd !== null && minutes > 0 ? aiUsd / minutes : null,
