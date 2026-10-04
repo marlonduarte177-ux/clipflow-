@@ -93,7 +93,7 @@ export class WorkerStack extends Stack {
     });
     const geminiKey = new secretsmanager.Secret(this, "GeminiApiKey", {
       secretName: `${prefix}/gemini-api-key`,
-      description: "Clave de Google AI Studio (aistudio.google.com) para Gemini. Reemplaza el valor por tu clave (AIza...).",
+      description: "Clave de Google AI Studio (aistudio.google.com) para Gemini. Reemplaza el valor por tu clave (empieza con AQ. o AIza).",
       generateSecretString: { passwordLength: 32, excludePunctuation: true },
       removalPolicy: props.stage === "production" ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     });

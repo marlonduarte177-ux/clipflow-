@@ -52,7 +52,7 @@ Groq whisper-large-v3: 0,111 USD por hora de audio (~0,0019 USD/min).
 Las dos viven en **AWS Secrets Manager**. El despliegue crea los secretos con un valor de relleno y, mientras
 no se reemplace, el pipeline nuevo queda apagado.
 - `clipflow-staging/groq-api-key`: la clave de console.groq.com (empieza con `gsk_`).
-- `clipflow-staging/gemini-api-key`: la clave de aistudio.google.com (empieza con `AIza`).
+- `clipflow-staging/gemini-api-key`: la clave de aistudio.google.com (empieza con `AQ.`; las claves antiguas, con `AIza`).
   - **Activar la facturación** en ese proyecto de Google. En el nivel gratis, Google puede usar los datos para
     mejorar sus productos, y la Política de privacidad dice que usamos el servicio de pago.
 
