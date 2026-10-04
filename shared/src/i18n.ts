@@ -165,6 +165,12 @@ const EXACT: Record<string, string> = {
   "Análisis de imágenes con formato inesperado": "Image analysis with an unexpected format",
   "Transcripción con formato inesperado": "Transcript with an unexpected format",
   "Solo descarga": "Download only",
+  "OpenAI está saturado por ahora (límite de uso por minuto de tu cuenta). Lo reintentamos en unos minutos; la transcripción ya quedó guardada.":
+    "OpenAI is saturated right now (your account's per-minute limit). We'll retry in a few minutes; the transcript is already saved.",
+  "Tu cuenta de OpenAI llegó a su límite de uso por día (se recupera en unas horas; puedes subir de nivel en platform.openai.com → Limits)":
+    "Your OpenAI account reached its daily usage limit (it recovers in a few hours; you can move up a tier at platform.openai.com → Limits)",
+  "El pedido a OpenAI es más grande que el límite por minuto de tu cuenta (sube de nivel en platform.openai.com → Limits)":
+    "The request to OpenAI is larger than your account's per-minute limit (move up a tier at platform.openai.com → Limits)",
   "error inesperado": "unexpected error",
 };
 

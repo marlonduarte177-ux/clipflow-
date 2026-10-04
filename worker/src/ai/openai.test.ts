@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { AIProviderError, dedupeHighlights, OpenAIProvider, parseResetDuration } from "./openai.js";
+import { AIProviderError, dedupeHighlights, OpenAIProvider, parseRateLimit, parseResetDuration } from "./openai.js";
 
 const dir = mkdtempSync(path.join(tmpdir(), "openai-test-"));
 const chunkA = path.join(dir, "audio-000.mp3");
@@ -149,6 +149,35 @@ describe("OpenAIProvider.transcribe", () => {
     expect(error.message).toBe("OpenAI limitó las solicitudes por minuto de tu cuenta (límite de velocidad)");
     expect(calls).toHaveLength(8);
     expect(Math.max(...sleeps)).toBeLessThanOrEqual(60_000);
+  });
+
+  it("el límite POR DÍA no se espera minutos: se rinde enseguida y lo dice", async () => {
+    const message =
+      "Rate limit reached for gpt-4o-mini in organization org-x on tokens per day (TPD): Limit 2000000, Used 1999000, Requested 9000. Please try again in 7m12s.";
+    const { impl, calls } = fakeFetch([json({ error: { code: "rate_limit_exceeded", type: "tokens", message } }, 429)]);
+    const error = await provider(impl).transcribe([{ path: chunkA, offsetSeconds: 0, durationSeconds: 10 }]).catch((e) => e);
+    expect(error).toMatchObject({ retryable: false, status: 429, limit: { per: "day", unit: "tokens", limit: 2000000, requested: 9000 } });
+    expect(error.message).toMatch(/límite de uso por día/);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("un pedido más grande que el límite por minuto tampoco se reintenta", async () => {
+    const message = "Request too large for gpt-4o-mini in organization org-x on tokens per min (TPM): Limit 30000, Requested 45000.";
+    const { impl, calls } = fakeFetch([json({ error: { code: "rate_limit_exceeded", message } }, 429)]);
+    const error = await provider(impl).transcribe([{ path: chunkA, offsetSeconds: 0, durationSeconds: 10 }]).catch((e) => e);
+    expect(error).toMatchObject({ retryable: false });
+    expect(error.message).toMatch(/más grande que el límite por minuto/);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("lee de qué límite se trata en el mensaje de OpenAI", () => {
+    expect(parseRateLimit("Rate limit reached for gpt-4o-mini on requests per min (RPM): Limit 500, Used 500, Requested 1.")).toEqual({
+      unit: "requests",
+      per: "min",
+      limit: 500,
+      requested: 1,
+    });
+    expect(parseRateLimit("otro error")).toBeUndefined();
   });
 
   it("entiende las duraciones de las cabeceras de OpenAI", () => {

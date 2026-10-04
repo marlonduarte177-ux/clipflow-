@@ -38,31 +38,69 @@ export class AIProviderError extends Error {
     readonly status?: number,
     /** Código de error de OpenAI (p. ej. "insufficient_quota", "rate_limit_exceeded"). */
     readonly code?: string,
+    /** Qué límite de OpenAI se alcanzó (para los registros): p. ej. "tokens per min (TPM): Limit 200000, Requested 9000". */
+    readonly limit?: RateLimitInfo,
   ) {
     super(message);
     this.name = "AIProviderError";
   }
 }
 
+/** Límite de velocidad de OpenAI que se alcanzó (sacado de su mensaje, que no trae contenido del usuario). */
+export interface RateLimitInfo {
+  /** "min": se recupera en segundos; "day": recién en horas. */
+  per: "min" | "day";
+  unit: "tokens" | "requests";
+  limit?: number;
+  requested?: number;
+}
+
+/** Lee "Rate limit reached for … on tokens per min (TPM): Limit 200000, Used 190000, Requested 12000." */
+export function parseRateLimit(message: string | undefined): RateLimitInfo | undefined {
+  const m = /on (tokens|requests) per (min|day)\b[^:]*:\s*Limit (\d+)(?:, Used \d+)?(?:, Requested (\d+))?/i.exec(message ?? "");
+  if (!m) return undefined;
+  return {
+    unit: m[1]!.toLowerCase() as RateLimitInfo["unit"],
+    per: m[2]!.toLowerCase() as RateLimitInfo["per"],
+    limit: Number(m[3]),
+    ...(m[4] ? { requested: Number(m[4]) } : {}),
+  };
+}
+
+/** Un solo pedido más grande que el límite por minuto: esperar no lo arregla. */
+const tooLarge = (limit?: RateLimitInfo) =>
+  limit?.per === "min" && limit.unit === "tokens" && limit.requested !== undefined && limit.limit !== undefined && limit.requested > limit.limit;
+
 /** Mensaje claro (apto para mostrar al usuario) según el error de OpenAI. */
-function describeError(status: number, code: string | undefined): string {
+function describeError(status: number, code: string | undefined, limit?: RateLimitInfo): string {
   if (status === 401) return "La clave de OpenAI no es válida";
   if (status === 429 && code === "insufficient_quota") {
     return "Tu cuenta de OpenAI no tiene saldo o llegó a su límite de gasto (revisa Billing y Limits en platform.openai.com)";
+  }
+  if (status === 429 && limit?.per === "day") {
+    return "Tu cuenta de OpenAI llegó a su límite de uso por día (se recupera en unas horas; puedes subir de nivel en platform.openai.com → Limits)";
+  }
+  if (status === 429 && tooLarge(limit)) {
+    return "El pedido a OpenAI es más grande que el límite por minuto de tu cuenta (sube de nivel en platform.openai.com → Limits)";
   }
   if (status === 429) return "OpenAI limitó las solicitudes por minuto de tu cuenta (límite de velocidad)";
   if (status >= 500) return `OpenAI tuvo un error temporal (${status})`;
   return code ? `OpenAI rechazó la solicitud (${status}, ${code})` : `OpenAI respondió ${status}`;
 }
 
-/** Solo el código de error del cuerpo (nunca el texto: puede incluir contenido del usuario). */
-async function errorCode(res: Response): Promise<string | undefined> {
+/**
+ * Código de error del cuerpo y, si es un límite de velocidad, cuál. Del texto solo se extraen esos
+ * datos (nunca se guarda el texto: en otros errores podría incluir contenido del usuario).
+ */
+async function errorInfo(res: Response): Promise<{ code?: string; limit?: RateLimitInfo }> {
   try {
-    const body = (await res.json()) as { error?: { code?: unknown; type?: unknown } };
-    const code = body?.error?.code ?? body?.error?.type;
-    return typeof code === "string" && /^[a-z0-9_.-]{1,60}$/i.test(code) ? code : undefined;
+    const body = (await res.json()) as { error?: { code?: unknown; type?: unknown; message?: unknown } };
+    const raw = body?.error?.code ?? body?.error?.type;
+    const code = typeof raw === "string" && /^[a-z0-9_.-]{1,60}$/i.test(raw) ? raw : undefined;
+    const limit = res.status === 429 && typeof body?.error?.message === "string" ? parseRateLimit(body.error.message) : undefined;
+    return { code, limit };
   } catch {
-    return undefined;
+    return {};
   }
 }
 
@@ -124,7 +162,8 @@ const ChatResponse = z.object({
 /** Análisis de momentos por partes: tamaño, solape, partes a la vez, tope de momentos y de respuesta. */
 const ANALYSIS_WINDOW_SECONDS = 20 * 60;
 const ANALYSIS_OVERLAP_SECONDS = 90;
-const ANALYSIS_CONCURRENCY = 3;
+// Dos partes a la vez: con tres, las cuentas nuevas de OpenAI (límite por minuto bajo) se saturaban.
+const ANALYSIS_CONCURRENCY = 2;
 const MAX_HIGHLIGHTS_PER_WINDOW = 8;
 const ANALYSIS_MAX_OUTPUT_TOKENS = 4000;
 
@@ -271,12 +310,13 @@ export class OpenAIProvider implements AIAnalysisProvider {
         continue;
       }
       if (res.ok) return res.json();
-      const code = await errorCode(res);
-      const rateLimited = res.status === 429 && code !== "insufficient_quota";
+      const { code, limit: rateLimit } = await errorInfo(res);
+      // El límite por día o un pedido más grande que el límite por minuto no se arreglan esperando.
+      const rateLimited = res.status === 429 && code !== "insufficient_quota" && rateLimit?.per !== "day" && !tooLarge(rateLimit);
       const retryable = rateLimited || res.status >= 500;
-      lastError = new AIProviderError(describeError(res.status, code), retryable, res.status, code);
-      const limit = rateLimited ? this.maxRateLimitAttempts : this.maxAttempts;
-      if (!retryable || attempt >= limit) throw lastError;
+      lastError = new AIProviderError(describeError(res.status, code, rateLimit), retryable, res.status, code, rateLimit);
+      const maxTries = rateLimited ? this.maxRateLimitAttempts : this.maxAttempts;
+      if (!retryable || attempt >= maxTries) throw lastError;
       await this.sleep(retryDelayMs(res.headers, attempt));
     }
   }

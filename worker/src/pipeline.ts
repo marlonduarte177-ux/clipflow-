@@ -406,7 +406,14 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       jobId: job.id,
       sourceUrl: video.sourceUrl,
       targetClipSeconds: clipDuration,
+      canRetry: job.attempts < job.maxAttempts,
     });
+    // Las imágenes esperan al análisis de texto; si el trabajo se va a reintentar por OpenAI saturado,
+    // no se gastan imágenes ahora. (Se marca como manejada: con la visión apagada nadie la espera.)
+    const visionGate = aiPromise.then((a) => {
+      if (a.retryLater) throw new Error("se reintentará");
+    });
+    visionGate.catch(() => undefined);
     const chatPromise = readTwitchChat(deps, video.sourceUrl, info.durationSeconds, controller.signal, job.id);
     const [raw, ai, vision, chat] = await Promise.all([
       analyzeSignals(deps.tools, input, info, dir, {
@@ -414,10 +421,17 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
         onProgress: (sec) => void report("signals")(sec / info.durationSeconds),
       }),
       aiPromise,
-      runVision(deps, info, input, dir, contentBox, controller.signal, async (f) => void (await report("vision")(f)), aiPromise),
+      runVision(deps, info, input, dir, contentBox, controller.signal, async (f) => void (await report("vision")(f)), visionGate),
       chatPromise,
     ]);
     check();
+    if (ai.retryLater) {
+      throw new JobError(
+        "ai_busy",
+        "OpenAI está saturado por ahora (límite de uso por minuto de tu cuenta). Lo reintentamos en unos minutos; la transcripción ya quedó guardada.",
+        true,
+      );
+    }
     const signals: SignalSeries = {
       visual: raw.visual,
       ...(raw.audio ? { audio: raw.audio } : {}),
@@ -810,6 +824,11 @@ interface AIOutcome {
   language: string | null;
   usage: AIUsage;
   transcribeCostUsd: number;
+  /**
+   * OpenAI falló por algo temporal (límite por minuto, error 5xx) y quedan intentos: el trabajo se
+   * reintenta en unos minutos (con la transcripción guardada) en vez de elegir clips sin la IA.
+   */
+  retryLater?: boolean;
 }
 
 function addUsage(total: AIUsage, extra: AIUsage) {
@@ -852,7 +871,15 @@ async function runAI(
   dir: string,
   signal: AbortSignal,
   onProgress: (fraction: number) => Promise<void>,
-  ids: { userId: string; videoId: string; jobId: string; sourceUrl?: string | null; targetClipSeconds?: number },
+  ids: {
+    userId: string;
+    videoId: string;
+    jobId: string;
+    sourceUrl?: string | null;
+    targetClipSeconds?: number;
+    /** Quedan intentos del trabajo: un fallo temporal de OpenAI se reintenta más tarde. */
+    canRetry?: boolean;
+  },
 ): Promise<AIOutcome> {
   const empty = { segments: [], language: null, usage: {}, transcribeCostUsd: 0 };
   if (!deps.ai) return { ...empty, status: "disabled", reason: deps.aiDisabledReason ?? "IA no configurada" };
@@ -947,7 +974,14 @@ async function runAI(
   } catch (err) {
     if (signal.aborted) throw err;
     const e = err as AIProviderError;
-    deps.log.warn({ step, error: e.message, status: e.status, code: e.code }, "IA no disponible; se continúa solo con FFmpeg");
+    // Solo lo que se recupera solo en minutos: límite por minuto (429), errores de OpenAI (5xx) o la red.
+    const temporary =
+      err instanceof AIProviderError && e.retryable && (e.status === 429 || (e.status ?? 0) >= 500 || e.message === "No se pudo conectar con OpenAI");
+    const retryLater = temporary && ids.canRetry === true;
+    deps.log.warn(
+      { step, error: e.message, status: e.status, code: e.code, limit: e.limit, retryLater },
+      retryLater ? "IA saturada; el trabajo se reintentará más tarde" : "IA no disponible; se continúa solo con FFmpeg",
+    );
     // Solo se muestran mensajes propios (los de OpenAIProvider no incluyen contenido del usuario).
     const detail = err instanceof AIProviderError ? e.message : "error inesperado";
     if (transcribed) {
@@ -958,9 +992,10 @@ async function runAI(
         language: transcribed.language,
         usage: { ...transcribed.usage },
         transcribeCostUsd: transcribed.usage.estimatedCostUsd ?? 0,
+        retryLater,
       };
     }
-    return { ...empty, status: "unavailable", reason: `falló ${step}: ${detail}` };
+    return { ...empty, status: "unavailable", reason: `falló ${step}: ${detail}`, retryLater };
   }
 }
 
@@ -997,7 +1032,12 @@ async function runVision(
       onProgress: (s) => void onProgress((s / info.durationSeconds) * 0.3).catch(() => undefined),
     });
     await onProgress(0.3);
-    await after?.catch(() => undefined);
+    // Si el análisis de texto avisa que el trabajo se reintentará, no se envían imágenes.
+    const go = await (after ?? Promise.resolve()).then(
+      () => true,
+      () => false,
+    );
+    if (!go) return off;
     // Tiempo máximo para empezar hojas nuevas: en videos largos el límite por minuto de la cuenta
     // puede hacerlo muy lento; lo que no alcance se omite y el video no espera de más.
     const deadline = Date.now() + (config.budgetSeconds ?? 180) * 1000;

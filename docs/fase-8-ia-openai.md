@@ -299,3 +299,28 @@ quedar fuera, y una historia de 50 s se cortaba a 30 s.
 - **Resultado:** `result.selection` dice `"ai"` o `"signals"`. En la web, el resumen del video dice
   «momentos elegidos por la IA».
 - **Costo:** igual que antes: la IA ya hacía este análisis; ahora se aprovecha mejor.
+
+## OpenAI saturado: se reintenta en vez de hacer clips sin IA (04/10/2026)
+
+**Qué pasaba:** en un stream largo de Twitch, OpenAI frenó la cuenta por su **límite de uso por minuto**. El
+análisis se rindió y los clips se eligieron solo por volumen y movimiento: salían momentos sin sentido.
+
+**Ahora:**
+- **Fallos que se arreglan solos en minutos** (límite por minuto 429, errores 5xx de OpenAI, cortes de red):
+  - el trabajo **se reintenta solo**, a los 1 y 2 minutos, en vez de crear clips sin la IA;
+  - la transcripción ya está guardada, así que el reintento no la vuelve a pagar;
+  - tampoco se envían imágenes en ese intento;
+  - la pantalla de progreso muestra «OpenAI está saturado por ahora… Lo reintentamos en unos minutos».
+  - Solo en el **último intento** (3 en total) se crean los clips por señales, y se avisa por qué.
+- **Límites que no se arreglan esperando:** se detectan leyendo el mensaje de OpenAI y no se pierde tiempo
+  reintentando.
+  - **Límite por día** (TPD/RPD): «Tu cuenta de OpenAI llegó a su límite de uso por día…».
+  - **Pedido más grande que el límite por minuto** («Request too large»): se pide subir de nivel en OpenAI.
+- El análisis por partes de los videos largos manda **2 partes a la vez** (antes 3), para no saturar las
+  cuentas nuevas.
+- **Registro:** el aviso del procesador incluye qué límite fue (`limit`: tokens o pedidos, por minuto o por
+  día, el tope y lo pedido), para saber si conviene subir de nivel en OpenAI.
+
+**Si pasa seguido:** en platform.openai.com → Settings → Limits se ve el nivel (Tier) de la cuenta. Los
+límites suben solos al acumular gasto (Tier 1 → 2 tras 50 USD pagados y 7 días). Recargar saldo ayuda a
+subir de nivel.

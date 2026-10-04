@@ -8,7 +8,7 @@ import { fullTranscriptKey, transcriptCacheKey, type AIAnalysisProvider, type Au
 import { claimJob, createJob, schema, type DbHandle } from "@clipflow/shared/db";
 import { createTestDb } from "@clipflow/shared/db/testing";
 import { AIProviderError } from "./ai/openai.js";
-import { processAnalyzeJob } from "./pipeline.js";
+import { JobError, processAnalyzeJob } from "./pipeline.js";
 import { makeDeps, makeSampleVideo, seedVideoJob } from "./test-helpers.js";
 
 let h: DbHandle | undefined;
@@ -44,7 +44,7 @@ class FakeAI implements AIAnalysisProvider {
   constructor(
     private readonly fail = false,
     private readonly segments: TranscriptSegment[] = SEGMENTS,
-    private readonly failAnalysis = false,
+    private readonly failAnalysis: boolean | "rate_limit" = false,
   ) {}
   async transcribe(chunks: AudioChunk[]) {
     if (this.fail) {
@@ -61,6 +61,9 @@ class FakeAI implements AIAnalysisProvider {
   async analyze(_segments: TranscriptSegment[], _duration: number, options?: { targetClipSeconds?: number }) {
     this.analyzeCalls++;
     this.analyzeOptions = options;
+    if (this.failAnalysis === "rate_limit") {
+      throw new AIProviderError("OpenAI limitó las solicitudes por minuto de tu cuenta (límite de velocidad)", true, 429, "rate_limit_exceeded");
+    }
     if (this.failAnalysis) throw new AIProviderError("OpenAI devolvió JSON inválido", true);
     // El contenido importante está en una parte SILENCIOSA (2–12 s): sin IA no se elegiría.
     return {
@@ -243,6 +246,24 @@ describe("procesamiento con IA", () => {
     expect(subs.length).toBeGreaterThan(0);
     const clips = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
     expect(clips.some((c) => c.title?.startsWith("Título"))).toBe(true);
+  });
+
+  it("OpenAI saturado (límite por minuto): reintenta el trabajo más tarde en vez de clips sin IA; en el último intento sigue sin ella", async () => {
+    const db = h!.db;
+    const { job } = await seedVideoJob(db, root, { sample });
+    const ai = new FakeAI(false, SEGMENTS, "rate_limit");
+    const deps = { ...makeDeps(db, root, path.join(root, "work")), ai };
+    const error = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps).catch((e) => e);
+    expect(error).toBeInstanceOf(JobError);
+    expect(error).toMatchObject({ code: "ai_busy", retryable: true });
+    expect(error.userMessage).toMatch(/Lo reintentamos en unos minutos/);
+    expect(await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id))).toEqual([]);
+
+    // Último intento: ya no se espera más; se crean los clips por señales y se dice por qué.
+    await db.update(schema.processingJobs).set({ attempts: 2, status: "queued", lockedBy: null }).where(eq(schema.processingJobs.id, job.id));
+    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    expect(result).toMatchObject({ ai: "unavailable", selection: "signals" });
+    expect(result.clipCount).toBeGreaterThan(0);
   });
 
   it("la transcripción se guarda por video y se reutiliza al volver a procesar: no se paga dos veces", async () => {
