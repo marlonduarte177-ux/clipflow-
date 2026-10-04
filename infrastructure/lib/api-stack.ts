@@ -31,6 +31,8 @@ export interface ApiStackProps extends StackProps {
   userPoolClient: cognito.IUserPoolClient;
   queue: sqs.IQueue;
   webOrigins: string[];
+  /** Correos con acceso a la prueba lado a lado (variable ADMIN_EMAILS de GitHub; no está en el código). */
+  adminEmails?: string;
   /** Procesador de video que la API enciende directamente al empezar una subida. */
   worker: {
     cluster: ecs.ICluster;
@@ -89,6 +91,9 @@ export class ApiStack extends Stack {
         API_PORT: String(API_PORT),
         LOG_LEVEL: "info",
         CORS_ALLOWED_ORIGINS: props.webOrigins.join(","),
+        ADMIN_EMAILS: props.adminEmails ?? "",
+        // Prueba lado a lado: pipeline actual contra Groq + cada modelo de Gemini.
+        COMPARE_PIPELINES: "classic,gemini:gemini-3.5-flash,gemini:gemini-3.1-flash-lite",
         COGNITO_USER_POOL_ID: props.userPool.userPoolId,
         COGNITO_CLIENT_ID: props.userPoolClient.userPoolClientId,
         S3_BUCKET: props.bucket.bucketName,

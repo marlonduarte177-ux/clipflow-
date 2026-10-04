@@ -76,7 +76,14 @@ export function selectAiMoments(input: SelectAiMomentsInput): Moment[] {
         reaction += (input.weights[name] / reactionWeight) * mean;
       }
       const score = reactionNames.length ? (1 - REACTION_WEIGHT) * h.strength + REACTION_WEIGHT * reaction : h.strength;
-      return { startSeconds: round(start), endSeconds: round(end), score: round(score), breakdown };
+      return {
+        startSeconds: round(start),
+        endSeconds: round(end),
+        score: round(score),
+        breakdown,
+        ...(h.title ? { title: h.title } : {}),
+        ...(h.reason ? { reason: h.reason } : {}),
+      };
     });
 
   const overlaps = (a: Moment, list: Moment[]) => list.some((c) => a.startSeconds < c.endSeconds + gap && c.startSeconds < a.endSeconds + gap);

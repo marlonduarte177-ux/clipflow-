@@ -165,6 +165,22 @@ const EXACT: Record<string, string> = {
   "Análisis de imágenes con formato inesperado": "Image analysis with an unexpected format",
   "Transcripción con formato inesperado": "Transcript with an unexpected format",
   "Solo descarga": "Download only",
+  "No tienes acceso a esta sección.": "You don't have access to this section.",
+  "La clave de Gemini no es válida": "The Gemini key is not valid",
+  "La clave de Gemini no es válida o no tiene permiso": "The Gemini key is not valid or lacks permission",
+  "Gemini limitó las solicitudes de tu cuenta (límite de velocidad o cuota)": "Gemini limited your account's requests (rate limit or quota)",
+  "Ese modelo de Gemini no está disponible para tu cuenta": "That Gemini model is not available for your account",
+  "No se pudo conectar con Gemini": "Could not connect to Gemini",
+  "Gemini no pudo procesar el video": "Gemini could not process the video",
+  "Gemini tardó demasiado en procesar el video": "Gemini took too long to process the video",
+  "Gemini devolvió JSON inválido": "Gemini returned invalid JSON",
+  "Respuesta inesperada de Gemini": "Unexpected response from Gemini",
+  "OpenAI está saturado por ahora (límite de uso por minuto de tu cuenta). Lo reintentamos en unos minutos; la transcripción ya quedó guardada.":
+    "OpenAI is saturated right now (your account's per-minute limit). We'll retry in a few minutes; the transcript is already saved.",
+  "Tu cuenta de OpenAI llegó a su límite de uso por día (se recupera en unas horas; puedes subir de nivel en platform.openai.com → Limits)":
+    "Your OpenAI account reached its daily usage limit (it recovers in a few hours; you can move up a tier at platform.openai.com → Limits)",
+  "El pedido a OpenAI es más grande que el límite por minuto de tu cuenta (sube de nivel en platform.openai.com → Limits)":
+    "The request to OpenAI is larger than your account's per-minute limit (move up a tier at platform.openai.com → Limits)",
   "error inesperado": "unexpected error",
 };
 
@@ -184,6 +200,8 @@ const RULES: Rule[] = [
   [/^OpenAI rechazó la solicitud \((.+)\)$/, (m) => `OpenAI rejected the request (${m[1]})`],
   [/^OpenAI tuvo un error temporal \((.+)\)$/, (m) => `OpenAI had a temporary error (${m[1]})`],
   [/^OpenAI respondió (.+)$/, (m) => `OpenAI responded ${m[1]}`],
+  [/^Gemini tuvo un error temporal \((.+)\)$/, (m) => `Gemini had a temporary error (${m[1]})`],
+  [/^Gemini rechazó la solicitud \((.+)\)$/, (m) => `Gemini rejected the request (${m[1]})`],
   [/^El archivo supera el máximo de (.+) GB\.$/, (m) => `The file exceeds the maximum of ${m[1]} GB.`],
   [/^El video supera la duración máxima de (.+) h\.$/, (m) => `The video exceeds the maximum length of ${m[1]} h.`],
   [/^Llegaste al máximo de (\d+) horas de video por día\. Podrás crear más clips en unas horas\.$/, (m) => `You reached the maximum of ${m[1]} hours of video per day. You'll be able to create more clips in a few hours.`],

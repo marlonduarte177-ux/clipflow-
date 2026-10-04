@@ -53,6 +53,18 @@ const EnvSchema = z.object({
   OPENAI_TRANSCRIBE_COST_PER_MINUTE_USD: z.coerce.number().nonnegative().default(0.006),
   OPENAI_INPUT_COST_PER_1M_TOKENS_USD: z.coerce.number().nonnegative().default(0.15),
   OPENAI_OUTPUT_COST_PER_1M_TOKENS_USD: z.coerce.number().nonnegative().default(0.6),
+
+  // --- Pipeline nuevo: Groq (transcripción) + Gemini (elegir momentos) ---
+  /** "classic" = OpenAI; "gemini" = Groq + Gemini con OpenAI de respaldo. Un trabajo puede pedir otro. */
+  AI_PIPELINE: z.enum(["classic", "gemini"]).default("classic"),
+  GROQ_API_KEY: z.string().optional(),
+  GROQ_TRANSCRIBE_MODEL: z.string().default("whisper-large-v3"),
+  /** USD por hora de audio (whisper-large-v3: 0.111). */
+  GROQ_COST_PER_HOUR_USD: z.coerce.number().nonnegative().default(0.111),
+  GEMINI_API_KEY: z.string().optional(),
+  GEMINI_MODEL: z.string().default("gemini-3.5-flash"),
+  /** Resolución de las imágenes que analiza Gemini: "low" (más barato) o "medium". */
+  GEMINI_MEDIA_RESOLUTION: z.enum(["low", "medium"]).default("low"),
 });
 
 export type WorkerConfig = z.infer<typeof EnvSchema>;
@@ -64,6 +76,16 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
     throw new Error(`Configuración inválida del worker:\n${problems}`);
   }
   return result.data;
+}
+
+/** Una clave de Groq tiene el formato "gsk_...". El valor de relleno del secreto no lo tiene. */
+export function looksLikeGroqKey(value: string | undefined): value is string {
+  return typeof value === "string" && /^gsk_[A-Za-z0-9]{20,}$/.test(value.trim());
+}
+
+/** Una clave de Google AI Studio tiene el formato "AIza..." (39 caracteres). */
+export function looksLikeGeminiKey(value: string | undefined): value is string {
+  return typeof value === "string" && /^AIza[A-Za-z0-9_-]{30,}$/.test(value.trim());
 }
 
 /** Una clave de OpenAI tiene el formato "sk-...". El valor inicial del secreto en AWS no lo tiene. */

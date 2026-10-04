@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { fullTranscriptKey, transcriptCacheKey, type AIAnalysisProvider, type AudioChunk, type FrameSheet, type TranscriptSegment } from "@clipflow/shared";
+import { fullTranscriptKey, transcriptCacheKey, type AIAnalysisProvider, type AudioChunk, type FrameSheet, type TranscriptSegment, type VideoPart } from "@clipflow/shared";
 import { claimJob, createJob, schema, type DbHandle } from "@clipflow/shared/db";
 import { createTestDb } from "@clipflow/shared/db/testing";
 import { AIProviderError } from "./ai/openai.js";
-import { processAnalyzeJob } from "./pipeline.js";
+import { JobError, processAnalyzeJob } from "./pipeline.js";
 import { makeDeps, makeSampleVideo, seedVideoJob } from "./test-helpers.js";
 
 let h: DbHandle | undefined;
@@ -44,7 +44,7 @@ class FakeAI implements AIAnalysisProvider {
   constructor(
     private readonly fail = false,
     private readonly segments: TranscriptSegment[] = SEGMENTS,
-    private readonly failAnalysis = false,
+    private readonly failAnalysis: boolean | "rate_limit" = false,
   ) {}
   async transcribe(chunks: AudioChunk[]) {
     if (this.fail) {
@@ -61,6 +61,9 @@ class FakeAI implements AIAnalysisProvider {
   async analyze(_segments: TranscriptSegment[], _duration: number, options?: { targetClipSeconds?: number }) {
     this.analyzeCalls++;
     this.analyzeOptions = options;
+    if (this.failAnalysis === "rate_limit") {
+      throw new AIProviderError("OpenAI limitó las solicitudes por minuto de tu cuenta (límite de velocidad)", true, 429, "rate_limit_exceeded");
+    }
     if (this.failAnalysis) throw new AIProviderError("OpenAI devolvió JSON inválido", true);
     // El contenido importante está en una parte SILENCIOSA (2–12 s): sin IA no se elegiría.
     return {
@@ -143,6 +146,88 @@ describe("análisis de imágenes con IA (experimental)", () => {
     });
     expect(result.vision).toBe("disabled");
     expect(ai.sheets).toEqual([]);
+  });
+});
+
+function probeSize(file: string) {
+  return execFileSync("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", file])
+    .toString()
+    .trim();
+}
+
+/** Pipeline nuevo de prueba: "mira" el video (recibe las partes) y devuelve momentos con título y motivo. */
+class FakeGeminiPipeline implements AIAnalysisProvider {
+  readonly name = "groq";
+  readonly transcriptionModel = "whisper-large-v3";
+  readonly watchesVideo = true;
+  parts: VideoPart[] = [];
+  titleCalls = 0;
+  constructor(private readonly segments: TranscriptSegment[] = SEGMENTS) {}
+  async transcribe() {
+    return { segments: this.segments, language: "spanish", usage: { audioSeconds: 40, estimatedCostUsd: 0.0012 }, provider: "groq:whisper-large-v3" };
+  }
+  async analyze(_s: TranscriptSegment[], _d: number, options?: { videoParts?: VideoPart[] }) {
+    this.parts = options?.videoParts ?? [];
+    return {
+      highlights: [{ startSeconds: 5, endSeconds: 20, strength: 0.9, title: "El gancho de Gemini", reason: "Pregunta fuerte y respuesta sorprendente." }],
+      usage: { inputTokens: 4000, outputTokens: 100, estimatedCostUsd: 0.007 },
+      provider: "gemini:gemini-3.5-flash",
+    };
+  }
+  async generateClipSuggestions(_s: TranscriptSegment[], moments: unknown[]) {
+    this.titleCalls++;
+    return { titles: moments.map(() => "Título de OpenAI"), usage: {} };
+  }
+}
+
+describe("pipeline nuevo (Groq + Gemini) elegido por el trabajo", () => {
+  it("Gemini recibe el video en partes livianas, sus títulos y motivos quedan en los clips, y se registra quién hizo qué", async () => {
+    const db = h!.db;
+    const { job } = await seedVideoJob(db, root, { sample, params: { pipeline: "gemini:gemini-3.5-flash", skipTranscriptCache: true } });
+    const gemini = new FakeGeminiPipeline();
+    const asked: string[] = [];
+    const deps = {
+      ...makeDeps(db, root, path.join(root, "work")),
+      ai: new FakeAI(),
+      aiFor: (p: string) => (asked.push(p), gemini),
+    };
+    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    expect(asked).toEqual(["gemini:gemini-3.5-flash"]);
+    expect(result).toMatchObject({
+      ai: "used",
+      pipeline: "gemini:gemini-3.5-flash",
+      selection: "ai",
+      providers: { transcription: "groq:whisper-large-v3", analysis: "gemini:gemini-3.5-flash" },
+    });
+    // Una parte de video liviana (el video de prueba dura 40 s) que existía al analizar.
+    expect(gemini.parts).toHaveLength(1);
+    expect(gemini.parts[0]).toMatchObject({ offsetSeconds: 0 });
+    const clipRows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
+    const best = clipRows.find((c) => c.title === "El gancho de Gemini");
+    expect(best).toBeDefined();
+    expect(best!.aiReason).toBe("Pregunta fuerte y respuesta sorprendente.");
+    // El clip sale del original con el encuadre vertical de siempre.
+    expect(probeSize(path.join(root, best!.s3Key!))).toBe("1080,1920");
+    expect(result.costs!.transcriptionUsd).toBeCloseTo(0.0012);
+  });
+
+  it("sin claves para el pipeline pedido, usa el actual", async () => {
+    const db = h!.db;
+    const { job } = await seedVideoJob(db, root, { sample, params: { pipeline: "gemini:x" } });
+    const deps = { ...makeDeps(db, root, path.join(root, "work")), ai: new FakeAI(), aiFor: () => null };
+    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    expect(result.pipeline).toBe("classic");
+  });
+
+  it("sin habla, Gemini igual elige momentos mirando el video (p. ej. gameplay)", async () => {
+    const db = h!.db;
+    const { job } = await seedVideoJob(db, root, { sample, params: { pipeline: "gemini" } });
+    const gemini = new FakeGeminiPipeline([]);
+    const deps = { ...makeDeps(db, root, path.join(root, "work")), ai: new FakeAI(), aiFor: () => gemini };
+    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    expect(result).toMatchObject({ ai: "used", selection: "ai" });
+    const clipRows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
+    expect(clipRows.some((c) => c.title === "El gancho de Gemini")).toBe(true);
   });
 });
 
@@ -243,6 +328,24 @@ describe("procesamiento con IA", () => {
     expect(subs.length).toBeGreaterThan(0);
     const clips = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
     expect(clips.some((c) => c.title?.startsWith("Título"))).toBe(true);
+  });
+
+  it("OpenAI saturado (límite por minuto): reintenta el trabajo más tarde en vez de clips sin IA; en el último intento sigue sin ella", async () => {
+    const db = h!.db;
+    const { job } = await seedVideoJob(db, root, { sample });
+    const ai = new FakeAI(false, SEGMENTS, "rate_limit");
+    const deps = { ...makeDeps(db, root, path.join(root, "work")), ai };
+    const error = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps).catch((e) => e);
+    expect(error).toBeInstanceOf(JobError);
+    expect(error).toMatchObject({ code: "ai_busy", retryable: true });
+    expect(error.userMessage).toMatch(/Lo reintentamos en unos minutos/);
+    expect(await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id))).toEqual([]);
+
+    // Último intento: ya no se espera más; se crean los clips por señales y se dice por qué.
+    await db.update(schema.processingJobs).set({ attempts: 2, status: "queued", lockedBy: null }).where(eq(schema.processingJobs.id, job.id));
+    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    expect(result).toMatchObject({ ai: "unavailable", selection: "signals" });
+    expect(result.clipCount).toBeGreaterThan(0);
   });
 
   it("la transcripción se guarda por video y se reutiliza al volver a procesar: no se paga dos veces", async () => {

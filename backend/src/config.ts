@@ -36,6 +36,26 @@ const EnvSchema = z.object({
   WORKER_MAX_TASKS: z.coerce.number().int().positive().default(3),
   COGNITO_USER_POOL_ID: z.string().regex(/^[\w-]+_[0-9a-zA-Z]+$/, "formato esperado: us-east-1_XXXXXXX"),
   COGNITO_CLIENT_ID: z.string().min(1),
+  /** Correos con acceso a las herramientas internas (prueba lado a lado). Separados por coma. */
+  ADMIN_EMAILS: z
+    .string()
+    .default("")
+    .transform((value) =>
+      value
+        .split(",")
+        .map((e) => e.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  /** Pipelines que compara la prueba lado a lado ("classic" = actual; "gemini:<modelo>"). */
+  COMPARE_PIPELINES: z
+    .string()
+    .default("classic,gemini:gemini-3.5-flash,gemini:gemini-3.1-flash-lite")
+    .transform((value) =>
+      value
+        .split(",")
+        .map((p) => p.trim())
+        .filter((p) => /^(classic|gemini(:[a-z0-9.-]{3,60})?)$/.test(p)),
+    ),
 });
 
 export type ApiConfig = z.infer<typeof EnvSchema>;

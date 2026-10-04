@@ -24,6 +24,7 @@ import {
   type SignalSeries,
   type SubtitleStyle,
   type TranscriptSegment,
+  type VideoPart,
 } from "@clipflow/shared";
 import { reportProgress, schema, type Database, type Job, type JobStage } from "@clipflow/shared/db";
 import {
@@ -35,6 +36,7 @@ import {
   extractAudioChunks,
   FfmpegError,
   makePhoneCompatible,
+  makeVideoParts,
   probe,
   renderThumbnail,
   renderVerticalClip,
@@ -91,6 +93,13 @@ export interface PipelineDeps {
   ai: AIAnalysisProvider | null;
   /** Por qué no hay IA (para mostrarlo al usuario). */
   aiDisabledReason?: string;
+  /**
+   * Proveedor para un pipeline concreto ("classic", "gemini" o "gemini:<modelo>"). Lo usa la prueba lado a
+   * lado (`params.pipeline`) y AI_PIPELINE. Devuelve null si ese pipeline no está disponible (sin claves).
+   */
+  aiFor?: (pipeline: string) => AIAnalysisProvider | null;
+  /** Pipeline por defecto (AI_PIPELINE): "classic" o "gemini". */
+  defaultPipeline?: string;
   /** Máximo de minutos de audio que se envían a la IA por video (control de costos). */
   aiMaxAudioMinutes: number;
   /** Clips que se generan a la vez (por defecto 2). */
@@ -183,7 +192,12 @@ function filenameFromTitle(title: string | null, fallback: string, ext: string):
  * genera clips 9:16 y miniaturas → sube a S3 → registra clips y consumo.
  * Es seguro repetirlo: las rutas de salida son fijas por trabajo y los clips previos se reemplazan.
  */
-export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<JobResult> {
+export async function processAnalyzeJob(job: Job, baseDeps: PipelineDeps): Promise<JobResult> {
+  // Pipeline de IA de este trabajo: el que pide (prueba lado a lado) o el del servidor.
+  const requestedPipeline = (job.params as JobParams).pipeline ?? baseDeps.defaultPipeline ?? "classic";
+  const pipelineAI = requestedPipeline !== "classic" && baseDeps.aiFor ? baseDeps.aiFor(requestedPipeline) : null;
+  const pipeline = pipelineAI ? requestedPipeline : "classic";
+  const deps: PipelineDeps = pipelineAI ? { ...baseDeps, ai: pipelineAI } : baseDeps;
   const startedAt = Date.now();
   const dir = path.join(deps.workDir, job.id);
   const controller = new AbortController();
@@ -406,7 +420,15 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       jobId: job.id,
       sourceUrl: video.sourceUrl,
       targetClipSeconds: clipDuration,
+      canRetry: job.attempts < job.maxAttempts,
+      skipTranscriptCache: params.skipTranscriptCache === true,
     });
+    // Las imágenes esperan al análisis de texto; si el trabajo se va a reintentar por OpenAI saturado,
+    // no se gastan imágenes ahora. (Se marca como manejada: con la visión apagada nadie la espera.)
+    const visionGate = aiPromise.then((a) => {
+      if (a.retryLater) throw new Error("se reintentará");
+    });
+    visionGate.catch(() => undefined);
     const chatPromise = readTwitchChat(deps, video.sourceUrl, info.durationSeconds, controller.signal, job.id);
     const [raw, ai, vision, chat] = await Promise.all([
       analyzeSignals(deps.tools, input, info, dir, {
@@ -414,10 +436,17 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
         onProgress: (sec) => void report("signals")(sec / info.durationSeconds),
       }),
       aiPromise,
-      runVision(deps, info, input, dir, contentBox, controller.signal, async (f) => void (await report("vision")(f)), aiPromise),
+      runVision(deps, info, input, dir, contentBox, controller.signal, async (f) => void (await report("vision")(f)), visionGate),
       chatPromise,
     ]);
     check();
+    if (ai.retryLater) {
+      throw new JobError(
+        "ai_busy",
+        "OpenAI está saturado por ahora (límite de uso por minuto de tu cuenta). Lo reintentamos en unos minutos; la transcripción ya quedó guardada.",
+        true,
+      );
+    }
     const signals: SignalSeries = {
       visual: raw.visual,
       ...(raw.audio ? { audio: raw.audio } : {}),
@@ -463,11 +492,14 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
           snapToSentences(m, ai.segments, { videoDurationSeconds: info.durationSeconds, outward: selection === "ai" }),
         )
       : moments;
-    let titles: (string | null)[] = finalMoments.map(() => null);
-    if (deps.ai && ai.segments.length && finalMoments.length) {
+    // Títulos: los que propuso la IA al elegir el momento (Gemini); a los demás se les pide uno.
+    let titles: (string | null)[] = finalMoments.map((m) => m.title ?? null);
+    const untitled = finalMoments.filter((m) => !m.title);
+    if (deps.ai && ai.segments.length && untitled.length) {
       try {
-        const suggestion = await deps.ai.generateClipSuggestions(ai.segments, finalMoments);
-        titles = suggestion.titles;
+        const suggestion = await deps.ai.generateClipSuggestions(ai.segments, untitled);
+        let k = 0;
+        titles = titles.map((t) => t ?? suggestion.titles[k++] ?? null);
         addUsage(ai.usage, suggestion.usage);
       } catch (err) {
         deps.log.warn({ jobId: job.id, error: (err as Error).message }, "no se pudieron generar títulos");
@@ -639,6 +671,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
               aspectRatio: "9:16" as const,
               score: moment.score,
               scoreBreakdown: moment.breakdown,
+              aiReason: moment.reason ?? null,
               s3Key: key,
               thumbnailS3Key: thumbKey,
             })),
@@ -715,6 +748,8 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     return {
       clipCount: outputs.length,
       selection,
+      pipeline,
+      ...(ai.providers && Object.keys(ai.providers).length ? { providers: ai.providers } : {}),
       ai: ai.status,
       ...(ai.reason ? { aiReason: ai.reason } : {}),
       language: ai.language,
@@ -810,6 +845,13 @@ interface AIOutcome {
   language: string | null;
   usage: AIUsage;
   transcribeCostUsd: number;
+  /**
+   * OpenAI falló por algo temporal (límite por minuto, error 5xx) y quedan intentos: el trabajo se
+   * reintenta en unos minutos (con la transcripción guardada) en vez de elegir clips sin la IA.
+   */
+  retryLater?: boolean;
+  /** Quién transcribió y quién eligió los momentos (registro de la prueba lado a lado). */
+  providers?: { transcription?: string; analysis?: string; fallbackReason?: string };
 }
 
 function addUsage(total: AIUsage, extra: AIUsage) {
@@ -852,12 +894,23 @@ async function runAI(
   dir: string,
   signal: AbortSignal,
   onProgress: (fraction: number) => Promise<void>,
-  ids: { userId: string; videoId: string; jobId: string; sourceUrl?: string | null; targetClipSeconds?: number },
+  ids: {
+    userId: string;
+    videoId: string;
+    jobId: string;
+    sourceUrl?: string | null;
+    targetClipSeconds?: number;
+    /** Quedan intentos del trabajo: un fallo temporal de OpenAI se reintenta más tarde. */
+    canRetry?: boolean;
+    /** No reutilizar transcripciones guardadas (prueba lado a lado: costo real). */
+    skipTranscriptCache?: boolean;
+  },
 ): Promise<AIOutcome> {
   const empty = { segments: [], language: null, usage: {}, transcribeCostUsd: 0 };
   if (!deps.ai) return { ...empty, status: "disabled", reason: deps.aiDisabledReason ?? "IA no configurada" };
   if (!info.hasAudio) return { ...empty, status: "no_audio", reason: "El video no tiene audio" };
   let step = "la preparación del audio";
+  const providers: NonNullable<AIOutcome["providers"]> = {};
   // Si la transcripción salió bien y lo que falla es el análisis, se conserva (ya se pagó): sirve
   // para subtítulos, títulos y la transcripción completa.
   let transcribed: Transcribed | null = null;
@@ -868,10 +921,10 @@ async function runAI(
       ? transcriptCacheKey(ids.userId, ids.videoId, deps.ai.name, deps.ai.transcriptionModel)
       : null;
     const cacheFile = path.join(dir, "transcript-cache.json");
-    let cached = cacheKey ? await loadTranscript(deps, cacheKey, coveredSeconds, cacheFile) : null;
+    let cached = cacheKey && !ids.skipTranscriptCache ? await loadTranscript(deps, cacheKey, coveredSeconds, cacheFile) : null;
     // El MISMO enlace importado otra vez es otro video en ClipFlow: se busca la transcripción de los
     // videos anteriores de ESTE usuario con ese enlace (nunca de otros usuarios).
-    if (!cached && cacheKey && ids.sourceUrl && deps.ai.transcriptionModel) {
+    if (!cached && cacheKey && !ids.skipTranscriptCache && ids.sourceUrl && deps.ai.transcriptionModel) {
       const earlier = await deps.db
         .select({ id: videos.id })
         .from(videos)
@@ -905,6 +958,7 @@ async function runAI(
       await onProgress(0.2);
       step = "la transcripción";
       transcript = await deps.ai.transcribe(chunks);
+      if (transcript.provider) providers.transcription = transcript.provider;
       analyzedSeconds = chunks.reduce((sum, c) => sum + c.durationSeconds, 0);
       if (cacheKey) {
         await saveTranscript(deps, cacheKey, path.join(dir, "transcript-cache.json"), {
@@ -921,7 +975,9 @@ async function runAI(
     // Sin habla real (p. ej. gameplay o música): no se inventan títulos ni subtítulos,
     // y los momentos se eligen por acción, sonido y movimiento.
     const speechSeconds = transcript.segments.reduce((sum, s) => sum + (s.endSeconds - s.startSeconds), 0);
-    if (speechSeconds < Math.max(15, analyzedSeconds * 0.1)) {
+    const noSpeech = speechSeconds < Math.max(15, analyzedSeconds * 0.1);
+    // Un proveedor que MIRA el video (Gemini) puede elegir momentos aunque no se hable (p. ej. gameplay).
+    if (noSpeech && !deps.ai.watchesVideo) {
       return {
         status: "no_speech",
         reason: "No se detectó habla (p. ej. gameplay o música); los clips se eligieron por acción, sonido y movimiento",
@@ -932,22 +988,54 @@ async function runAI(
       };
     }
     step = "el análisis de momentos";
-    const analysis = await deps.ai.analyze(transcript.segments, info.durationSeconds, { targetClipSeconds: ids.targetClipSeconds });
+    // Gemini mira el video: partes de ~10 min en baja resolución (el clip final sale del original).
+    let videoParts: VideoPart[] | undefined;
+    if (deps.ai.watchesVideo) {
+      try {
+        videoParts = await makeVideoParts(deps.tools, input, dir, info.durationSeconds, { signal });
+      } catch (err) {
+        if (signal.aborted) throw err;
+        deps.log.warn({ error: (err as Error).message }, "no se pudieron preparar las partes de video para la IA");
+      }
+    }
+    const segmentsForAI = noSpeech ? [] : transcript.segments;
+    const analysis = await deps.ai.analyze(segmentsForAI, info.durationSeconds, { targetClipSeconds: ids.targetClipSeconds, videoParts });
+    if (analysis.provider) providers.analysis = analysis.provider;
+    if (analysis.fallbackReason) providers.fallbackReason = analysis.fallbackReason;
+    if (noSpeech && analysis.highlights.length === 0) {
+      return {
+        status: "no_speech",
+        reason: "No se detectó habla (p. ej. gameplay o música); los clips se eligieron por acción, sonido y movimiento",
+        segments: [],
+        language: null,
+        usage: { ...transcript.usage },
+        transcribeCostUsd: transcript.usage.estimatedCostUsd ?? 0,
+        providers,
+      };
+    }
     const usage: AIUsage = { ...transcript.usage };
     const transcribeCostUsd = transcript.usage.estimatedCostUsd ?? 0;
     addUsage(usage, analysis.usage);
     return {
       status: "used",
-      segments: transcript.segments,
+      segments: segmentsForAI,
       highlights: analysis.highlights,
-      language: transcript.language,
+      language: noSpeech ? null : transcript.language,
       usage,
       transcribeCostUsd,
+      providers,
     };
   } catch (err) {
     if (signal.aborted) throw err;
     const e = err as AIProviderError;
-    deps.log.warn({ step, error: e.message, status: e.status, code: e.code }, "IA no disponible; se continúa solo con FFmpeg");
+    // Solo lo que se recupera solo en minutos: límite por minuto (429), errores de OpenAI (5xx) o la red.
+    const temporary =
+      err instanceof AIProviderError && e.retryable && (e.status === 429 || (e.status ?? 0) >= 500 || e.message === "No se pudo conectar con OpenAI");
+    const retryLater = temporary && ids.canRetry === true;
+    deps.log.warn(
+      { step, error: e.message, status: e.status, code: e.code, limit: e.limit, retryLater },
+      retryLater ? "IA saturada; el trabajo se reintentará más tarde" : "IA no disponible; se continúa solo con FFmpeg",
+    );
     // Solo se muestran mensajes propios (los de OpenAIProvider no incluyen contenido del usuario).
     const detail = err instanceof AIProviderError ? e.message : "error inesperado";
     if (transcribed) {
@@ -958,9 +1046,11 @@ async function runAI(
         language: transcribed.language,
         usage: { ...transcribed.usage },
         transcribeCostUsd: transcribed.usage.estimatedCostUsd ?? 0,
+        retryLater,
+        providers,
       };
     }
-    return { ...empty, status: "unavailable", reason: `falló ${step}: ${detail}` };
+    return { ...empty, status: "unavailable", reason: `falló ${step}: ${detail}`, retryLater, providers };
   }
 }
 
@@ -997,7 +1087,12 @@ async function runVision(
       onProgress: (s) => void onProgress((s / info.durationSeconds) * 0.3).catch(() => undefined),
     });
     await onProgress(0.3);
-    await after?.catch(() => undefined);
+    // Si el análisis de texto avisa que el trabajo se reintentará, no se envían imágenes.
+    const go = await (after ?? Promise.resolve()).then(
+      () => true,
+      () => false,
+    );
+    if (!go) return off;
     // Tiempo máximo para empezar hojas nuevas: en videos largos el límite por minuto de la cuenta
     // puede hacerlo muy lento; lo que no alcance se omite y el video no espera de más.
     const deadline = Date.now() + (config.budgetSeconds ?? 180) * 1000;

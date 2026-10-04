@@ -102,6 +102,15 @@ export interface JobParams {
   subtitleStyle?: SubtitleStyle;
   /** Importación "solo descargar": se baja el video y no se crean clips. */
   downloadOnly?: boolean;
+  /**
+   * Pipeline de IA de este trabajo (solo lo pone la prueba lado a lado del administrador):
+   * "classic" = OpenAI; "gemini:<modelo>" = Groq + ese modelo de Gemini. Sin valor, el del servidor.
+   */
+  pipeline?: string;
+  /** Prueba lado a lado a la que pertenece este trabajo. */
+  comparisonId?: string;
+  /** No reutilizar transcripciones guardadas (para medir el costo real en la comparación). */
+  skipTranscriptCache?: boolean;
 }
 
 export interface JobResult {
@@ -114,6 +123,9 @@ export interface JobResult {
    */
   ai: "used" | "no_speech" | "disabled" | "unavailable" | "no_audio";
   aiReason?: string;
+  /** Pipeline usado y quién hizo cada parte (p. ej. transcription "groq:whisper-large-v3", analysis "gemini:gemini-3.5-flash"). */
+  pipeline?: string;
+  providers?: { transcription?: string; analysis?: string; fallbackReason?: string };
   language?: string | null;
   /** Cómo se eligieron los momentos: "ai" = los eligió la IA (videos con voz); "signals" = por volumen, acción y movimiento. */
   selection?: "ai" | "signals";
