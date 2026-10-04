@@ -113,13 +113,7 @@ export function JobProgressPanel({ job, subtitles, imported = false }: { job: Jo
           </div>
         </div>
         <p className="text-lg font-semibold">{jobLabel(job, t, locale)}</p>
-        <p className="min-h-5 text-sm text-muted">{hint ??
-            (job.status === "queued"
-              ? // Reintento: por qué (p. ej. OpenAI saturado) en vez de "empieza en unos segundos".
-                job.attempts > 0 && job.errorMessage
-                ? translateMessage(job.errorMessage, locale)
-                : t.progress.startsSoon
-              : "")}</p>
+        <p className="min-h-5 text-sm text-muted">{hint ?? (job.status === "queued" ? t.progress.startsSoon : "")}</p>
       </div>
 
       <ol className="space-y-3.5 rounded-2xl border border-line bg-surface p-4">

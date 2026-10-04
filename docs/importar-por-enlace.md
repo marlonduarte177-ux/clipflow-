@@ -85,8 +85,8 @@ usa para elegir los momentos: donde el chat explota suele haber un buen clip.
 - **Nunca hace fallar el trabajo:** si el chat no se puede leer (VOD sin repetición del chat, Twitch
   caído), los momentos se eligen con las demás señales. Tiene un límite de 2 min y corre en paralelo
   con la transcripción.
-- **Resultado:** el trabajo guarda `result.chat` ("used"/"unavailable") y `result.chatMessages`. La web
-  muestra "También se usó el chat del directo de Twitch…".
+- **Resultado:** el trabajo guarda `result.chat` ("used"/"unavailable") y `result.chatMessages` (solo
+  para registros; la web no lo muestra).
 - **Probado:** un VOD real de 29 min: 118 muestras y 3220 mensajes leídos en 3 s.
 - **Límites honestos:**
   - Las suscripciones y donaciones **solo cuentan si aparecen en el chat** (un bot que las anuncia o

@@ -111,7 +111,7 @@ const es = {
   },
   options: {
     duration: "Duración de cada clip",
-    durationHint: "Aproximada: si hay voz, la IA ajusta el largo para que cada idea quede completa.",
+    durationHint: "Aproximada: se ajusta unos segundos para no cortar frases a la mitad.",
     subtitles: "Subtítulos en el video",
     highlight: "Resaltado",
     classic: "Clásico",
@@ -231,7 +231,6 @@ const es = {
     from: (host: string) => `desde ${host}`,
     clips: (n: number) => `${n} clips`,
     of: (s: number) => `de ${s} s`,
-    aiPicked: "momentos elegidos por la IA",
     subtitlesIn: (language: string) => `subtítulos en ${language.toLowerCase()}`,
     itsLanguage: "su idioma",
     backToVideos: "Volver a Mis videos",
@@ -246,9 +245,6 @@ const es = {
     wantClipsText: "Usamos el video que ya tenemos: no hay que volver a pegar el enlace.",
     unfinished: "Esta subida no terminó. Vuelve a subir el video desde “Subir video”.",
     reanalyze: "Volver a analizar con IA",
-    reanalyzeNote: (withTranscript: boolean) =>
-      `Usamos el video que ya está guardado${withTranscript ? " y su transcripción: no se vuelve a pagar" : ""}.`,
-    chatUsed: "También se usó el chat del directo de Twitch para encontrar los momentos donde más reaccionó la gente.",
     filter: "Filtrar clips",
     tabAll: (n: number) => `Todos · ${n}`,
     tabApproved: (n: number) => `Aprobados · ${n}`,
@@ -256,11 +252,6 @@ const es = {
     noMoments: "No encontramos momentos que destaquen en este video (sin cambios claros de voz, volumen ni de escena).",
     noApproved: "Todavía no aprobaste ningún clip.",
     noDiscarded: "No hay clips descartados.",
-    aiNoSpeech: "No se detectó habla (gameplay o música): los clips se eligieron por acción, volumen y movimiento. Sin títulos ni subtítulos.",
-    aiNoAudio: "El video no tiene audio: los clips se eligieron por movimiento y cambios de escena.",
-    aiMomentsFailed: (reason: string | null) =>
-      `La IA no pudo elegir los momentos${reason ? ` (${reason})` : ""}. Se eligieron por acción, volumen y movimiento; los subtítulos y la transcripción sí están.`,
-    aiNone: (reason: string | null) => `Sin análisis de IA${reason ? `: ${reason}` : ""}. Los clips se eligieron por acción, volumen y movimiento.`,
   },
   clip: {
     unavailable: "Video no disponible",
@@ -463,7 +454,7 @@ const en: Messages = {
   },
   options: {
     duration: "Length of each clip",
-    durationHint: "Approximate: when there is speech, the AI adjusts the length so each idea is complete.",
+    durationHint: "Approximate: adjusted by a few seconds so sentences aren't cut in half.",
     subtitles: "Captions on the video",
     highlight: "Highlight",
     classic: "Classic",
@@ -583,7 +574,6 @@ const en: Messages = {
     from: (host: string) => `from ${host}`,
     clips: (n: number) => `${n} clips`,
     of: (s: number) => `${s} s each`,
-    aiPicked: "moments picked by AI",
     subtitlesIn: (language: string) => `captions in ${language}`,
     itsLanguage: "its language",
     backToVideos: "Back to My videos",
@@ -598,9 +588,6 @@ const en: Messages = {
     wantClipsText: "We use the video we already have: no need to paste the link again.",
     unfinished: "This upload didn't finish. Upload the video again from “Upload video”.",
     reanalyze: "Analyze again with AI",
-    reanalyzeNote: (withTranscript: boolean) =>
-      `We use the video that is already saved${withTranscript ? " and its transcript: you don't pay for it again" : ""}.`,
-    chatUsed: "The Twitch stream chat was also used to find the moments where people reacted the most.",
     filter: "Filter clips",
     tabAll: (n: number) => `All · ${n}`,
     tabApproved: (n: number) => `Approved · ${n}`,
@@ -608,11 +595,6 @@ const en: Messages = {
     noMoments: "We didn't find standout moments in this video (no clear changes in voice, volume or scene).",
     noApproved: "You haven't approved any clips yet.",
     noDiscarded: "There are no discarded clips.",
-    aiNoSpeech: "No speech was detected (gameplay or music): the clips were picked by action, volume and motion. No titles or captions.",
-    aiNoAudio: "The video has no audio: the clips were picked by motion and scene changes.",
-    aiMomentsFailed: (reason: string | null) =>
-      `The AI couldn't pick the moments${reason ? ` (${reason})` : ""}. They were picked by action, volume and motion; captions and the transcript are available.`,
-    aiNone: (reason: string | null) => `No AI analysis${reason ? `: ${reason}` : ""}. The clips were picked by action, volume and motion.`,
   },
   clip: {
     unavailable: "Video not available",

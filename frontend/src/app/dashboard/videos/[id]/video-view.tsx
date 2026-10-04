@@ -176,7 +176,7 @@ export function VideoView({ videoId }: { videoId: string }) {
   }
   const summary = (downloadReady ? [formatBytes(video.sizeBytes), formatDuration(video.durationSeconds), origin] : [
     job?.status === "completed" ? t.video.clips(counts.all) : video.sizeBytes > 0 ? formatBytes(video.sizeBytes) : origin,
-    result?.selection === "ai" ? t.video.aiPicked : job?.params.clipDurationSeconds ? t.video.of(job.params.clipDurationSeconds) : formatDuration(video.durationSeconds),
+    job?.params.clipDurationSeconds ? t.video.of(job.params.clipDurationSeconds) : formatDuration(video.durationSeconds),
     result?.ai === "used" && style !== "none" ? t.video.subtitlesIn(language ?? t.video.itsLanguage) : null,
   ])
     .filter(Boolean)
@@ -299,25 +299,14 @@ export function VideoView({ videoId }: { videoId: string }) {
 
       {job?.status === "completed" && !downloadReady ? (
         <section className="space-y-4">
-          {result && result.ai !== "used" ? <AiNote result={result} /> : null}
           {result && (result.ai === "unavailable" || result.ai === "disabled") ? (
-            <div className="space-y-1.5">
-              <button
-                onClick={() => jobAction("retry")}
-                className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-accent font-bold text-on-accent"
-              >
-                <RetryIcon size={18} />
-                {t.video.reanalyze}
-              </button>
-              <p className="text-center text-xs text-muted">
-                {t.video.reanalyzeNote(Boolean(result.language))}
-              </p>
-            </div>
-          ) : null}
-          {result?.chat === "used" ? (
-            <p className="rounded-2xl border border-line bg-surface px-4 py-3 text-[13px] leading-[18px] text-muted">
-              {t.video.chatUsed}
-            </p>
+            <button
+              onClick={() => jobAction("retry")}
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-accent font-bold text-on-accent"
+            >
+              <RetryIcon size={18} />
+              {t.video.reanalyze}
+            </button>
           ) : null}
 
           <div className="-mx-5 flex gap-2 overflow-x-auto px-5 sm:mx-0 sm:px-0" role="tablist" aria-label={t.video.filter}>
@@ -408,21 +397,4 @@ export function VideoView({ videoId }: { videoId: string }) {
       ) : null}
     </div>
   );
-}
-
-/** Por qué no hubo análisis con IA (sin habla, sin clave, error), en lenguaje simple. */
-function AiNote({ result }: { result: NonNullable<JobDto["result"]> }) {
-  const t = useT();
-  const { locale } = useLocale();
-  const reason = translateMessage(result.aiReason, locale) ?? null;
-  const text =
-    result.ai === "no_speech"
-      ? t.video.aiNoSpeech
-      : result.ai === "no_audio"
-        ? t.video.aiNoAudio
-        : result.ai === "unavailable" && result.language
-          ? // Falló solo el análisis de momentos: la transcripción se conservó.
-            t.video.aiMomentsFailed(reason)
-          : t.video.aiNone(reason);
-  return <p className="rounded-2xl border border-line bg-surface px-4 py-3 text-[13px] leading-[18px] text-muted">{text}</p>;
 }

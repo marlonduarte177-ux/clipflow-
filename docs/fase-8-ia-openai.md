@@ -296,8 +296,7 @@ quedar fuera, y una historia de 50 s se cortaba a 30 s.
   hablado) no se agregan.
 - **Sin voz o sin IA** (gameplay, música, IA caída): sigue el sistema por señales con ventanas del largo
   elegido.
-- **Resultado:** `result.selection` dice `"ai"` o `"signals"`. En la web, el resumen del video dice
-  «momentos elegidos por la IA».
+- **Resultado:** `result.selection` dice `"ai"` o `"signals"` (solo para registros; la web no lo muestra).
 - **Costo:** igual que antes: la IA ya hacía este análisis; ahora se aprovecha mejor.
 
 ## OpenAI saturado: se reintenta en vez de hacer clips sin IA (04/10/2026)
@@ -310,7 +309,7 @@ análisis se rindió y los clips se eligieron solo por volumen y movimiento: sal
   - el trabajo **se reintenta solo**, a los 1 y 2 minutos, en vez de crear clips sin la IA;
   - la transcripción ya está guardada, así que el reintento no la vuelve a pagar;
   - tampoco se envían imágenes en ese intento;
-  - la pantalla de progreso muestra «OpenAI está saturado por ahora… Lo reintentamos en unos minutos».
+  - la pantalla de progreso solo dice «En cola para reintentar» (el motivo queda en el registro).
   - Solo en el **último intento** (3 en total) se crean los clips por señales, y se avisa por qué.
 - **Límites que no se arreglan esperando:** se detectan leyendo el mensaje de OpenAI y no se pierde tiempo
   reintentando.
@@ -324,3 +323,8 @@ análisis se rindió y los clips se eligieron solo por volumen y movimiento: sal
 **Si pasa seguido:** en platform.openai.com → Settings → Limits se ve el nivel (Tier) de la cuenta. Los
 límites suben solos al acumular gasto (Tier 1 → 2 tras 50 USD pagados y 7 días). Recargar saldo ayuda a
 subir de nivel.
+
+**Regla de la interfaz (04/10/2026):** la app no le explica al usuario cómo trabaja por dentro (IA, chat,
+límites de OpenAI, por qué se eligieron los clips). Esos detalles quedan en el resultado del trabajo y en
+los registros. Se quitaron los avisos de «momentos elegidos por la IA», «También se usó el chat…», los
+motivos de por qué no hubo análisis de IA y la nota bajo «Volver a analizar con IA»; el botón se mantiene.
