@@ -29,6 +29,13 @@
       "when": 1790821128971,
       "tag": "0003_import_by_link",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791084087081,
+      "tag": "0004_clip_ai_reason",
+      "breakpoints": true
     }
   ]
 }

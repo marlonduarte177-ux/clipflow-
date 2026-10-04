@@ -249,6 +249,8 @@ export const clips = pgTable(
     /** Score de interés 0–1 y el aporte de cada señal. */
     score: numeric("score", { precision: 5, scale: 4, mode: "number" }),
     scoreBreakdown: jsonb("score_breakdown"),
+    /** Por qué la IA eligió este momento (solo para revisión interna; la web no lo muestra a usuarios). */
+    aiReason: text("ai_reason"),
     s3Key: text("s3_key"),
     thumbnailS3Key: text("thumbnail_s3_key"),
     createdAt: createdAt(),

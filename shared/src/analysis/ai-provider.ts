@@ -38,6 +38,16 @@ export interface ContentHighlight {
   /** 0–1: qué tan buen clip sería. */
   strength: number;
   reason?: string;
+  /** Título con gancho que propuso la IA (si lo da, no se pide aparte). */
+  title?: string;
+}
+
+/** Una parte del video en baja resolución para que la IA la vea (imagen + audio). */
+export interface VideoPart {
+  path: string;
+  /** Segundo del video original en que empieza esta parte. */
+  offsetSeconds: number;
+  durationSeconds: number;
 }
 
 /** Una hoja con varios fotogramas en cuadrícula (izquierda→derecha, arriba→abajo). */
@@ -66,15 +76,22 @@ export interface AIAnalysisProvider {
    * y se reutiliza al reintentar o volver a procesar: no se paga dos veces.
    */
   readonly transcriptionModel?: string;
-  /** Transcribe el audio con tiempos por frase. */
-  transcribe(chunks: AudioChunk[]): Promise<{ segments: TranscriptSegment[]; language: string | null; usage: AIUsage }>;
+  /**
+   * Si es true, `analyze` aprovecha el video (imagen + audio) en `options.videoParts`: el procesador
+   * prepara esas partes en baja resolución. También puede elegir momentos sin habla.
+   */
+  readonly watchesVideo?: boolean;
+  /** Transcribe el audio con tiempos por frase. `provider`: quién transcribió de verdad (p. ej. "groq:whisper-large-v3"). */
+  transcribe(
+    chunks: AudioChunk[],
+  ): Promise<{ segments: TranscriptSegment[]; language: string | null; usage: AIUsage; provider?: string }>;
   /** Lee la transcripción y marca los mejores momentos por su contenido. */
   /** `targetClipSeconds`: duración que eligió el usuario, como guía del largo de cada momento. */
   analyze(
     segments: TranscriptSegment[],
     durationSeconds: number,
-    options?: { targetClipSeconds?: number },
-  ): Promise<{ highlights: ContentHighlight[]; usage: AIUsage }>;
+    options?: { targetClipSeconds?: number; videoParts?: VideoPart[] },
+  ): Promise<{ highlights: ContentHighlight[]; usage: AIUsage; provider?: string; fallbackReason?: string }>;
   /** Analiza fotogramas (opcional: solo proveedores con visión). */
   analyzeFrames?(
     sheets: FrameSheet[],

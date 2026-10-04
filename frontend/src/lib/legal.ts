@@ -4,7 +4,7 @@ export const LEGAL = {
   country: "Costa Rica",
   email: "soporte@clipflowia.com",
   site: "clipflowia.com",
-  updated: "3 de octubre de 2026",
+  updated: "4 de octubre de 2026",
   trial: { priceUsd: 1, days: 7, minutes: 60 },
   pro: { priceUsd: 15, minutes: 600 },
   refund: { days: 7, maxMinutesUsed: 15 },

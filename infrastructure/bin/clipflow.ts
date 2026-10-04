@@ -48,6 +48,7 @@ const api = new ApiStack(app, `${prefix}-api`, {
     securityGroup: worker.securityGroup,
   },
   webOrigins: config.webOrigins,
+  adminEmails: app.node.tryGetContext("adminEmails") || undefined,
 });
 
 // Alertas por correo y presupuesto. El correo y el presupuesto llegan desde variables de GitHub

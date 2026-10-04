@@ -14,6 +14,8 @@ import type {
 } from "@clipflow/shared";
 
 export interface OpenAIProviderOptions {
+  /** Nombre del proveedor (clave de la transcripción guardada). "groq" usa la API compatible de Groq. */
+  name?: string;
   apiKey: string;
   /** Único modelo que devuelve tiempos por frase (necesarios para subtítulos y cortes). */
   transcribeModel: string;
@@ -269,7 +271,9 @@ export function isLikelyHallucination(s: { no_speech_prob?: number; avg_logprob?
  * Todas las respuestas se validan: si la IA devuelve algo raro, se descarta.
  */
 export class OpenAIProvider implements AIAnalysisProvider {
-  readonly name = "openai";
+  get name(): string {
+    return this.options.name ?? "openai";
+  }
 
   get transcriptionModel(): string {
     return this.options.transcribeModel;

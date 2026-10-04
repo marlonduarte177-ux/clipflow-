@@ -82,6 +82,22 @@ export class WorkerStack extends Stack {
       removalPolicy: props.stage === "production" ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     });
 
+    // Claves de Groq (transcripción) y Google AI Studio (Gemini, elegir momentos). Igual que la de OpenAI:
+    // se crean con un valor de relleno (la función queda apagada y se usa OpenAI) y el usuario pega la
+    // real en Secrets Manager. Solo el worker puede leerlas.
+    const groqKey = new secretsmanager.Secret(this, "GroqApiKey", {
+      secretName: `${prefix}/groq-api-key`,
+      description: "Clave de Groq (console.groq.com) para transcribir. Reemplaza el valor por tu clave (gsk_...).",
+      generateSecretString: { passwordLength: 32, excludePunctuation: true },
+      removalPolicy: props.stage === "production" ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
+    });
+    const geminiKey = new secretsmanager.Secret(this, "GeminiApiKey", {
+      secretName: `${prefix}/gemini-api-key`,
+      description: "Clave de Google AI Studio (aistudio.google.com) para Gemini. Reemplaza el valor por tu clave (AIza...).",
+      generateSecretString: { passwordLength: 32, excludePunctuation: true },
+      removalPolicy: props.stage === "production" ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
+    });
+
     const cluster = new ecs.Cluster(this, "WorkerCluster", { clusterName: `${prefix}-workers`, vpc: props.vpc });
     this.cluster = cluster;
     this.taskFamily = `${prefix}-worker`;
@@ -123,6 +139,12 @@ export class WorkerStack extends Stack {
         OPENAI_TRANSCRIBE_MODEL: "whisper-1",
         OPENAI_ANALYSIS_MODEL: "gpt-4o-mini",
         OPENAI_MAX_AUDIO_MINUTES: "180",
+        // Pipeline de IA por defecto: "classic" (OpenAI) hasta decidir con la prueba lado a lado.
+        // "gemini" = Groq Whisper para transcribir + Gemini para elegir momentos (con OpenAI de respaldo).
+        AI_PIPELINE: "classic",
+        GROQ_TRANSCRIBE_MODEL: "whisper-large-v3",
+        GEMINI_MODEL: "gemini-3.5-flash",
+        GEMINI_MEDIA_RESOLUTION: "low",
         // Análisis de imágenes con IA: apagado (probado en staging: caro en videos largos y satura el
         // límite por minuto de OpenAI). El código sigue disponible: "true" lo vuelve a activar.
         AI_VISION_ENABLED: "false",
@@ -138,6 +160,8 @@ export class WorkerStack extends Stack {
         // una clave nueva se usa desde el siguiente video).
         OPENAI_API_KEY: ecs.Secret.fromSecretsManager(openAiKey),
         DOWNLOAD_PROXY_URL: ecs.Secret.fromSecretsManager(downloadProxy),
+        GROQ_API_KEY: ecs.Secret.fromSecretsManager(groqKey),
+        GEMINI_API_KEY: ecs.Secret.fromSecretsManager(geminiKey),
         DB_USER: ecs.Secret.fromSecretsManager(dbSecret, "username"),
         DB_PASSWORD: ecs.Secret.fromSecretsManager(dbSecret, "password"),
       },
@@ -254,5 +278,7 @@ export class WorkerStack extends Stack {
     new CfnOutput(this, "QueueUrl", { value: this.queue.queueUrl });
     new CfnOutput(this, "OpenAiSecretName", { value: openAiKey.secretName });
     new CfnOutput(this, "DownloadProxySecretName", { value: downloadProxy.secretName });
+    new CfnOutput(this, "GroqSecretName", { value: groqKey.secretName });
+    new CfnOutput(this, "GeminiSecretName", { value: geminiKey.secretName });
   }
 }

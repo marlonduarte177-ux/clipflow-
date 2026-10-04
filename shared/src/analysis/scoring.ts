@@ -19,6 +19,9 @@ export interface Moment {
   score: number;
   /** Aporte de cada señal (0–1) en esta ventana. */
   breakdown: Partial<Record<SignalName, number>>;
+  /** Título y motivo que dio la IA para este momento (si lo eligió ella). */
+  title?: string;
+  reason?: string;
 }
 
 export interface SelectMomentsInput {

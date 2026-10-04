@@ -57,6 +57,10 @@ export class FakeStorage implements VideoStorage {
     keys.forEach((k) => this.objects.delete(k));
     return keys.length;
   }
+  async copyObject(sourceKey: string, targetKey: string) {
+    if (!this.objects.has(sourceKey)) throw new Error("NoSuchKey");
+    this.objects.set(targetKey, this.objects.get(sourceKey)!);
+  }
   async presignGet(key: string, expires: number, downloadName?: string) {
     return `https://s3.test/${key}?get=1&expires=${expires}${downloadName ? `&download=${downloadName}` : ""}`;
   }
@@ -96,7 +100,10 @@ export interface TestContext {
   launcher: FakeLauncher;
 }
 
-export async function createTestApp(product: ProductConfig = DEFAULT_PRODUCT_CONFIG): Promise<TestContext> {
+export async function createTestApp(
+  product: ProductConfig = DEFAULT_PRODUCT_CONFIG,
+  admin?: { emails: string[]; comparePipelines: string[] },
+): Promise<TestContext> {
   const database = await createTestDb();
   const storage = new FakeStorage();
   const queue = new FakeQueue();
@@ -116,6 +123,7 @@ export async function createTestApp(product: ProductConfig = DEFAULT_PRODUCT_CON
     verifyToken,
     lookupEmail: async (token) => `${token.split(".")[1]}@example.com`,
     logger: false,
+    admin,
   });
   return { app, database, storage, queue, launcher };
 }

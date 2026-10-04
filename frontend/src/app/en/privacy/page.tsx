@@ -78,6 +78,14 @@ export default function PrivacyPageEn() {
                   business terms, it does not use this data to train its models.
                 </li>
                 <li>
+                  <strong>Groq:</strong> receives the audio of your videos to transcribe it.
+                </li>
+                <li>
+                  <strong>Google (Gemini):</strong> receives a low-resolution copy of your video (image and audio) and its
+                  transcript to pick the best moments. We use the paid service, under which Google does not use this data
+                  to improve its products.
+                </li>
+                <li>
                   <strong>Paddle:</strong> processes payments as Merchant of Record.
                 </li>
                 <li>
