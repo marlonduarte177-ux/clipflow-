@@ -229,6 +229,25 @@ describe("pipeline nuevo (Groq + Gemini) elegido por el trabajo", () => {
     const clipRows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
     expect(clipRows.some((c) => c.title === "El gancho de Gemini")).toBe(true);
   });
+
+  it("si la transcripción falla (Groq y OpenAI), Gemini igual elige los momentos con el audio del video", async () => {
+    const db = h!.db;
+    const { job } = await seedVideoJob(db, root, { sample, params: { pipeline: "gemini", skipTranscriptCache: true } });
+    const gemini = new FakeGeminiPipeline();
+    gemini.transcribe = async () => {
+      throw new AIProviderError("OpenAI rechazó la solicitud: sin saldo", false, 429, "insufficient_quota");
+    };
+    const deps = { ...makeDeps(db, root, path.join(root, "work")), ai: new FakeAI(), aiFor: () => gemini };
+    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    expect(result).toMatchObject({ ai: "used", selection: "ai", providers: { analysis: "gemini:gemini-3.5-flash" } });
+    expect(result.aiReason).toContain("falló la transcripción");
+    expect(gemini.parts).toHaveLength(1);
+    const clipRows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
+    const best = clipRows.find((c) => c.title === "El gancho de Gemini");
+    expect(best).toBeDefined();
+    // Sin transcripción no hay subtítulos.
+    expect(await db.select().from(schema.subtitles).where(eq(schema.subtitles.clipId, best!.id))).toHaveLength(0);
+  });
 });
 
 describe("procesamiento con IA", () => {
