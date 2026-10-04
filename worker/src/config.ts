@@ -83,9 +83,14 @@ export function looksLikeGroqKey(value: string | undefined): value is string {
   return typeof value === "string" && /^gsk_[A-Za-z0-9]{20,}$/.test(value.trim());
 }
 
-/** Una clave de Google AI Studio tiene el formato "AIza..." (39 caracteres). */
+/**
+ * Clave de Google AI Studio: las nuevas empiezan con "AQ." y las antiguas con "AIza".
+ * Ambas funcionan con la API nativa de Gemini (cabecera x-goog-api-key).
+ */
 export function looksLikeGeminiKey(value: string | undefined): value is string {
-  return typeof value === "string" && /^AIza[A-Za-z0-9_-]{30,}$/.test(value.trim());
+  if (typeof value !== "string") return false;
+  const key = value.trim();
+  return /^AIza[A-Za-z0-9_-]{30,}$/.test(key) || /^AQ\.[A-Za-z0-9._-]{20,}$/.test(key);
 }
 
 /** Una clave de OpenAI tiene el formato "sk-...". El valor inicial del secreto en AWS no lo tiene. */

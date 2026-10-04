@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeProxyValue, parseProxyUrl } from "./config.js";
+import { describeProxyValue, looksLikeGeminiKey, parseProxyUrl } from "./config.js";
 
 describe("proxy de descarga", () => {
   it("acepta la URL estándar", () => {
@@ -29,5 +29,14 @@ describe("proxy de descarga", () => {
     expect(describeProxyValue("Xk29aLq0RtY7mZp3Wc8vBn4sJd6fGh1e")).toBe("sin configurar");
     expect(describeProxyValue(undefined)).toBe("sin configurar");
     expect(describeProxyValue("mi clave de evomi")).toBe("mal escrito");
+  });
+});
+
+describe("clave de Gemini", () => {
+  it("acepta el formato nuevo (AQ.) y el antiguo (AIza), y rechaza el valor provisional", () => {
+    expect(looksLikeGeminiKey("AQ.Ab8RN6Lq0xYzW3vTnPq2s5uD9eFgHiJkLm")).toBe(true);
+    expect(looksLikeGeminiKey("AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q")).toBe(true);
+    expect(looksLikeGeminiKey("PEGA_AQUI_TU_CLAVE")).toBe(false);
+    expect(looksLikeGeminiKey("AQ.corta")).toBe(false);
   });
 });
