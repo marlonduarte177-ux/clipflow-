@@ -97,7 +97,7 @@ describe("prueba lado a lado (solo administradores)", () => {
     const list = (await app.inject({ method: "GET", url: "/admin/comparisons", headers: bearer("admin") })).json();
     expect(list.comparisons).toHaveLength(1);
     const v = list.comparisons[0].variants.find((x: { pipeline: string }) => x.pipeline === "gemini:gemini-3.5-flash");
-    expect(v).toMatchObject({ label: "Gemini 3.5 Flash", status: "completed", clipCount: 1 });
+    expect(v).toMatchObject({ label: "Gemini 3.5 Flash", status: "completed", clipCount: 1, ai: "used", aiReason: null });
     expect(v.totalUsdPerMinute).toBeCloseTo(0.015); // 0,15 USD / 10 min
     expect(v.aiUsdPerMinute).toBeCloseTo(0.012);
     expect(v.clips[0]).toMatchObject({ title: "El gancho", reason: "Dato sorprendente." });

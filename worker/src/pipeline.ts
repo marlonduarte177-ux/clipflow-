@@ -914,6 +914,8 @@ async function runAI(
   // Si la transcripción salió bien y lo que falla es el análisis, se conserva (ya se pagó): sirve
   // para subtítulos, títulos y la transcripción completa.
   let transcribed: Transcribed | null = null;
+  /** La transcripción falló pero el proveedor mira el video (Gemini): se sigue sin ella. */
+  let transcriptionError: string | null = null;
   try {
     const coveredSeconds = Math.min(info.durationSeconds, deps.aiMaxAudioMinutes * 60);
     // ¿Ya se transcribió este video (reintento o nuevo procesamiento)? Se reutiliza: no se paga otra vez.
@@ -957,10 +959,19 @@ async function runAI(
       const chunks = await extractAudioChunks(deps.tools, input, dir, { maxSeconds: coveredSeconds, signal });
       await onProgress(0.2);
       step = "la transcripción";
-      transcript = await deps.ai.transcribe(chunks);
+      try {
+        transcript = await deps.ai.transcribe(chunks);
+      } catch (err) {
+        // Gemini escucha el audio del video: si la transcripción falla, igual elige los momentos
+        // (los clips salen sin subtítulos). Los demás proveedores sin transcripción no pueden elegir.
+        if (signal.aborted || !deps.ai.watchesVideo) throw err;
+        transcriptionError = err instanceof AIProviderError ? err.message : "error inesperado";
+        deps.log.warn({ jobId: ids.jobId, error: transcriptionError }, "falló la transcripción; Gemini elige los momentos con el audio del video");
+        transcript = { segments: [], language: null, usage: {} };
+      }
       if (transcript.provider) providers.transcription = transcript.provider;
       analyzedSeconds = chunks.reduce((sum, c) => sum + c.durationSeconds, 0);
-      if (cacheKey) {
+      if (cacheKey && !transcriptionError) {
         await saveTranscript(deps, cacheKey, path.join(dir, "transcript-cache.json"), {
           coveredSeconds,
           analyzedSeconds,
@@ -1002,6 +1013,9 @@ async function runAI(
     const analysis = await deps.ai.analyze(segmentsForAI, info.durationSeconds, { targetClipSeconds: ids.targetClipSeconds, videoParts });
     if (analysis.provider) providers.analysis = analysis.provider;
     if (analysis.fallbackReason) providers.fallbackReason = analysis.fallbackReason;
+    if (transcriptionError && analysis.highlights.length === 0) {
+      return { ...empty, status: "unavailable", reason: `falló la transcripción: ${transcriptionError}`, providers };
+    }
     if (noSpeech && analysis.highlights.length === 0) {
       return {
         status: "no_speech",
@@ -1018,6 +1032,7 @@ async function runAI(
     addUsage(usage, analysis.usage);
     return {
       status: "used",
+      ...(transcriptionError ? { reason: `sin subtítulos: falló la transcripción: ${transcriptionError}` } : {}),
       segments: segmentsForAI,
       highlights: analysis.highlights,
       language: noSpeech ? null : transcript.language,
