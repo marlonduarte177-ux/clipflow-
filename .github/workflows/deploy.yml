@@ -52,10 +52,9 @@ jobs:
         env:
           ALERT_EMAIL: ${{ vars.ALERT_EMAIL }}
           MONTHLY_BUDGET_USD: ${{ vars.MONTHLY_BUDGET_USD }}
-          ADMIN_EMAILS: ${{ vars.ADMIN_EMAILS }}
         run: >-
           npx cdk deploy --all -c stage=${{ inputs.stage }}
-          -c alertEmail="$ALERT_EMAIL" -c monthlyBudgetUsd="$MONTHLY_BUDGET_USD" -c adminEmails="$ADMIN_EMAILS"
+          -c alertEmail="$ALERT_EMAIL" -c monthlyBudgetUsd="$MONTHLY_BUDGET_USD"
           --require-approval never --outputs-file cdk-outputs.json
       - name: Resumen
         working-directory: infrastructure

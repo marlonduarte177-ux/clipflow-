@@ -38,7 +38,6 @@ const app = await buildApp({
   product,
   verifyToken: createCognitoVerifier(config.COGNITO_USER_POOL_ID, config.COGNITO_CLIENT_ID),
   lookupEmail: createCognitoEmailLookup(config.AWS_REGION),
-  admin: { emails: config.ADMIN_EMAILS, comparePipelines: config.COMPARE_PIPELINES },
 });
 app.addHook("onClose", () => database.close());
 

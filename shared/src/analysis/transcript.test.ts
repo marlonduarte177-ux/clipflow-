@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { segmentsForRange, snapToSentences, speechSignalFromHighlights, toSrt, toVtt } from "./transcript.js";
+import { clampToRange, clipDurationRange, fitToSentences, segmentsForRange, snapToSentences, speechSignalFromHighlights, toSrt, toVtt } from "./transcript.js";
 
 const segments = [
   { startSeconds: 0, endSeconds: 4.2, text: "Hola a todos." },
@@ -83,5 +83,50 @@ describe("snapToSentences hacia afuera (momentos de la IA)", () => {
     const moment = { startSeconds: 2, endSeconds: 12, score: 1, breakdown: {} };
     expect(snapToSentences(moment, segments, { videoDurationSeconds: 20 })).toMatchObject({ startSeconds: 0, endSeconds: 10 });
     expect(snapToSentences(moment, segments, { videoDurationSeconds: 20, outward: true })).toMatchObject({ startSeconds: 0, endSeconds: 15 });
+  });
+});
+
+describe("duración obligatoria de los clips", () => {
+  /** Frases de 5 s seguidas: [from, from+5], [from+5, from+10]… */
+  const sentences = (from: number, to: number, step = 5) =>
+    Array.from({ length: Math.floor((to - from) / step) }, (_, i) => ({ startSeconds: from + i * step, endSeconds: from + (i + 1) * step, text: `Frase ${i}.` }));
+  const bounds60 = { ...clipDurationRange(60), videoDurationSeconds: 3600 };
+
+  it("rango: lo pedido ±5 s", () => {
+    expect(clipDurationRange(60)).toEqual({ min: 55, max: 65 });
+    expect(clipDurationRange(30)).toEqual({ min: 25, max: 35 });
+    expect(clipDurationRange(15)).toEqual({ min: 10, max: 20 });
+  });
+
+  it("un momento corto se alarga con las frases que siguen hasta el largo pedido", () => {
+    expect(fitToSentences(100, 122, sentences(0, 600), bounds60)).toEqual({ startSeconds: 100, endSeconds: 160 });
+  });
+
+  it("uno largo se recorta en un final de frase; uno que ya está en rango se respeta", () => {
+    expect(fitToSentences(100, 190, sentences(0, 600), bounds60)).toEqual({ startSeconds: 100, endSeconds: 160 });
+    expect(fitToSentences(100, 163, sentences(0, 600), bounds60)).toEqual({ startSeconds: 100, endSeconds: 165 });
+  });
+
+  it("empieza en la frase donde arranca la idea (aunque la IA marque a mitad de frase)", () => {
+    expect(fitToSentences(102, 160, sentences(0, 600), bounds60)).toEqual({ startSeconds: 100, endSeconds: 160 });
+  });
+
+  it("si no hay ningún corte en frases con ese largo, devuelve null (el momento se descarta)", () => {
+    const long = [{ startSeconds: 0, endSeconds: 100, text: "Una frase larguísima." }, { startSeconds: 100, endSeconds: 200, text: "Otra." }];
+    expect(fitToSentences(10, 70, long, bounds60)).toBeNull();
+    // Momento en un tramo sin habla.
+    expect(fitToSentences(1000, 1060, sentences(0, 600), bounds60)).toBeNull();
+  });
+
+  it("al final del video, puede empezar una frase antes para llegar al largo", () => {
+    const fitted = fitToSentences(560, 600, sentences(0, 600), { ...bounds60, videoDurationSeconds: 600 })!;
+    expect(fitted.endSeconds - fitted.startSeconds).toBeGreaterThanOrEqual(55);
+    expect(fitted.endSeconds).toBeLessThanOrEqual(600);
+  });
+
+  it("sin frases: a la medida, sin salirse del video", () => {
+    expect(clampToRange(100, 110, bounds60)).toEqual({ startSeconds: 100, endSeconds: 155 });
+    expect(clampToRange(580, 700, { ...bounds60, videoDurationSeconds: 600 })).toEqual({ startSeconds: 535, endSeconds: 600 });
+    expect(clampToRange(0, 20, { ...bounds60, videoDurationSeconds: 40 })).toEqual({ startSeconds: 0, endSeconds: 40 });
   });
 });

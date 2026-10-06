@@ -1,7 +1,6 @@
 import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
-  CopyObjectCommand,
   CreateMultipartUploadCommand,
   DeleteObjectCommand,
   DeleteObjectsCommand,
@@ -11,7 +10,6 @@ import {
   NotFound,
   S3Client,
   UploadPartCommand,
-  UploadPartCopyCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
@@ -31,8 +29,6 @@ export interface VideoStorage {
   deletePrefix(prefix: string): Promise<number>;
   /** URL temporal de lectura (previews y descargas). */
   presignGet(key: string, expiresInSeconds: number, downloadFilename?: string): Promise<string>;
-  /** Copia un objeto dentro del bucket, sin descargarlo (en partes si pasa de 5 GB). */
-  copyObject(sourceKey: string, targetKey: string, sizeBytes: number): Promise<void>;
 }
 
 export function createS3Storage(options: { bucket: string; region: string; client?: S3Client }): VideoStorage {
@@ -108,31 +104,5 @@ export function createS3Storage(options: { bucket: string; region: string; clien
         expiresIn: expiresInSeconds,
       });
     },
-      async copyObject(sourceKey, targetKey, sizeBytes) {
-      const source = `${Bucket}/${sourceKey.split("/").map(encodeURIComponent).join("/")}`;
-      const MAX_SINGLE = 5 * 1024 ** 3;
-      if (sizeBytes < MAX_SINGLE) {
-        await s3.send(new CopyObjectCommand({ Bucket, Key: targetKey, CopySource: source, ServerSideEncryption: "AES256" }));
-        return;
-      }
-      // Más de 5 GB: copia en partes de 1 GB.
-      const { UploadId } = await s3.send(new CreateMultipartUploadCommand({ Bucket, Key: targetKey, ServerSideEncryption: "AES256" }));
-      if (!UploadId) throw new Error("S3 no devolvió UploadId");
-      try {
-        const partSize = 1024 ** 3;
-        const parts: { PartNumber: number; ETag: string }[] = [];
-        for (let start = 0, n = 1; start < sizeBytes; start += partSize, n++) {
-          const end = Math.min(sizeBytes, start + partSize) - 1;
-          const res = await s3.send(
-            new UploadPartCopyCommand({ Bucket, Key: targetKey, UploadId, PartNumber: n, CopySource: source, CopySourceRange: `bytes=${start}-${end}` }),
-          );
-          parts.push({ PartNumber: n, ETag: res.CopyPartResult!.ETag! });
-        }
-        await s3.send(new CompleteMultipartUploadCommand({ Bucket, Key: targetKey, UploadId, MultipartUpload: { Parts: parts } }));
-      } catch (err) {
-        await s3.send(new AbortMultipartUploadCommand({ Bucket, Key: targetKey, UploadId })).catch(() => undefined);
-        throw err;
-      }
-    },
-};
+  };
 }

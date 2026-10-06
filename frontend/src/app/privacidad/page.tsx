@@ -73,16 +73,12 @@ export default function PrivacyPage() {
                   <strong>Amazon Web Services (AWS):</strong> aloja la app, la base de datos y tus archivos, en servidores de Estados Unidos.
                 </li>
                 <li>
-                  <strong>OpenAI:</strong> recibe el audio de tus videos para transcribirlo y el texto para elegir los mejores momentos. Según
+                  <strong>AssemblyAI:</strong> recibe el audio de tus videos para transcribirlo. Al terminar, borramos la transcripción de
+                  su servicio.
+                </li>
+                <li>
+                  <strong>OpenAI:</strong> recibe el texto de la transcripción para elegir los mejores momentos y proponer títulos. Según
                   sus condiciones para empresas, no usa estos datos para entrenar sus modelos.
-                </li>
-                <li>
-                  <strong>Groq:</strong> recibe el audio de tus videos para transcribirlo.
-                </li>
-                <li>
-                  <strong>Google (Gemini):</strong> recibe una copia en baja resolución de tu video (imagen y audio) y su
-                  transcripción para elegir los mejores momentos. Usamos el servicio de pago, en el que Google no usa estos
-                  datos para mejorar sus productos.
                 </li>
                 <li>
                   <strong>Paddle:</strong> procesa los pagos como comerciante registrado.

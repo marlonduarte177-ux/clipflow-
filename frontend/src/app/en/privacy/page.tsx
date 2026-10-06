@@ -74,16 +74,12 @@ export default function PrivacyPageEn() {
                   <strong>Amazon Web Services (AWS):</strong> hosts the app, the database and your files, on servers in the United States.
                 </li>
                 <li>
-                  <strong>OpenAI:</strong> receives the audio of your videos to transcribe it and the text to pick the best moments. Under its
-                  business terms, it does not use this data to train its models.
+                  <strong>AssemblyAI:</strong> receives the audio of your videos to transcribe it. When it is done, we delete the transcript
+                  from its service.
                 </li>
                 <li>
-                  <strong>Groq:</strong> receives the audio of your videos to transcribe it.
-                </li>
-                <li>
-                  <strong>Google (Gemini):</strong> receives a low-resolution copy of your video (image and audio) and its
-                  transcript to pick the best moments. We use the paid service, under which Google does not use this data
-                  to improve its products.
+                  <strong>OpenAI:</strong> receives the transcript text to pick the best moments and suggest titles. Under its business terms,
+                  it does not use this data to train its models.
                 </li>
                 <li>
                   <strong>Paddle:</strong> processes payments as Merchant of Record.

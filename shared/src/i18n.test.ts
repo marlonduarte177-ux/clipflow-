@@ -33,7 +33,9 @@ describe("translateMessage", () => {
     expect(translateMessage("Nuestro servicio de descarga no respondió (proxy: sin saldo, 402). Lo intentaremos de nuevo.", "en")).toContain(
       "proxy: no balance, 402",
     );
-    expect(translateMessage("Llegaste al máximo de 20 videos por día. Podrás crear más clips en unas horas.", "en")).toContain("20 videos per day");
+    expect(translateMessage("falló la transcripción: AssemblyAI tuvo un error temporal (503)", "en")).toBe(
+      "transcription failed: AssemblyAI had a temporary error (503)",
+    );
   });
 
   it("cada mensaje fijo de la API, la validación y el procesador tiene traducción al inglés", () => {
