@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
-import { and, count, desc, eq, gt, inArray, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, inArray, or } from "drizzle-orm";
 import { z } from "zod";
 import {
   checkImportUrl,
@@ -31,40 +31,8 @@ import type { WorkerLauncher } from "./launcher.js";
 import type { JobQueue } from "./queue.js";
 import type { VideoStorage } from "./storage.js";
 
-const { projects, videos, usage, clips, processingJobs } = schema;
+const { projects, videos, usage, clips } = schema;
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-/**
- * Tope diario por usuario: videos mandados a crear clips en las últimas 24 h y minutos de video que
- * suman (incluido el que se quiere agregar, si se conoce su duración). «Solo descargar» no cuenta.
- * Devuelve el mensaje para el usuario si se pasó, o null.
- */
-async function dailyLimitMessage(db: Database, product: ProductConfig, userId: string, incomingSeconds = 0): Promise<string | null> {
-  const [used] = await db
-    .select({
-      jobs: count(),
-      seconds: sql<number>`coalesce(sum(${videos.durationSeconds}), 0)::float`,
-    })
-    .from(processingJobs)
-    .innerJoin(videos, and(eq(videos.id, processingJobs.videoId), eq(videos.userId, processingJobs.userId)))
-    .where(
-      and(
-        eq(processingJobs.userId, userId),
-        eq(processingJobs.type, "analyze_video"),
-        gt(processingJobs.createdAt, new Date(Date.now() - DAY_MS)),
-        sql`coalesce(${processingJobs.params}->>'downloadOnly', 'false') <> 'true'`,
-      ),
-    );
-  const { maxJobs, maxVideoMinutes } = product.daily;
-  if ((used?.jobs ?? 0) >= maxJobs) {
-    return `Llegaste al máximo de ${maxJobs} videos por día. Podrás crear más clips en unas horas.`;
-  }
-  if ((Number(used?.seconds ?? 0) + incomingSeconds) / 60 > maxVideoMinutes) {
-    return `Llegaste al máximo de ${Math.round(maxVideoMinutes / 60)} horas de video por día. Podrás crear más clips en unas horas.`;
-  }
-  return null;
-}
 /** Miniaturas en listas: URLs temporales cortas (la web las vuelve a pedir al recargar). */
 const THUMB_TTL_SECONDS = 15 * 60;
 type VideoRow = typeof videos.$inferSelect;
@@ -279,8 +247,6 @@ export function videoRoutes(deps: VideoRouteDeps) {
           `Ya tienes ${limits.maxPendingUploads} subidas en curso. Termínalas o cancélalas antes de empezar otra.`,
         );
       }
-      const overLimit = await dailyLimitMessage(db, product, userId, durationSeconds ?? 0);
-      if (overLimit) return sendError(reply, 429, "daily_limit", overLimit);
 
       // La ruta en S3 la decide el servidor: nunca incluye el nombre que envía el usuario.
       const videoId = crypto.randomUUID();
@@ -349,8 +315,6 @@ export function videoRoutes(deps: VideoRouteDeps) {
         );
       }
       if (!downloadOnly) {
-        const overLimit = await dailyLimitMessage(db, product, userId);
-        if (overLimit) return sendError(reply, 429, "daily_limit", overLimit);
       }
 
       const videoId = crypto.randomUUID();
@@ -518,8 +482,6 @@ export function videoRoutes(deps: VideoRouteDeps) {
       if (row.status !== "uploaded" && row.status !== "ready") {
         return sendError(reply, 409, "not_processable", "Este video no se puede procesar.");
       }
-      const overLimit = await dailyLimitMessage(db, product, userId, row.durationSeconds ?? 0);
-      if (overLimit) return sendError(reply, 429, "daily_limit", overLimit);
       const options = processingParams(product, input.data);
       if (!options.ok) return sendError(reply, 400, "invalid_duration", options.message);
       const { job, created } = await createJob(db, {

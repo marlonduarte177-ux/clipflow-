@@ -204,8 +204,6 @@ const RULES: Rule[] = [
   [/^Gemini rechazó la solicitud \((.+)\)$/, (m) => `Gemini rejected the request (${m[1]})`],
   [/^El archivo supera el máximo de (.+) GB\.$/, (m) => `The file exceeds the maximum of ${m[1]} GB.`],
   [/^El video supera la duración máxima de (.+) h\.$/, (m) => `The video exceeds the maximum length of ${m[1]} h.`],
-  [/^Llegaste al máximo de (\d+) horas de video por día\. Podrás crear más clips en unas horas\.$/, (m) => `You reached the maximum of ${m[1]} hours of video per day. You'll be able to create more clips in a few hours.`],
-  [/^Llegaste al máximo de (\d+) videos por día\. Podrás crear más clips en unas horas\.$/, (m) => `You reached the maximum of ${m[1]} videos per day. You'll be able to create more clips in a few hours.`],
   [/^Ya tienes (\d+) subidas en curso\. Termínalas o cancélalas antes de empezar otra\.$/, (m) => `You already have ${m[1]} uploads in progress. Finish or cancel them before starting another one.`],
   [/^Ya tienes (\d+) videos subiéndose o descargándose\. Espera a que terminen\.$/, (m) => `You already have ${m[1]} videos uploading or downloading. Wait for them to finish.`],
   [/^(.+) no encontrado\.$/, (m) => `${m[1] === "Video" ? "Video" : m[1] === "Proyecto" ? "Project" : m[1] === "Trabajo" ? "Job" : m[1] === "Clip" ? "Clip" : m[1]} not found.`],

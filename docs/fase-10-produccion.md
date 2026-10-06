@@ -29,16 +29,10 @@ Las alarmas también avisan cuando vuelven a la normalidad («OK»).
 - El presupuesto es de **toda la cuenta de AWS**: configúralo en un solo entorno.
 - OpenAI no está en AWS: además, pon un límite de gasto en platform.openai.com → Limits.
 
-### Tope diario por usuario
+### Sin tope diario
 
-Mientras no hay planes, cada usuario puede, en 24 h:
-- mandar a crear clips **20 videos**;
-- y que esos videos sumen **300 minutos** (5 h).
-
-Al pasarse, la API responde 429 `daily_limit` con un mensaje claro. Se revisa al empezar una subida
-(con la duración del archivo), al importar por enlace y en «Crear clips».
-- Configurable con `DAILY_MAX_JOBS` y `DAILY_MAX_VIDEO_MINUTES`.
-- Costo máximo aproximado por usuario y día: 300 min × ~0,01 USD = ~3 USD de OpenAI.
+No hay tope por día: cada usuario usa los minutos de su plan cuando quiera (p. ej. 600 min al mes
+en Pro). Para el gasto, usa los límites de cada proveedor (OpenAI → Limits) y las alertas de presupuesto.
 
 ## Pasos manuales (una vez)
 
