@@ -1,0 +1,51 @@
+# Diagnóstico: muestra qué está fallando en AWS sin entrar a la consola.
+# Se ejecuta a mano: GitHub > Actions > Diagnóstico > Run workflow.
+# Solo LEE (rol de solo lectura de CDK, credenciales temporales por OIDC): no cambia nada y nunca
+# muestra el valor de un secreto. El repositorio es público: el script oculta códigos, correos y enlaces.
+name: Diagnóstico
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Entorno
+        type: choice
+        options: [staging, production]
+        default: staging
+      hours:
+        description: Horas hacia atrás a revisar
+        default: "24"
+
+permissions:
+  id-token: write # necesario para OIDC
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: ${{ inputs.stage }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Credenciales temporales de AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Rol de solo lectura
+        # El rol de GitHub solo puede pasar a los roles de CDK; el de "lookup" es de solo lectura.
+        run: |
+          account=$(aws sts get-caller-identity --query Account --output text)
+          echo "::add-mask::$account"
+          echo "LOOKUP_ROLE=arn:aws:iam::${account}:role/cdk-hnb659fds-lookup-role-${account}-${AWS_REGION}" >> "$GITHUB_ENV"
+      - name: Pasar al rol de solo lectura
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ env.LOOKUP_ROLE }}
+          role-chaining: true
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Diagnóstico
+        env:
+          STAGE: ${{ inputs.stage }}
+          HOURS: ${{ inputs.hours }}
+        run: python3 scripts/diagnose.py
