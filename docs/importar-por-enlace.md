@@ -326,3 +326,17 @@ El original ocupa S3 igual que un video subido y se borra al eliminar el video.
   - la importación envía las opciones elegidas;
   - la pantalla "Descargando el video";
   - el estado en Mis videos.
+
+## Usar solo una parte del video (07/10/2026)
+
+En la pestaña **Enlace**, la opción "Usar solo una parte del video" permite escribir **Desde** y **Hasta**
+(por ejemplo, `1:00:00` y `2:30:00`).
+- **Solo se descarga esa parte.** yt-dlp usa `--download-sections`. Un stream de 8 h ya no hace falta que
+  quepa entero en el máximo de 3 h; basta con que la parte quepa.
+- **Solo esa parte gasta minutos:** el video guardado en ClipFlow es la parte elegida.
+- **Sin "Hasta":** va desde "Desde" hasta el final del video, con un máximo de 3 h.
+- **Límites:** al menos 30 s, como máximo 3 h y el final después del inicio. Lo valida la API (`invalid_range`).
+- **Dónde se guarda:** en `videos.source_start_seconds` y `videos.source_end_seconds`.
+- **Streams largos y chat de Twitch:** los clips de streams largos se cortan del original sumando el inicio
+  de la parte, y el chat de Twitch se lee desde ese segundo.
+- **Enlaces directos a un archivo:** se bajan enteros y luego se recortan con FFmpeg, sin volver a codificar.

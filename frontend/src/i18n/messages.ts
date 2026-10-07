@@ -219,7 +219,10 @@ const es = {
     rangeOrder: "El final debe ser después del inicio.",
     rangeTooShort: "La parte debe durar al menos 30 segundos.",
     rangeTooLong: (max: string) => `La parte puede durar como máximo ${max}.`,
-    keepAwake: "No bloquees el celular hasta que termine de subir.",
+    keepAwake: "Puedes seguir usando la app mientras sube; no bloquees el celular ni cierres la página.",
+    dockChoose: (percent: number) => `Subiendo… ${percent} % · toca para elegir las opciones`,
+    dockUploaded: "Subido · toca para crear los clips",
+    dockDone: "Listo · toca para ver el video",
     canClose: "Puedes cerrar la página cuando empiece el procesamiento.",
   },
   projects: {
@@ -580,7 +583,10 @@ const en: Messages = {
     rangeOrder: "The end must be after the start.",
     rangeTooShort: "The part must be at least 30 seconds long.",
     rangeTooLong: (max: string) => `The part can be at most ${max} long.`,
-    keepAwake: "Don't lock your phone until the upload finishes.",
+    keepAwake: "You can keep using the app while it uploads; don't lock your phone or close the page.",
+    dockChoose: (percent: number) => `Uploading… ${percent}% · tap to choose the options`,
+    dockUploaded: "Uploaded · tap to create the clips",
+    dockDone: "Done · tap to see the video",
     canClose: "You can close the page once processing starts.",
   },
   projects: {

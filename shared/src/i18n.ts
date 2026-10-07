@@ -166,6 +166,7 @@ const EXACT: Record<string, string> = {
   "Transcripción con formato inesperado": "Transcript with an unexpected format",
   "Solo descarga": "Download only",
   "El final del tramo debe ser después del inicio.": "The end of the section must be after the start.",
+  "No pudimos recortar el tramo elegido del video.": "We couldn't cut the chosen part of the video.",
   "Falta la clave de AssemblyAI en Secrets Manager": "The AssemblyAI key is missing in Secrets Manager",
   "La clave de AssemblyAI no es válida": "The AssemblyAI key is not valid",
   "Tu cuenta de AssemblyAI no tiene saldo (revisa Billing en assemblyai.com)": "Your AssemblyAI account has no balance (check Billing at assemblyai.com)",

@@ -73,7 +73,7 @@ describe("trabajos de procesamiento", () => {
     expect(ctx!.queue.sent).toEqual([]);
     const after = (await app().inject({ method: "GET", url: `/videos/${video.id}`, headers: bearer("alice") })).json();
     expect(after.status).toBe("pending_upload");
-    expect((await complete({ subtitleStyle: "neon" })).statusCode).toBe(400);
+    expect((await complete({ subtitleStyle: "glitter" })).statusCode).toBe(400);
   });
 
   it("si SQS falla, el trabajo no se pierde y puede reenviarse", async () => {

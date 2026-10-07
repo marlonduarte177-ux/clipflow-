@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
 import {
   checkImportUrl,
   translateMessage,
@@ -12,29 +12,28 @@ import {
   type ProjectDto,
   type ProjectListResponse,
   type SubtitleStyle,
-  type VideoDto,
 } from "@clipflow/shared";
 import { DEFAULT_DURATION, DurationPicker, SubtitlePicker } from "@/components/clip-options";
 import { CheckIcon, CloseIcon, DownIcon, DownloadIcon, LinesIcon, UploadIcon } from "@/components/icons";
 import { RightsDialog } from "@/components/rights-dialog";
+import { useUpload } from "@/components/upload-manager";
 import { Alert } from "@/components/ui";
 import { errorMessage } from "@/i18n/locale";
 import { useLocale, useT } from "@/i18n/provider";
 import { apiConfigured, apiFetch, formatBytes, formatDuration } from "@/lib/api";
 import { parseClock } from "@/lib/clock-input";
-import { readVideoDuration, uploadVideo, type UploadProgress } from "@/lib/uploader";
+import { readVideoDuration } from "@/lib/uploader";
 
 // Límites mostrados al usuario; la API los vuelve a comprobar siempre.
 const LIMITS = DEFAULT_PRODUCT_CONFIG.upload;
 /** Parte mínima de un enlace (la API pide lo mismo). */
 const MIN_RANGE_SECONDS = 30;
 
-type Phase = "idle" | "uploading" | "uploaded" | "starting" | "error";
-
 /**
  * Subir video: el archivo empieza a subirse apenas se elige y, mientras tanto, el usuario elige
  * la duración de los clips y el estilo de subtítulos. "Crear clips" confirma: si la subida no
- * terminó, el procesamiento empieza solo en cuanto termine.
+ * terminó, el procesamiento empieza solo en cuanto termine. La subida sigue en segundo plano si el
+ * usuario se va a otra pantalla de la app (ver UploadProvider).
  */
 export function UploadView() {
   const t = useT();
@@ -43,14 +42,16 @@ export function UploadView() {
   const params = useSearchParams();
   const [projects, setProjects] = useState<ProjectDto[] | null>(null);
   const [projectId, setProjectId] = useState(params.get("projectId") ?? "");
-  const [file, setFile] = useState<File | null>(null);
-  const [videoSeconds, setVideoSeconds] = useState<number | null>(null);
-  const [phase, setPhase] = useState<Phase>("idle");
-  const [progress, setProgress] = useState<UploadProgress | null>(null);
-  const [error, setError] = useState("");
+  const { upload, start, confirm, cancel, clear } = useUpload();
+  const file = upload?.file ?? null;
+  const videoSeconds = upload?.videoSeconds ?? null;
+  const phase = upload?.phase ?? "idle";
+  const progress = upload?.progress ?? null;
+  const confirmed = upload?.confirmed ?? false;
+  const [localError, setError] = useState("");
+  const error = localError || upload?.error || "";
   const [clipSeconds, setClipSeconds] = useState(DEFAULT_DURATION);
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>("highlight");
-  const [confirmed, setConfirmed] = useState(false);
   // Subir un archivo o importar desde un enlace (lo descarga el worker).
   const [source, setSource] = useState<"file" | "link">("file");
   const [link, setLink] = useState("");
@@ -63,11 +64,6 @@ export function UploadView() {
   const [rangeFrom, setRangeFrom] = useState("");
   const [rangeTo, setRangeTo] = useState("");
 
-  const abortRef = useRef<AbortController | null>(null);
-  const videoRef = useRef<VideoDto | null>(null);
-  // "Crear clips" resuelve esta promesa; la subida la espera antes de confirmar.
-  const confirmRef = useRef<((options: { clipDurationSeconds: number; subtitleStyle: SubtitleStyle }) => void) | null>(null);
-
   useEffect(() => {
     if (!apiConfigured) return;
     apiFetch<ProjectListResponse>("/projects")
@@ -78,23 +74,13 @@ export function UploadView() {
       .catch((err: Error) => setError(errorMessage(err)));
   }, []);
 
-  // Durante la subida: avisa antes de cerrar la pestaña y evita que la pantalla se apague
-  // (en el celular, con la pantalla bloqueada el navegador pausa la subida).
-  const uploading = phase === "uploading" || phase === "uploaded" || phase === "starting";
+  // Subida terminada (y "Crear clips" ya confirmado) estando en esta pantalla: al video.
   useEffect(() => {
-    if (!uploading) return;
-    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
-    window.addEventListener("beforeunload", warn);
-    let lock: WakeLockSentinel | null = null;
-    navigator.wakeLock
-      ?.request("screen")
-      .then((l) => (lock = l))
-      .catch(() => undefined);
-    return () => {
-      window.removeEventListener("beforeunload", warn);
-      void lock?.release().catch(() => undefined);
-    };
-  }, [uploading]);
+    if (upload?.phase === "done" && upload.videoId) {
+      router.push(`/dashboard/videos/${upload.videoId}`);
+      clear();
+    }
+  }, [upload?.phase, upload?.videoId, router, clear]);
 
   async function ensureProject(): Promise<string> {
     if (projectId) return projectId;
@@ -122,43 +108,7 @@ export function UploadView() {
       setError(t.upload.tooLong(formatDuration(seconds), formatDuration(LIMITS.maxDurationSeconds)));
       return;
     }
-    setFile(selected);
-    setVideoSeconds(seconds);
-    void start(selected, seconds);
-  }
-
-  async function start(selected: File, seconds: number | null) {
-    const controller = new AbortController();
-    abortRef.current = controller;
-    videoRef.current = null;
-    setConfirmed(false);
-    setPhase("uploading");
-    setProgress({ uploadedBytes: 0, totalBytes: selected.size });
-    const confirmation = new Promise<{ clipDurationSeconds: number; subtitleStyle: SubtitleStyle }>((resolve) => {
-      confirmRef.current = resolve;
-    });
-    try {
-      const project = await ensureProject();
-      const video = await uploadVideo({
-        file: selected,
-        projectId: project,
-        durationSeconds: seconds,
-        signal: controller.signal,
-        onProgress: setProgress,
-        onCreated: (v) => (videoRef.current = v),
-        onUploaded: () => setPhase((p) => (p === "uploading" ? "uploaded" : p)),
-        completeWith: () => confirmation,
-      });
-      router.push(`/dashboard/videos/${video.id}`);
-    } catch (err) {
-      if (controller.signal.aborted) return;
-      setError(errorMessage(err));
-      setPhase("error");
-      // Libera la subida en S3 para no dejar partes huérfanas. (El tipo se fuerza: TS no ve la
-      // asignación que hace onCreated dentro de la subida.)
-      const created = videoRef.current as VideoDto | null;
-      if (created) await apiFetch(`/videos/${created.id}/abort`, { method: "POST" }).catch(() => undefined);
-    }
+    start(selected, seconds, ensureProject);
   }
 
   /** La parte elegida del enlace: lo que se manda a la API y el texto que la explica, o un error. */
@@ -216,19 +166,12 @@ export function UploadView() {
   }
 
   function onCreateClips() {
-    setConfirmed(true);
-    setPhase((p) => (p === "uploaded" ? "starting" : p));
-    confirmRef.current?.({ clipDurationSeconds: clipSeconds, subtitleStyle });
+    confirm({ clipDurationSeconds: clipSeconds, subtitleStyle });
   }
 
   async function onCancel() {
-    abortRef.current?.abort();
-    const created = videoRef.current;
-    setFile(null);
-    setProgress(null);
-    setPhase("idle");
-    setConfirmed(false);
-    if (created) await apiFetch(`/videos/${created.id}/abort`, { method: "POST" }).catch(() => undefined);
+    setError("");
+    await cancel();
   }
 
   if (!apiConfigured) {
