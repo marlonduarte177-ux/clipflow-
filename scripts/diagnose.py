@@ -89,7 +89,7 @@ def stopped_tasks() -> None:
 
 
 # Lo que interesa de cada línea de registro (los registros son JSON de pino).
-FIELDS = ["msg", "step", "code", "error", "status", "reason", "detail", "result", "video", "stderr"]
+FIELDS = ["msg", "step", "code", "error", "status", "reason", "detail", "result", "video", "clip", "section", "source", "box", "segment", "crop", "filter", "stderr"]
 PATTERN = '?"trabajo con error" ?"FFmpeg falló" ?"error inesperado" ?"IA no disponible" ?"IA saturada" ?"no se pudo" ?"\\"level\\":50"'
 
 

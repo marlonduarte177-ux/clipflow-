@@ -40,6 +40,7 @@ import {
   probe,
   renderThumbnail,
   renderVerticalClip,
+  verticalFilter,
   type FfmpegTools,
   type ProbeResult,
 } from "./ffmpeg.js";
@@ -594,16 +595,38 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
         speaking,
         onWarning: (message, err) => deps.log.warn({ jobId: job.id, clip: index, error: (err as Error).message }, message),
       });
-      await renderVerticalClip(deps.tools, source.file, clipFile, segment, {
-        signal: controller.signal,
-        crop,
-        subtitles: burn,
-        onProgress: (sec) => {
-          clipProgress[index] = Math.min(0.95, sec / duration);
-          void reportClips();
-        },
-      });
-      await renderThumbnail(deps.tools, source.file, thumbFile, segment.startSeconds + duration / 2, controller.signal, cropAt(crop, duration / 2));
+      try {
+        await renderVerticalClip(deps.tools, source.file, clipFile, segment, {
+          signal: controller.signal,
+          crop,
+          subtitles: burn,
+          onProgress: (sec) => {
+            clipProgress[index] = Math.min(0.95, sec / duration);
+            void reportClips();
+          },
+        });
+        await renderThumbnail(deps.tools, source.file, thumbFile, segment.startSeconds + duration / 2, controller.signal, cropAt(crop, duration / 2));
+      } catch (err) {
+        // Solo medidas (sin contenido): para entender por qué FFmpeg rechaza un recorte.
+        if (err instanceof FfmpegError && !controller.signal.aborted) {
+          const { path: pieces, ...fixed } = crop;
+          const { raw: _raw, ...sourceInfo } = source.info;
+          deps.log.warn(
+            {
+              jobId: job.id,
+              clip: index,
+              section: source.file !== input,
+              source: sourceInfo,
+              box: source.box,
+              segment,
+              crop: { ...fixed, pieces: pieces?.length ?? 0 },
+              filter: verticalFilter(crop).slice(0, 600),
+            },
+            "no se pudo generar el clip",
+          );
+        }
+        throw err;
+      }
       if (source.file !== input) await rm(source.file, { force: true }); // el tramo ya no hace falta
       check();
       const key = `clips/${job.userId}/${job.id}/${index}.mp4`;
@@ -910,15 +933,18 @@ async function runAI(
     const cacheFile = path.join(dir, "transcript-cache.json");
     let cached = cacheKey ? await loadTranscript(deps, cacheKey, coveredSeconds, cacheFile) : null;
     // El MISMO enlace importado otra vez es otro video en ClipFlow: se busca la transcripción de los
-    // videos anteriores de ESTE usuario con ese enlace (nunca de otros usuarios).
+    // videos anteriores de ESTE usuario con ese enlace (nunca de otros usuarios). Solo si duran lo
+    // mismo: si el anterior se bajó desde otro punto (o el stream seguía creciendo), sus tiempos no
+    // coinciden con este video y los subtítulos quedarían corridos.
     if (!cached && cacheKey && ids.sourceUrl && deps.ai.transcriptionModel) {
       const earlier = await deps.db
-        .select({ id: videos.id })
+        .select({ id: videos.id, durationSeconds: videos.durationSeconds })
         .from(videos)
         .where(and(eq(videos.userId, ids.userId), eq(videos.sourceUrl, ids.sourceUrl), ne(videos.id, ids.videoId)))
         .orderBy(desc(videos.createdAt))
         .limit(5);
       for (const other of earlier) {
+        if (other.durationSeconds == null || Math.abs(other.durationSeconds - info.durationSeconds) > 1) continue;
         const otherKey = transcriptCacheKey(ids.userId, other.id, deps.ai.name, `${deps.ai.transcriptionModel}${TRANSCRIPT_CACHE_VERSION}`);
         cached = await loadTranscript(deps, otherKey, coveredSeconds, cacheFile);
         if (cached) {
