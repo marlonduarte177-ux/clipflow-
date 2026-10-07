@@ -165,14 +165,6 @@ const EXACT: Record<string, string> = {
   "Análisis de imágenes con formato inesperado": "Image analysis with an unexpected format",
   "Transcripción con formato inesperado": "Transcript with an unexpected format",
   "Solo descarga": "Download only",
-  "Falta la clave de AssemblyAI en Secrets Manager": "The AssemblyAI key is missing in Secrets Manager",
-  "La clave de AssemblyAI no es válida": "The AssemblyAI key is not valid",
-  "Tu cuenta de AssemblyAI no tiene saldo (revisa Billing en assemblyai.com)": "Your AssemblyAI account has no balance (check Billing at assemblyai.com)",
-  "AssemblyAI está saturado por ahora": "AssemblyAI is saturated right now",
-  "AssemblyAI no pudo transcribir el audio": "AssemblyAI could not transcribe the audio",
-  "AssemblyAI tardó demasiado en transcribir": "AssemblyAI took too long to transcribe",
-  "No se pudo conectar con AssemblyAI": "Could not connect to AssemblyAI",
-  "Respuesta inesperada de AssemblyAI": "Unexpected response from AssemblyAI",
   "OpenAI está saturado por ahora (límite de uso por minuto de tu cuenta). Lo reintentamos en unos minutos; la transcripción ya quedó guardada.":
     "OpenAI is saturated right now (your account's per-minute limit). We'll retry in a few minutes; the transcript is already saved.",
   "Tu cuenta de OpenAI llegó a su límite de uso por día (se recupera en unas horas; puedes subir de nivel en platform.openai.com → Limits)":
@@ -198,8 +190,6 @@ const RULES: Rule[] = [
   [/^OpenAI rechazó la solicitud \((.+)\)$/, (m) => `OpenAI rejected the request (${m[1]})`],
   [/^OpenAI tuvo un error temporal \((.+)\)$/, (m) => `OpenAI had a temporary error (${m[1]})`],
   [/^OpenAI respondió (.+)$/, (m) => `OpenAI responded ${m[1]}`],
-  [/^AssemblyAI tuvo un error temporal \((.+)\)$/, (m) => `AssemblyAI had a temporary error (${m[1]})`],
-  [/^AssemblyAI rechazó la solicitud \((.+)\)$/, (m) => `AssemblyAI rejected the request (${m[1]})`],
   [/^El archivo supera el máximo de (.+) GB\.$/, (m) => `The file exceeds the maximum of ${m[1]} GB.`],
   [/^El video supera la duración máxima de (.+) h\.$/, (m) => `The video exceeds the maximum length of ${m[1]} h.`],
   [/^Ya tienes (\d+) subidas en curso\. Termínalas o cancélalas antes de empezar otra\.$/, (m) => `You already have ${m[1]} uploads in progress. Finish or cancel them before starting another one.`],

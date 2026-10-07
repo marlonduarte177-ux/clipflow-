@@ -300,16 +300,8 @@ describe("cola y worker", () => {
     expect(JSON.stringify(t.api.toJSON())).not.toContain("openai-api-key");
   });
 
-  it("la clave de AssemblyAI vive en Secrets Manager; su relleno no parece una clave real", () => {
-    t.worker.hasResourceProperties("AWS::SecretsManager::Secret", {
-      Name: "clipflow-staging/assemblyai-api-key",
-      GenerateSecretString: { PasswordLength: 32, RequireEachIncludedType: true },
-    });
-    const [taskDef] = Object.values(t.worker.findResources("AWS::ECS::TaskDefinition"));
-    const container = (taskDef as { Properties: { ContainerDefinitions: Record<string, unknown>[] } }).Properties
-      .ContainerDefinitions[0]!;
-    expect((container.Secrets as { Name: string }[]).map((e) => e.Name)).toContain("ASSEMBLYAI_API_KEY");
-    expect(JSON.stringify(t.api.toJSON())).not.toContain("assemblyai-api-key");
+  it("sin AssemblyAI: la transcripción la hace Whisper con la clave de OpenAI", () => {
+    expect(JSON.stringify(t.worker.toJSON())).not.toContain("assemblyai");
   });
 
   it("lee originales, escribe resultados y solo puede AGREGAR originales (videos por enlace), nunca borrarlos", () => {

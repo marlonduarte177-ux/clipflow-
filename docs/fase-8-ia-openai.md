@@ -1,7 +1,7 @@
 # ClipFlow — Fase 8: Análisis con IA (OpenAI)
 
-> **Desde el 06/10/2026 la transcripción la hace AssemblyAI** (ya no Whisper), y cada clip dura lo que
-> eligió el usuario ±5 s. Ver [transcripcion-assemblyai.md](transcripcion-assemblyai.md).
+> **Desde el 08/10/2026 la transcripción vuelve a ser Whisper de OpenAI** (se quitó AssemblyAI), con la
+> misma clave de OpenAI. Cada clip dura lo que eligió el usuario ±5 s.
 
 Estado: **desplegada y verificada en AWS (staging) con OpenAI real** el 30/09/2026.
 

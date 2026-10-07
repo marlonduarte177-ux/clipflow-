@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeProxyValue, looksLikeAssemblyAIKey, parseProxyUrl } from "./config.js";
+import { describeProxyValue, parseProxyUrl } from "./config.js";
 
 describe("proxy de descarga", () => {
   it("acepta la URL estándar", () => {
@@ -32,11 +32,3 @@ describe("proxy de descarga", () => {
   });
 });
 
-describe("clave de AssemblyAI", () => {
-  it("acepta una clave real y rechaza el relleno del secreto (lleva signos)", () => {
-    expect(looksLikeAssemblyAIKey("0123456789abcdef0123456789abcdef")).toBe(true);
-    expect(looksLikeAssemblyAIKey("aB3$kL9!mN2#pQ5%rS8&tU1*vW4^xY7(")).toBe(false);
-    expect(looksLikeAssemblyAIKey("")).toBe(false);
-    expect(looksLikeAssemblyAIKey(undefined)).toBe(false);
-  });
-});

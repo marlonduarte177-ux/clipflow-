@@ -82,16 +82,6 @@ export class WorkerStack extends Stack {
       removalPolicy: props.stage === "production" ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     });
 
-    // Clave de AssemblyAI (transcripción). Igual que la de OpenAI: el usuario pega la real en Secrets Manager.
-    // El relleno lleva signos de puntuación a propósito: una clave real no los tiene, así el worker sabe
-    // que todavía no se pegó (y no intenta transcribir con ella).
-    const assemblyAiKey = new secretsmanager.Secret(this, "AssemblyAiApiKey", {
-      secretName: `${prefix}/assemblyai-api-key`,
-      description: "Clave de AssemblyAI (assemblyai.com → API Keys) para transcribir. Reemplaza el valor por tu clave.",
-      generateSecretString: { passwordLength: 32, requireEachIncludedType: true, excludeCharacters: "\"'\\ /@" },
-      removalPolicy: props.stage === "production" ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
-    });
-
     const cluster = new ecs.Cluster(this, "WorkerCluster", { clusterName: `${prefix}-workers`, vpc: props.vpc });
     this.cluster = cluster;
     this.taskFamily = `${prefix}-worker`;
@@ -147,7 +137,6 @@ export class WorkerStack extends Stack {
         // ECS lee el secreto al arrancar cada worker (como el worker escala a 0,
         // una clave nueva se usa desde el siguiente video).
         OPENAI_API_KEY: ecs.Secret.fromSecretsManager(openAiKey),
-        ASSEMBLYAI_API_KEY: ecs.Secret.fromSecretsManager(assemblyAiKey),
         DOWNLOAD_PROXY_URL: ecs.Secret.fromSecretsManager(downloadProxy),
         DB_USER: ecs.Secret.fromSecretsManager(dbSecret, "username"),
         DB_PASSWORD: ecs.Secret.fromSecretsManager(dbSecret, "password"),
@@ -264,7 +253,6 @@ export class WorkerStack extends Stack {
 
     new CfnOutput(this, "QueueUrl", { value: this.queue.queueUrl });
     new CfnOutput(this, "OpenAiSecretName", { value: openAiKey.secretName });
-    new CfnOutput(this, "AssemblyAiSecretName", { value: assemblyAiKey.secretName });
     new CfnOutput(this, "DownloadProxySecretName", { value: downloadProxy.secretName });
   }
 }
