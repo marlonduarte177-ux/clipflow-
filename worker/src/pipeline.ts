@@ -871,6 +871,12 @@ async function readTwitchChat(
   }
 }
 
+/**
+ * Versión de las transcripciones guardadas. "-sync": desde que el audio se alinea con el inicio del
+ * video (antes, si el audio empezaba más tarde, los tiempos quedaban corridos). Las viejas no se reusan.
+ */
+const TRANSCRIPT_CACHE_VERSION = "-sync";
+
 async function runAI(
   deps: PipelineDeps,
   info: { durationSeconds: number; hasAudio: boolean },
@@ -899,7 +905,7 @@ async function runAI(
     const coveredSeconds = Math.min(info.durationSeconds, deps.aiMaxAudioMinutes * 60);
     // ¿Ya se transcribió este video (reintento o nuevo procesamiento)? Se reutiliza: no se paga otra vez.
     const cacheKey = deps.ai.transcriptionModel
-      ? transcriptCacheKey(ids.userId, ids.videoId, deps.ai.name, deps.ai.transcriptionModel)
+      ? transcriptCacheKey(ids.userId, ids.videoId, deps.ai.name, `${deps.ai.transcriptionModel}${TRANSCRIPT_CACHE_VERSION}`)
       : null;
     const cacheFile = path.join(dir, "transcript-cache.json");
     let cached = cacheKey ? await loadTranscript(deps, cacheKey, coveredSeconds, cacheFile) : null;
@@ -913,7 +919,7 @@ async function runAI(
         .orderBy(desc(videos.createdAt))
         .limit(5);
       for (const other of earlier) {
-        const otherKey = transcriptCacheKey(ids.userId, other.id, deps.ai.name, deps.ai.transcriptionModel);
+        const otherKey = transcriptCacheKey(ids.userId, other.id, deps.ai.name, `${deps.ai.transcriptionModel}${TRANSCRIPT_CACHE_VERSION}`);
         cached = await loadTranscript(deps, otherKey, coveredSeconds, cacheFile);
         if (cached) {
           // Copia propia para este video (se borra con él, igual que la original con el suyo).

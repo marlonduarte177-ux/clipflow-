@@ -1,10 +1,10 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chooseVerticalCrop, detectContentBox, probe, renderVerticalClip } from "./ffmpeg.js";
+import { chooseVerticalCrop, detectContentBox, extractAudioChunks, probe, renderVerticalClip } from "./ffmpeg.js";
 import { detectFaces } from "./faces/yunet.js";
 
 const tools = { ffmpegPath: "ffmpeg", ffprobePath: "ffprobe" };
@@ -168,5 +168,25 @@ describe("encuadre que sigue caras", () => {
     const top = execFileSync("ffmpeg", ["-loglevel", "error", "-ss", "1", "-i", out, "-frames:v", "1", "-vf", "crop=1080:300:0:0,scale=36:10,format=gray", "-f", "rawvideo", "-"]);
     const mean = top.reduce((a, b) => a + b, 0) / top.length;
     expect(mean).toBeGreaterThan(20);
+  });
+});
+
+describe("audio para transcribir", () => {
+  it("si el audio empieza después que la imagen, el sonido queda en su segundo real (subtítulos en sincronía)", async () => {
+    // Imagen desde 0 s; audio desde 2 s, con un pitido en el segundo 3 del audio = segundo 5 del video.
+    const file = path.join(dir, "late-audio.mp4");
+    execFileSync("ffmpeg", [
+      "-loglevel", "error", "-y",
+      "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25:duration=10",
+      "-itsoffset", "2", "-f", "lavfi", "-i", "aevalsrc=if(between(t\\,3\\,4)\\,sin(2*PI*1000*t)\\,0):s=44100:d=6",
+      "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", file,
+    ]);
+    const work = path.join(dir, "late-audio-chunks");
+    execFileSync("mkdir", ["-p", work]);
+    const [chunk] = await extractAudioChunks(tools, file, work, { maxSeconds: 60 });
+    const log = spawnSync("ffmpeg", ["-i", chunk!.path, "-af", "silencedetect=n=-30dB:d=0.5", "-f", "null", "-"]).stderr.toString();
+    const beep = Number(/silence_end: ([\d.]+)/.exec(log)![1]);
+    expect(beep).toBeGreaterThan(4.8);
+    expect(beep).toBeLessThan(5.2);
   });
 });

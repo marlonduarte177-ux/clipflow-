@@ -709,6 +709,11 @@ export async function extractAudioChunks(
       "-map",
       "0:a:0",
       "-vn",
+      // Si el audio empieza después que la imagen (pasa en streams y videos de celular), se rellena
+      // con silencio desde el segundo 0 del video. Sin esto, el desfase se perdía al cortar en trozos
+      // y los subtítulos quedaban corridos respecto de lo que se oye.
+      "-af",
+      "aresample=async=1:first_pts=0",
       "-ac",
       "1",
       "-ar",
