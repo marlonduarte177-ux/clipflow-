@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { fullTranscriptKey, transcriptCacheKey, type AIAnalysisProvider, type AudioChunk, type FrameSheet, type TranscriptSegment, type VideoPart } from "@clipflow/shared";
+import { fullTranscriptKey, transcriptCacheKey, type AIAnalysisProvider, type AudioChunk, type FrameSheet, type TranscriptSegment } from "@clipflow/shared";
 import { claimJob, createJob, schema, type DbHandle } from "@clipflow/shared/db";
 import { createTestDb } from "@clipflow/shared/db/testing";
 import { AIProviderError } from "./ai/openai.js";
@@ -146,107 +146,6 @@ describe("análisis de imágenes con IA (experimental)", () => {
     });
     expect(result.vision).toBe("disabled");
     expect(ai.sheets).toEqual([]);
-  });
-});
-
-function probeSize(file: string) {
-  return execFileSync("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", file])
-    .toString()
-    .trim();
-}
-
-/** Pipeline nuevo de prueba: "mira" el video (recibe las partes) y devuelve momentos con título y motivo. */
-class FakeGeminiPipeline implements AIAnalysisProvider {
-  readonly name = "groq";
-  readonly transcriptionModel = "whisper-large-v3";
-  readonly watchesVideo = true;
-  parts: VideoPart[] = [];
-  titleCalls = 0;
-  constructor(private readonly segments: TranscriptSegment[] = SEGMENTS) {}
-  async transcribe() {
-    return { segments: this.segments, language: "spanish", usage: { audioSeconds: 40, estimatedCostUsd: 0.0012 }, provider: "groq:whisper-large-v3" };
-  }
-  async analyze(_s: TranscriptSegment[], _d: number, options?: { videoParts?: VideoPart[] }) {
-    this.parts = options?.videoParts ?? [];
-    return {
-      highlights: [{ startSeconds: 5, endSeconds: 20, strength: 0.9, title: "El gancho de Gemini", reason: "Pregunta fuerte y respuesta sorprendente." }],
-      usage: { inputTokens: 4000, outputTokens: 100, estimatedCostUsd: 0.007 },
-      provider: "gemini:gemini-3.5-flash",
-    };
-  }
-  async generateClipSuggestions(_s: TranscriptSegment[], moments: unknown[]) {
-    this.titleCalls++;
-    return { titles: moments.map(() => "Título de OpenAI"), usage: {} };
-  }
-}
-
-describe("pipeline nuevo (Groq + Gemini) elegido por el trabajo", () => {
-  it("Gemini recibe el video en partes livianas, sus títulos y motivos quedan en los clips, y se registra quién hizo qué", async () => {
-    const db = h!.db;
-    const { job } = await seedVideoJob(db, root, { sample, params: { pipeline: "gemini:gemini-3.5-flash", skipTranscriptCache: true } });
-    const gemini = new FakeGeminiPipeline();
-    const asked: string[] = [];
-    const deps = {
-      ...makeDeps(db, root, path.join(root, "work")),
-      ai: new FakeAI(),
-      aiFor: (p: string) => (asked.push(p), gemini),
-    };
-    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
-    expect(asked).toEqual(["gemini:gemini-3.5-flash"]);
-    expect(result).toMatchObject({
-      ai: "used",
-      pipeline: "gemini:gemini-3.5-flash",
-      selection: "ai",
-      providers: { transcription: "groq:whisper-large-v3", analysis: "gemini:gemini-3.5-flash" },
-    });
-    // Una parte de video liviana (el video de prueba dura 40 s) que existía al analizar.
-    expect(gemini.parts).toHaveLength(1);
-    expect(gemini.parts[0]).toMatchObject({ offsetSeconds: 0 });
-    const clipRows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
-    const best = clipRows.find((c) => c.title === "El gancho de Gemini");
-    expect(best).toBeDefined();
-    expect(best!.aiReason).toBe("Pregunta fuerte y respuesta sorprendente.");
-    // El clip sale del original con el encuadre vertical de siempre.
-    expect(probeSize(path.join(root, best!.s3Key!))).toBe("1080,1920");
-    expect(result.costs!.transcriptionUsd).toBeCloseTo(0.0012);
-  });
-
-  it("sin claves para el pipeline pedido, usa el actual", async () => {
-    const db = h!.db;
-    const { job } = await seedVideoJob(db, root, { sample, params: { pipeline: "gemini:x" } });
-    const deps = { ...makeDeps(db, root, path.join(root, "work")), ai: new FakeAI(), aiFor: () => null };
-    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
-    expect(result.pipeline).toBe("classic");
-  });
-
-  it("sin habla, Gemini igual elige momentos mirando el video (p. ej. gameplay)", async () => {
-    const db = h!.db;
-    const { job } = await seedVideoJob(db, root, { sample, params: { pipeline: "gemini" } });
-    const gemini = new FakeGeminiPipeline([]);
-    const deps = { ...makeDeps(db, root, path.join(root, "work")), ai: new FakeAI(), aiFor: () => gemini };
-    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
-    expect(result).toMatchObject({ ai: "used", selection: "ai" });
-    const clipRows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
-    expect(clipRows.some((c) => c.title === "El gancho de Gemini")).toBe(true);
-  });
-
-  it("si la transcripción falla (Groq y OpenAI), Gemini igual elige los momentos con el audio del video", async () => {
-    const db = h!.db;
-    const { job } = await seedVideoJob(db, root, { sample, params: { pipeline: "gemini", skipTranscriptCache: true } });
-    const gemini = new FakeGeminiPipeline();
-    gemini.transcribe = async () => {
-      throw new AIProviderError("OpenAI rechazó la solicitud: sin saldo", false, 429, "insufficient_quota");
-    };
-    const deps = { ...makeDeps(db, root, path.join(root, "work")), ai: new FakeAI(), aiFor: () => gemini };
-    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
-    expect(result).toMatchObject({ ai: "used", selection: "ai", providers: { analysis: "gemini:gemini-3.5-flash" } });
-    expect(result.aiReason).toContain("falló la transcripción");
-    expect(gemini.parts).toHaveLength(1);
-    const clipRows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
-    const best = clipRows.find((c) => c.title === "El gancho de Gemini");
-    expect(best).toBeDefined();
-    // Sin transcripción no hay subtítulos.
-    expect(await db.select().from(schema.subtitles).where(eq(schema.subtitles.clipId, best!.id))).toHaveLength(0);
   });
 });
 

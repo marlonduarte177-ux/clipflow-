@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeProxyValue, looksLikeGeminiKey, parseProxyUrl } from "./config.js";
+import { describeProxyValue, looksLikeAssemblyAIKey, parseProxyUrl } from "./config.js";
 
 describe("proxy de descarga", () => {
   it("acepta la URL estándar", () => {
@@ -32,11 +32,11 @@ describe("proxy de descarga", () => {
   });
 });
 
-describe("clave de Gemini", () => {
-  it("acepta el formato nuevo (AQ.) y el antiguo (AIza), y rechaza el valor provisional", () => {
-    expect(looksLikeGeminiKey("AQ.Ab8RN6Lq0xYzW3vTnPq2s5uD9eFgHiJkLm")).toBe(true);
-    expect(looksLikeGeminiKey("AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q")).toBe(true);
-    expect(looksLikeGeminiKey("PEGA_AQUI_TU_CLAVE")).toBe(false);
-    expect(looksLikeGeminiKey("AQ.corta")).toBe(false);
+describe("clave de AssemblyAI", () => {
+  it("acepta una clave real y rechaza el relleno del secreto (lleva signos)", () => {
+    expect(looksLikeAssemblyAIKey("0123456789abcdef0123456789abcdef")).toBe(true);
+    expect(looksLikeAssemblyAIKey("aB3$kL9!mN2#pQ5%rS8&tU1*vW4^xY7(")).toBe(false);
+    expect(looksLikeAssemblyAIKey("")).toBe(false);
+    expect(looksLikeAssemblyAIKey(undefined)).toBe(false);
   });
 });

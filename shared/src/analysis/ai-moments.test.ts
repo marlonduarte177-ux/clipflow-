@@ -1,26 +1,30 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_PRODUCT_CONFIG } from "../product-config.js";
-import { aiClipBounds, selectAiMoments } from "./ai-moments.js";
+import { selectAiMoments } from "./ai-moments.js";
 
 const weights = DEFAULT_PRODUCT_CONFIG.scoreWeights;
 const flat = (n: number, v = -30) => Array.from({ length: n }, () => v);
+/** Frases de 5 s seguidas entre `from` y `to`. */
+const sentences = (from: number, to: number) =>
+  Array.from({ length: Math.floor((to - from) / 5) }, (_, i) => ({ startSeconds: from + i * 5, endSeconds: from + i * 5 + 5, text: `Frase ${i}.` }));
 
 describe("selectAiMoments (la IA decide)", () => {
-  it("usa el inicio y el final que eligió la IA, aunque la duración elegida sea otra", () => {
+  it("lleva cada momento de la IA a la duración elegida ±5 s, cortando en frases completas", () => {
     const moments = selectAiMoments({
       durationSeconds: 600,
       highlights: [
-        { startSeconds: 100, endSeconds: 152, strength: 0.9 }, // una historia de 52 s con clips "de 30 s"
-        { startSeconds: 300, endSeconds: 318, strength: 0.7 },
+        { startSeconds: 100, endSeconds: 152, strength: 0.9 }, // 52 s con clips de 30 s: se recorta en una frase
+        { startSeconds: 300, endSeconds: 318, strength: 0.7 }, // 18 s: se alarga con las frases que siguen
       ],
       signals: { audio: flat(600) },
       weights,
       clipDurationSeconds: 30,
       maxClips: 15,
+      segments: sentences(0, 600),
     });
     expect(moments.map((m) => [m.startSeconds, m.endSeconds])).toEqual([
-      [100, 152],
-      [300, 318],
+      [100, 130],
+      [300, 330],
     ]);
     expect(moments[0]!.breakdown.speech).toBe(0.9);
   });
@@ -33,9 +37,7 @@ describe("selectAiMoments (la IA decide)", () => {
     expect(moments.map((m) => m.startSeconds)).toEqual([420, 480, 540]);
   });
 
-  it("alarga los muy cortos y recorta los muy largos según la duración elegida", () => {
-    expect(aiClipBounds(30)).toEqual({ min: 15, max: 60 });
-    expect(aiClipBounds(90)).toEqual({ min: 45, max: 90 });
+  it("sin transcripción, alarga los muy cortos y recorta los muy largos a la medida", () => {
     const moments = selectAiMoments({
       durationSeconds: 600,
       highlights: [
@@ -47,7 +49,23 @@ describe("selectAiMoments (la IA decide)", () => {
       clipDurationSeconds: 30,
       maxClips: 15,
     });
-    expect(moments.map((m) => m.endSeconds - m.startSeconds)).toEqual([15, 60]);
+    expect(moments.map((m) => m.endSeconds - m.startSeconds)).toEqual([25, 35]);
+  });
+
+  it("si un momento no se puede cortar en frases con ese largo, se descarta y entra el siguiente", () => {
+    const moments = selectAiMoments({
+      durationSeconds: 600,
+      highlights: [
+        { startSeconds: 400, endSeconds: 430, strength: 0.95 }, // sin habla cerca: no hay dónde cortar
+        { startSeconds: 50, endSeconds: 80, strength: 0.8 },
+      ],
+      signals: {},
+      weights,
+      clipDurationSeconds: 30,
+      maxClips: 1,
+      segments: sentences(0, 100),
+    });
+    expect(moments.map((m) => [m.startSeconds, m.endSeconds])).toEqual([[50, 80]]);
   });
 
   it("la reacción (volumen, chat…) desempata y sube un poco, pero no manda", () => {
@@ -77,7 +95,7 @@ describe("selectAiMoments (la IA decide)", () => {
       weights,
       clipDurationSeconds: 30,
       maxClips: 15,
-      segments: [{ startSeconds: 95, endSeconds: 135, text: "dato interesante" }],
+      segments: sentences(95, 135),
     });
     expect(moments).toHaveLength(2);
     const extra = moments.find((m) => m.startSeconds >= 440)!;
@@ -94,7 +112,7 @@ describe("selectAiMoments (la IA decide)", () => {
       weights,
       clipDurationSeconds: 30,
       maxClips: 15,
-      segments: [{ startSeconds: 0, endSeconds: 600, text: "hablan todo el tiempo" }],
+      segments: sentences(0, 600),
     });
     expect(moments.map((m) => m.startSeconds)).toEqual([100]);
   });

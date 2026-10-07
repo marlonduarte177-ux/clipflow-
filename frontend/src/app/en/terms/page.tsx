@@ -106,8 +106,8 @@ export default function TermsPageEn() {
           title: "Usage limits",
           body: (
             <p>
-              To keep the service working well for everyone, there are usage limits (for example, videos up to 3 hours long and a daily
-              maximum per user). The app tells you when you reach one.
+              To keep the service working well for everyone, there are usage limits (for example, videos up to 3 hours long and the minutes
+              in your plan). The app tells you when you reach one.
             </p>
           ),
         },

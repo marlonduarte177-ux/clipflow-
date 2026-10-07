@@ -3,7 +3,6 @@ import cors from "@fastify/cors";
 import type { MeResponse, ProductConfig } from "@clipflow/shared";
 import { getCreditBalance, type Database } from "@clipflow/shared/db";
 import { accountRoutes } from "./account.js";
-import { adminRoutes } from "./admin.js";
 import type { ApiConfig } from "./config.js";
 import { requireAuth, type EmailLookup, type TokenVerifier } from "./auth.js";
 import { clipRoutes } from "./clips.js";
@@ -25,11 +24,9 @@ export interface AppDeps {
   product: ProductConfig;
   /** false en tests para no llenar la salida de logs. */
   logger?: boolean;
-  /** Herramientas internas: correos de administradores y pipelines de la prueba lado a lado. */
-  admin?: { emails: string[]; comparePipelines: string[] };
 }
 
-export async function buildApp({ config, verifyToken, lookupEmail, db, storage, queue, launcher, product, logger = true, admin }: AppDeps): Promise<FastifyInstance> {
+export async function buildApp({ config, verifyToken, lookupEmail, db, storage, queue, launcher, product, logger = true }: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
     logger: logger
       ? {
@@ -96,18 +93,6 @@ export async function buildApp({ config, verifyToken, lookupEmail, db, storage, 
     return { userId: request.user!.id, email: request.user!.email, creditMinutes };
   });
   await app.register(accountRoutes({ db, auth, storage }));
-  await app.register(
-    adminRoutes({
-      db,
-      auth,
-      storage,
-      queue,
-      launcher,
-      product,
-      adminEmails: admin?.emails ?? [],
-      comparePipelines: admin?.comparePipelines ?? ["classic"],
-    }),
-  );
 
   await app.register(projectRoutes({ db, auth, storage }));
   await app.register(

@@ -742,67 +742,6 @@ export async function extractAudioChunks(
 }
 
 /**
- * Partes del video en baja resolución para que una IA las mire (imagen + audio): ~10 min cada una,
- * con 1 min de solape para no partir un momento en el borde. 360 p, 2 fotogramas por segundo y audio
- * mono: livianas para subir, y suficientes para entender lo que pasa.
- */
-export async function makeVideoParts(
-  tools: FfmpegTools,
-  input: string,
-  workDir: string,
-  durationSeconds: number,
-  options: { partSeconds?: number; overlapSeconds?: number; height?: number; fps?: number; signal?: AbortSignal } = {},
-): Promise<{ path: string; offsetSeconds: number; durationSeconds: number }[]> {
-  const partSeconds = options.partSeconds ?? 600;
-  const overlap = options.overlapSeconds ?? 60;
-  const parts: { path: string; offsetSeconds: number; durationSeconds: number }[] = [];
-  for (let start = 0, i = 0; start < durationSeconds - 1; start += partSeconds, i++) {
-    // La última parte absorbe un resto corto (menos de 2 min) en vez de quedar sola.
-    const rest = durationSeconds - (start + partSeconds);
-    const length = rest < 120 ? durationSeconds - start : partSeconds + overlap;
-    const file = path.join(workDir, `ai-part-${String(i).padStart(3, "0")}.mp4`);
-    await run(
-      tools.ffmpegPath,
-      [
-        ...FFMPEG_BASE,
-        "-ss",
-        start.toFixed(3),
-        "-i",
-        input,
-        "-t",
-        length.toFixed(3),
-        "-map",
-        "0:v:0",
-        "-map",
-        "0:a:0?",
-        "-vf",
-        // Nunca se agranda (p. ej. la copia liviana de un stream largo ya viene en 160 p).
-        `scale=-2:min(${options.height ?? 360}\\,ih),fps=${options.fps ?? 2}`,
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "32",
-        "-c:a",
-        "aac",
-        "-ac",
-        "1",
-        "-b:a",
-        "48k",
-        "-movflags",
-        "+faststart",
-        file,
-      ],
-      { signal: options.signal },
-    );
-    parts.push({ path: file, offsetSeconds: start, durationSeconds: Math.min(length, durationSeconds - start) });
-    if (rest < 120) break;
-  }
-  return parts;
-}
-
-/**
  * Hojas de fotogramas para el análisis de imágenes con IA: 1 fotograma cada `intervalSeconds`
  * (sin franjas negras), agrupados en cuadrículas de columnas×filas. Una hoja = una imagen para
  * la IA, así se paga una imagen por cada 9 fotogramas en lugar de 9.

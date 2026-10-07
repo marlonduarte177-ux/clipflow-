@@ -2,7 +2,7 @@ import { openAsBlob } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { aiClipBounds } from "@clipflow/shared";
+import { clipDurationRange } from "@clipflow/shared";
 import type {
   AIAnalysisProvider,
   AIUsage,
@@ -14,8 +14,6 @@ import type {
 } from "@clipflow/shared";
 
 export interface OpenAIProviderOptions {
-  /** Nombre del proveedor (clave de la transcripción guardada). "groq" usa la API compatible de Groq. */
-  name?: string;
   apiKey: string;
   /** Único modelo que devuelve tiempos por frase (necesarios para subtítulos y cortes). */
   transcribeModel: string;
@@ -271,9 +269,7 @@ export function isLikelyHallucination(s: { no_speech_prob?: number; avg_logprob?
  * Todas las respuestas se validan: si la IA devuelve algo raro, se descarta.
  */
 export class OpenAIProvider implements AIAnalysisProvider {
-  get name(): string {
-    return this.options.name ?? "openai";
-  }
+  readonly name = "openai";
 
   get transcriptionModel(): string {
     return this.options.transcribeModel;
@@ -486,11 +482,12 @@ export class OpenAIProvider implements AIAnalysisProvider {
     partial: boolean,
     targetClipSeconds?: number,
   ) {
-    // Largo de cada momento: alrededor de lo que eligió el usuario; la idea completa manda.
-    const bounds = targetClipSeconds ? aiClipBounds(targetClipSeconds) : { min: 10, max: 90 };
+    // Largo obligatorio: lo que eligió el usuario ±5 s (después se ajusta en frases completas).
+    const bounds = targetClipSeconds ? clipDurationRange(targetClipSeconds) : { min: 10, max: 90 };
     const length = targetClipSeconds
-      ? `Cada momento debe durar idealmente unos ${targetClipSeconds} segundos (entre ${bounds.min} y ${bounds.max}): ` +
-        "más corto o más largo solo si la idea lo necesita para entenderse completa. "
+      ? `Cada momento DEBE durar entre ${bounds.min} y ${bounds.max} segundos (el usuario pidió clips de ${targetClipSeconds} s). ` +
+        "Si la idea es más corta, incluye la frase anterior o las siguientes hasta cerrar una frase; si es más larga, " +
+        "elige el tramo más fuerte que se entienda solo. "
       : "Cada momento debe durar entre 10 y 90 segundos. ";
     const transcript = window.segments.map((s) => `[${fmt(s.startSeconds)}-${fmt(s.endSeconds)}] ${s.text}`).join("\n");
     const system =

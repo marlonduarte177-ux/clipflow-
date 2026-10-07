@@ -105,8 +105,8 @@ export default function TermsPage() {
           title: "Límites de uso",
           body: (
             <p>
-              Para que el servicio funcione bien para todos, hay topes de uso (por ejemplo, videos de hasta 3 horas y un máximo diario por
-              usuario). Te avisamos en la app cuando llegas a uno.
+              Para que el servicio funcione bien para todos, hay topes de uso (por ejemplo, videos de hasta 3 horas y los minutos
+              de tu plan). Te avisamos en la app cuando llegas a uno.
             </p>
           ),
         },

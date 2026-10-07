@@ -55,6 +55,60 @@ export function snapToSentences(
   return { ...moment, startSeconds: round3(start), endSeconds: round3(end) };
 }
 
+/** Largo obligatorio de un clip según la duración que eligió el usuario: ±5 s. Ej.: 60 s → entre 55 y 65 s. */
+export function clipDurationRange(clipDurationSeconds: number): { min: number; max: number } {
+  return { min: Math.max(1, clipDurationSeconds - 5), max: clipDurationSeconds + 5 };
+}
+
+/**
+ * Lleva un momento al largo obligatorio cortando en frases completas: empieza al inicio de una frase
+ * (la del momento o una cercana) y termina al final de una frase, con el largo dentro de [min, max].
+ * Si el momento es corto, se alarga con las frases que siguen (o las de antes); si es largo, se recorta
+ * en el final de frase más cercano. Devuelve null si no hay ningún corte en frases que dé ese largo.
+ */
+export function fitToSentences(
+  startSeconds: number,
+  endSeconds: number,
+  segments: TranscriptSegment[],
+  options: { min: number; max: number; videoDurationSeconds: number },
+): { startSeconds: number; endSeconds: number } | null {
+  const spoken = segments.filter((s) => s.text.trim() !== "" && s.endSeconds > s.startSeconds);
+  if (spoken.length === 0) return null;
+  const { min, max } = options;
+  const starts = [...new Set(spoken.map((s) => s.startSeconds))].sort((a, b) => a - b);
+  const ends = [...new Set(spoken.map((s) => s.endSeconds))].filter((e) => e <= options.videoDurationSeconds + 0.25);
+  // Preferido: la frase donde arranca el momento (o la que empieza justo antes, hasta 4 s).
+  const own = starts.filter((x) => x <= startSeconds + 0.25 && x >= startSeconds - 4).pop();
+  // Si no alcanza, otros inicios de frase cerca, sin perder la idea: hasta medio clip antes o hasta la mitad del momento.
+  const nearby = starts
+    .filter((x) => x >= startSeconds - max / 2 && x <= startSeconds + Math.max(0, (endSeconds - startSeconds) / 2))
+    .sort((a, b) => Math.abs(a - startSeconds) - Math.abs(b - startSeconds));
+  for (const start of [...(own !== undefined ? [own] : []), ...nearby]) {
+    // Final ideal: el que eligió la IA si ya da un largo permitido; si no, el largo pedido (centro del rango).
+    const length = endSeconds - start;
+    const ideal = length >= min && length <= max ? endSeconds : start + (min + max) / 2;
+    // Se prefiere el primer final de frase desde ese punto (no corta la idea); si no hay, el más cercano antes.
+    const allowed = ends.filter((end) => end - start >= min && end - start <= max).sort((x, y) => x - y);
+    const best = allowed.find((end) => end >= ideal - 0.25) ?? allowed[allowed.length - 1] ?? null;
+    if (best !== null) return { startSeconds: round3(start), endSeconds: round3(Math.min(best, options.videoDurationSeconds)) };
+  }
+  return null;
+}
+
+/**
+ * Sin frases donde cortar (sin habla): se alarga o recorta el momento al rango, sin salirse del video.
+ * Si el video es más corto que el mínimo, el clip es el video entero.
+ */
+export function clampToRange(
+  startSeconds: number,
+  endSeconds: number,
+  options: { min: number; max: number; videoDurationSeconds: number },
+): { startSeconds: number; endSeconds: number } {
+  const length = Math.min(options.videoDurationSeconds, Math.min(options.max, Math.max(options.min, endSeconds - startSeconds)));
+  const start = Math.max(0, Math.min(startSeconds, options.videoDurationSeconds - length));
+  return { startSeconds: round3(start), endSeconds: round3(start + length) };
+}
+
 /** Frases de un tramo, con tiempos relativos al inicio del tramo (para subtítulos de un clip). */
 export function segmentsForRange(segments: TranscriptSegment[], startSeconds: number, endSeconds: number): TranscriptSegment[] {
   return segments

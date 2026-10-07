@@ -1,5 +1,6 @@
 import type { ScoreWeights } from "../product-config.js";
 import type { ContentHighlight, TranscriptSegment } from "./ai-provider.js";
+import { clampToRange, clipDurationRange, fitToSentences } from "./transcript.js";
 import { normalizeSeries, selectMoments, SIGNAL_MIN_RANGE, type Moment, type SignalName, type SignalSeries } from "./scoring.js";
 
 /** Fuerza mínima (0–1) que la IA le dio a un momento para que sea clip. */
@@ -18,25 +19,18 @@ export interface SelectAiMomentsInput {
   /** Señales por segundo (como en selectMoments); "speech" se ignora: la IA ya está en los momentos. */
   signals: SignalSeries;
   weights: ScoreWeights;
-  /** Duración elegida por el usuario: guía el largo, pero el momento de la IA manda. */
+  /** Duración elegida por el usuario: cada clip dura eso ±5 s (ver clipDurationRange). */
   clipDurationSeconds: number;
   maxClips: number;
   minGapSeconds?: number;
-  /** Frases de la transcripción: para saber qué tramos no tienen habla. */
+  /** Frases de la transcripción: para cortar en frases completas y saber qué tramos no tienen habla. */
   segments?: TranscriptSegment[];
-}
-
-/** Largo permitido para un momento de la IA según la duración elegida (siempre entre 8 y 90 s). */
-export function aiClipBounds(clipDurationSeconds: number): { min: number; max: number } {
-  return {
-    min: Math.max(8, Math.round(clipDurationSeconds * 0.5)),
-    max: Math.min(90, Math.max(20, Math.round(clipDurationSeconds * 2))),
-  };
 }
 
 /**
  * La IA decide (videos con voz: podcasts, entrevistas, streams hablados): cada clip es un momento que
- * eligió la IA, con su propio inicio y final. Las demás señales solo suben un poco los que además
+ * eligió la IA, llevado al largo obligatorio (duración elegida ±5 s) cortando en frases completas. Si
+ * un momento no se puede llevar a ese largo en frases, se descarta y ocupa su lugar el siguiente. Las demás señales solo suben un poco los que además
  * tienen reacción. Si sobra lugar, se agregan hasta 3 momentos muy fuertes solo por señales en
  * tramos casi sin habla (p. ej. una jugada con gritos), siempre por debajo de los de la IA.
  */
@@ -44,7 +38,8 @@ export function selectAiMoments(input: SelectAiMomentsInput): Moment[] {
   const total = Math.floor(input.durationSeconds);
   if (total <= 0) return [];
   const gap = input.minGapSeconds ?? 2;
-  const { min, max } = aiClipBounds(input.clipDurationSeconds);
+  const { min, max } = clipDurationRange(input.clipDurationSeconds);
+  const hasSpeech = (input.segments ?? []).some((s) => s.text.trim() !== "");
 
   // Reacción por segundo: promedio ponderado de las señales normalizadas (sin la de la IA).
   const reactionNames = (Object.keys(input.signals) as SignalName[]).filter(
@@ -63,11 +58,15 @@ export function selectAiMoments(input: SelectAiMomentsInput): Moment[] {
 
   const candidates: Moment[] = input.highlights
     .filter((h) => h.strength >= AI_MIN_STRENGTH && h.endSeconds > h.startSeconds)
-    .map((h) => {
-      // Respeta el momento de la IA dentro de los límites: muy corto se alarga, muy largo se recorta.
-      const start = Math.max(0, Math.min(h.startSeconds, total - 1));
-      let end = Math.min(total, Math.max(h.endSeconds, start + min));
-      if (end - start > max) end = start + max;
+    .flatMap((h) => {
+      // Largo obligatorio: con transcripción, cortando en frases (o se descarta); sin ella, a la medida.
+      const bounds = { min, max, videoDurationSeconds: input.durationSeconds };
+      const fitted = hasSpeech
+        ? fitToSentences(h.startSeconds, h.endSeconds, input.segments!, bounds)
+        : clampToRange(h.startSeconds, h.endSeconds, bounds);
+      if (!fitted) return [];
+      const start = fitted.startSeconds;
+      const end = fitted.endSeconds;
       const breakdown: Partial<Record<SignalName, number>> = { speech: round(h.strength) };
       let reaction = 0;
       for (const name of reactionNames) {
@@ -76,14 +75,16 @@ export function selectAiMoments(input: SelectAiMomentsInput): Moment[] {
         reaction += (input.weights[name] / reactionWeight) * mean;
       }
       const score = reactionNames.length ? (1 - REACTION_WEIGHT) * h.strength + REACTION_WEIGHT * reaction : h.strength;
-      return {
-        startSeconds: round(start),
-        endSeconds: round(end),
-        score: round(score),
-        breakdown,
-        ...(h.title ? { title: h.title } : {}),
-        ...(h.reason ? { reason: h.reason } : {}),
-      };
+      return [
+        {
+          startSeconds: round(start),
+          endSeconds: round(end),
+          score: round(score),
+          breakdown,
+          ...(h.title ? { title: h.title } : {}),
+          ...(h.reason ? { reason: h.reason } : {}),
+        },
+      ];
     });
 
   const overlaps = (a: Moment, list: Moment[]) => list.some((c) => a.startSeconds < c.endSeconds + gap && c.startSeconds < a.endSeconds + gap);
