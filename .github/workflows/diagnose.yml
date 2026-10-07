@@ -15,6 +15,10 @@ on:
       hours:
         description: Horas hacia atrás a revisar
         default: "24"
+      media:
+        description: Medir los últimos videos y clips (solo números)
+        type: boolean
+        default: true
 
 permissions:
   id-token: write # necesario para OIDC
@@ -46,8 +50,12 @@ jobs:
           # El rol de GitHub no puede etiquetar sesiones (sts:TagSession) en los roles de CDK.
           role-skip-session-tagging: true
           aws-region: ${{ vars.AWS_REGION }}
+      - name: Instalar FFmpeg (para medir videos)
+        if: ${{ inputs.media }}
+        run: sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
       - name: Diagnóstico
         env:
+          MEDIA: ${{ inputs.media }}
           STAGE: ${{ inputs.stage }}
           HOURS: ${{ inputs.hours }}
         run: python3 scripts/diagnose.py
