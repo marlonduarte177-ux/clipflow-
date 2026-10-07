@@ -43,6 +43,8 @@ jobs:
         with:
           role-to-assume: ${{ env.LOOKUP_ROLE }}
           role-chaining: true
+          # El rol de GitHub no puede etiquetar sesiones (sts:TagSession) en los roles de CDK.
+          role-skip-session-tagging: true
           aws-region: ${{ vars.AWS_REGION }}
       - name: Diagnóstico
         env:

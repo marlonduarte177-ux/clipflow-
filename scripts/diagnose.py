@@ -126,6 +126,13 @@ def main() -> None:
     if SUMMARY:
         with open(SUMMARY, "a", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
+    # También como avisos (anotaciones) del workflow: se leen desde la API de GitHub sin descargar
+    # el registro completo. Como mucho 10 avisos por paso, en trozos.
+    text = "\n".join(lines)
+    chunks = [text[i : i + 3500] for i in range(0, len(text), 3500)][:10]
+    for n, chunk in enumerate(chunks, 1):
+        body = chunk.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print(f"::notice title=Diagnóstico {n}/{len(chunks)}::{body}")
 
 
 if __name__ == "__main__":
