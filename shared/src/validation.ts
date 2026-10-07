@@ -29,7 +29,7 @@ export const UploadPartsRequestSchema = z.object({
 });
 
 /** Estilo de los subtítulos quemados en el video. */
-export const SUBTITLE_STYLES = ["highlight", "classic", "none"] as const;
+export const SUBTITLE_STYLES = ["highlight", "classic", "word", "yellow", "neon", "minimal", "none"] as const;
 export const SubtitleStyleSchema = z.enum(SUBTITLE_STYLES);
 
 /** Opciones que el usuario elige antes de procesar. */
@@ -90,6 +90,12 @@ export const ImportVideoSchema = z.object({
   rightsConfirmed: z.literal(true, "Debes confirmar que tienes derechos o permiso para usar el video"),
   /** Solo descargar el video (sin clips): el usuario se lo lleva y puede crear clips después. */
   downloadOnly: z.boolean().optional(),
+  /**
+   * Tramo del video a usar, en segundos del original (p. ej. de un stream de 8 h, solo de 1:00:00 a
+   * 2:30:00). Se descarga solo ese tramo y solo ese tramo gasta minutos. Sin ellos: el video entero.
+   */
+  startSeconds: z.number().int().min(0).max(48 * 3600).optional(),
+  endSeconds: z.number().int().positive().max(48 * 3600).optional(),
   ...ProcessingOptions,
 });
 

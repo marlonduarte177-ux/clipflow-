@@ -21,10 +21,13 @@ import { Alert } from "@/components/ui";
 import { errorMessage } from "@/i18n/locale";
 import { useLocale, useT } from "@/i18n/provider";
 import { apiConfigured, apiFetch, formatBytes, formatDuration } from "@/lib/api";
+import { parseClock } from "@/lib/clock-input";
 import { readVideoDuration, uploadVideo, type UploadProgress } from "@/lib/uploader";
 
 // Límites mostrados al usuario; la API los vuelve a comprobar siempre.
 const LIMITS = DEFAULT_PRODUCT_CONFIG.upload;
+/** Parte mínima de un enlace (la API pide lo mismo). */
+const MIN_RANGE_SECONDS = 30;
 
 type Phase = "idle" | "uploading" | "uploaded" | "starting" | "error";
 
@@ -55,6 +58,10 @@ export function UploadView() {
   const [importing, setImporting] = useState(false);
   /** Por enlace: crear clips o solo bajar el video. */
   const [importMode, setImportMode] = useState<"clips" | "download">("clips");
+  /** Por enlace: usar solo una parte (p. ej. de un stream largo). */
+  const [useRange, setUseRange] = useState(false);
+  const [rangeFrom, setRangeFrom] = useState("");
+  const [rangeTo, setRangeTo] = useState("");
 
   const abortRef = useRef<AbortController | null>(null);
   const videoRef = useRef<VideoDto | null>(null);
@@ -154,10 +161,30 @@ export function UploadView() {
     }
   }
 
+  /** La parte elegida del enlace: lo que se manda a la API y el texto que la explica, o un error. */
+  function linkRange(): { ok: true; body: { startSeconds?: number; endSeconds?: number }; note: string } | { ok: false; message: string } {
+    if (!useRange) return { ok: true, body: {}, note: "" };
+    const from = parseClock(rangeFrom);
+    const to = parseClock(rangeTo);
+    if (Number.isNaN(from) || Number.isNaN(to)) return { ok: false, message: t.upload.rangeInvalid };
+    const start = from ?? 0;
+    const max = formatDuration(LIMITS.maxDurationSeconds);
+    if (to === null) return { ok: true, body: { startSeconds: start }, note: t.upload.rangeToEnd(max) };
+    if (to <= start) return { ok: false, message: t.upload.rangeOrder };
+    if (to - start < MIN_RANGE_SECONDS) return { ok: false, message: t.upload.rangeTooShort };
+    if (to - start > LIMITS.maxDurationSeconds) return { ok: false, message: t.upload.rangeTooLong(max) };
+    return { ok: true, body: { startSeconds: start, endSeconds: to }, note: t.upload.rangeLength(formatDuration(to - start)) };
+  }
+
   function onImportClick(mode: "clips" | "download") {
     const checked = checkImportUrl(link);
     if (!checked.ok) {
       setError(translateMessage(checked.message, locale));
+      return;
+    }
+    const range = linkRange();
+    if (!range.ok) {
+      setError(range.message);
       return;
     }
     setError("");
@@ -169,12 +196,16 @@ export function UploadView() {
     setImporting(true);
     try {
       const project = await ensureProject();
+      const range = linkRange();
       const { video } = await apiFetch<ImportVideoResponse>("/videos/import", {
         method: "POST",
-        body:
-          importMode === "download"
-            ? { projectId: project, url: link.trim(), rightsConfirmed: true, downloadOnly: true }
-            : { projectId: project, url: link.trim(), rightsConfirmed: true, clipDurationSeconds: clipSeconds, subtitleStyle },
+        body: {
+          projectId: project,
+          url: link.trim(),
+          rightsConfirmed: true,
+          ...(range.ok ? range.body : {}),
+          ...(importMode === "download" ? { downloadOnly: true } : { clipDurationSeconds: clipSeconds, subtitleStyle }),
+        },
       });
       router.push(`/dashboard/videos/${video.id}`);
     } catch (err) {
@@ -258,6 +289,27 @@ export function UploadView() {
             }}
             placeholder="https://www.tiktok.com/@…/video/…"
             className="h-12 w-full rounded-xl border border-line bg-background px-3.5 text-base outline-none focus:border-accent"
+          />
+          <RangeFields
+            enabled={useRange}
+            onEnabled={(on) => {
+              setUseRange(on);
+              setError("");
+            }}
+            from={rangeFrom}
+            to={rangeTo}
+            onFrom={(v) => {
+              setRangeFrom(v);
+              setError("");
+            }}
+            onTo={(v) => {
+              setRangeTo(v);
+              setError("");
+            }}
+            note={(() => {
+              const r = linkRange();
+              return r.ok ? r.note : "";
+            })()}
           />
           {/* Otra acción con el mismo enlace: bajar el video tal cual, sin clips (si está activada). */}
           {FEATURES.downloadOnly ? (
@@ -371,6 +423,52 @@ export function UploadView() {
           onCancel={() => setAskRights(false)}
           onConfirm={onConfirmImport}
         />
+      ) : null}
+    </div>
+  );
+}
+
+/** "Usar solo una parte del video": desde / hasta, escritos como 1:30:00. */
+function RangeFields({
+  enabled,
+  onEnabled,
+  from,
+  to,
+  onFrom,
+  onTo,
+  note,
+}: {
+  enabled: boolean;
+  onEnabled: (on: boolean) => void;
+  from: string;
+  to: string;
+  onFrom: (value: string) => void;
+  onTo: (value: string) => void;
+  note: string;
+}) {
+  const t = useT();
+  const field = "h-11 w-full rounded-xl border border-line bg-background px-3 text-base tabular-nums outline-none focus:border-accent";
+  return (
+    <div className="space-y-2.5 rounded-xl border border-line/70 p-3">
+      <label className="flex cursor-pointer items-center justify-between gap-3">
+        <span className="text-sm font-semibold">{t.upload.rangeToggle}</span>
+        <input type="checkbox" checked={enabled} onChange={(e) => onEnabled(e.target.checked)} className="h-5 w-5 accent-accent" />
+      </label>
+      <p className="text-xs leading-[17px] text-muted">{t.upload.rangeHint}</p>
+      {enabled ? (
+        <>
+          <div className="grid grid-cols-2 gap-2.5">
+            <label className="space-y-1">
+              <span className="text-xs text-muted">{t.upload.rangeFrom}</span>
+              <input value={from} onChange={(e) => onFrom(e.target.value)} placeholder="0:00:00" autoComplete="off" className={field} />
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs text-muted">{t.upload.rangeTo}</span>
+              <input value={to} onChange={(e) => onTo(e.target.value)} placeholder={t.upload.rangeToPlaceholder} autoComplete="off" className={field} />
+            </label>
+          </div>
+          {note ? <p className="text-xs font-semibold text-accent">{note}</p> : null}
+        </>
       ) : null}
     </div>
   );

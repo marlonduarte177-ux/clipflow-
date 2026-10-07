@@ -54,6 +54,17 @@ function fakeChat(duration: number, perSecond: (t: number) => number) {
 }
 
 describe("fetchTwitchChatActivity", () => {
+  it("con un tramo elegido, lee el chat desde ese segundo y la serie empieza en 0", async () => {
+    // Explosión del chat en el segundo 1120 del VOD = segundo 120 del tramo que empieza en 1000.
+    const { fetchFn, requests } = fakeChat(1300, (t) => (t >= 1120 && t < 1135 ? 20 : t % 5 === 0 ? 1 : 0));
+    const activity = await fetchTwitchChatActivity("1", 300, { fetch: fetchFn, stepSeconds: 15, startSeconds: 1000 });
+    expect(Math.min(...requests)).toBe(1000);
+    expect(activity!.series).toHaveLength(300);
+    const peak = activity!.series.indexOf(Math.max(...activity!.series));
+    expect(peak).toBeGreaterThan(100);
+    expect(peak).toBeLessThan(135);
+  });
+
   it("encuentra el pico del chat y lo corre unos segundos antes (el chat reacciona tarde)", async () => {
     // Chat tranquilo (1 msg cada 5 s) y una explosión entre 120 y 135 s (20 msg/s).
     const { fetchFn, requests } = fakeChat(300, (t) => (t >= 120 && t < 135 ? 20 : t % 5 === 0 ? 1 : 0));

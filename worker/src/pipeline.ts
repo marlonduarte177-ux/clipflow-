@@ -14,6 +14,7 @@ import {
   selectAiMoments,
   selectMoments,
   speechSignalFromHighlights,
+  SUBTITLE_STYLES,
   toSrt,
   toVtt,
   visionSignalFromFrames,
@@ -241,13 +242,20 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     await progress("downloading", 0, true);
     let downloaded;
     let analysisCopy = false;
+    // Tramo que eligió el usuario (solo ese se baja y se procesa).
+    const section = sourceSection(video);
     try {
       if (!(job.params as JobParams).downloadOnly && isStreamPlatformUrl(video.sourceUrl)) {
         const media = await (deps.streams?.fetchMediaInfo ?? fetchMediaInfo)(video.sourceUrl, linkOptions());
-        analysisCopy = !media.isLive && (media.durationSeconds ?? 0) >= (deps.longStreamMinSeconds ?? LONG_STREAM_MIN_SECONDS);
+        // Lo que se va a bajar: el tramo (o lo que quede del video desde su inicio) o el video entero.
+        const length = section
+          ? Math.min(section.endSeconds, media.durationSeconds ?? section.endSeconds) - section.startSeconds
+          : (media.durationSeconds ?? 0);
+        analysisCopy = !media.isLive && length >= (deps.longStreamMinSeconds ?? LONG_STREAM_MIN_SECONDS);
       }
       downloaded = await (deps.download ?? downloadFromUrl)(video.sourceUrl, workDir, {
         ...linkOptions(),
+        section,
         ...(analysisCopy ? { quality: "analysis" as const } : {}),
         onProgress: (f) => void progress("downloading", f).catch(() => undefined),
       });
@@ -416,7 +424,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       if (a.retryLater) throw new Error("se reintentará");
     });
     visionGate.catch(() => undefined);
-    const chatPromise = readTwitchChat(deps, video.sourceUrl, info.durationSeconds, controller.signal, job.id);
+    const chatPromise = readTwitchChat(deps, video.sourceUrl, info.durationSeconds, controller.signal, job.id, video.sourceStartSeconds ?? 0);
     const [raw, ai, vision, chat] = await Promise.all([
       analyzeSignals(deps.tools, input, info, dir, {
         signal: controller.signal,
@@ -509,7 +517,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       await deps.storage.upload(fullFile, fullTranscriptKey(job.userId, job.id), "text/vtt");
     }
     const requested = (job.params as JobParams).subtitleStyle;
-    const subtitleStyle: SubtitleStyle = requested === "classic" || requested === "none" ? requested : "highlight";
+    const subtitleStyle: SubtitleStyle = (SUBTITLE_STYLES as readonly string[]).includes(requested ?? "") ? (requested as SubtitleStyle) : "highlight";
 
     // 4. Generar clips verticales y miniaturas; subir a S3 con rutas fijas por trabajo.
     const outputs: {
@@ -546,7 +554,8 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       const file = path.join(dir, `section-${index}.mp4`);
       const get = deps.streams?.downloadSection ?? downloadSection;
       const run = () =>
-        get(streamSource!, moment.startSeconds, moment.endSeconds - moment.startSeconds, file, {
+        // Los tiempos del clip son del video de ClipFlow; en el original se suma el inicio del tramo.
+        get(streamSource!, (sourceSection(video)?.startSeconds ?? 0) + moment.startSeconds, moment.endSeconds - moment.startSeconds, file, {
           ffmpegPath: deps.tools.ffmpegPath,
           signal: controller.signal,
         });
@@ -844,6 +853,13 @@ function addUsage(total: AIUsage, extra: AIUsage) {
   total.estimatedCostUsd = (total.estimatedCostUsd ?? 0) + (extra.estimatedCostUsd ?? 0);
 }
 
+/** Tramo del enlace que eligió el usuario (segundos del original), o null si es el video entero. */
+function sourceSection(video: { sourceStartSeconds: number | null; sourceEndSeconds: number | null }) {
+  return video.sourceStartSeconds !== null && video.sourceEndSeconds !== null
+    ? { startSeconds: video.sourceStartSeconds, endSeconds: video.sourceEndSeconds }
+    : null;
+}
+
 /** Transcripción + análisis con IA. Nunca hace fallar el trabajo: si algo falla, lo informa. */
 /**
  * Chat del VOD de Twitch (solo enlaces twitch.tv/videos/…). Nunca hace fallar el trabajo:
@@ -855,13 +871,14 @@ async function readTwitchChat(
   durationSeconds: number,
   signal: AbortSignal,
   jobId: string,
+  startSeconds = 0,
 ): Promise<{ status?: "used" | "unavailable"; series: number[]; messages: number }> {
   const videoId = twitchVideoId(sourceUrl);
   if (!videoId || deps.twitchChat === false) return { series: [], messages: 0 };
   const read = deps.twitchChat ?? fetchTwitchChatActivity;
   try {
     // Como mucho 2 minutos: es una señal extra, no debe frenar el análisis.
-    const activity = await read(videoId, durationSeconds, { signal, deadline: Date.now() + 120_000 });
+    const activity = await read(videoId, durationSeconds, { signal, deadline: Date.now() + 120_000, startSeconds });
     if (!activity) return { status: "unavailable", series: [], messages: 0 };
     deps.log.info({ jobId, messages: activity.messages, samples: activity.samples }, "chat de Twitch leído");
     return { status: "used", series: activity.series, messages: activity.messages };
