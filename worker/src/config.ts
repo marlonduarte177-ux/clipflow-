@@ -54,16 +54,6 @@ const EnvSchema = z.object({
   OPENAI_INPUT_COST_PER_1M_TOKENS_USD: z.coerce.number().nonnegative().default(0.15),
   OPENAI_OUTPUT_COST_PER_1M_TOKENS_USD: z.coerce.number().nonnegative().default(0.6),
 
-  // --- Transcripción (AssemblyAI) ---
-  /** En AWS la inyecta ECS desde Secrets Manager. Nunca se registra en logs. */
-  ASSEMBLYAI_API_KEY: z.string().optional(),
-  /** Modelos en orden de preferencia, separados por coma. */
-  ASSEMBLYAI_SPEECH_MODELS: z
-    .string()
-    .default("universal-3-5-pro,universal-2")
-    .transform((v) => v.split(",").map((m) => m.trim()).filter(Boolean)),
-  /** USD por hora de audio (Universal-3.5 Pro: 0.21). Verificar en https://www.assemblyai.com/pricing */
-  ASSEMBLYAI_COST_PER_HOUR_USD: z.coerce.number().nonnegative().default(0.21),
 });
 
 export type WorkerConfig = z.infer<typeof EnvSchema>;
@@ -75,14 +65,6 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
     throw new Error(`Configuración inválida del worker:\n${problems}`);
   }
   return result.data;
-}
-
-/**
- * Una clave de AssemblyAI son 32 caracteres hexadecimales. El valor inicial del secreto en AWS
- * ("PEGA_AQUI_TU_CLAVE…") no lo tiene: así no se intenta transcribir con una clave de relleno.
- */
-export function looksLikeAssemblyAIKey(value: string | undefined): value is string {
-  return typeof value === "string" && /^[A-Za-z0-9]{32,64}$/.test(value.trim());
 }
 
 /** Una clave de OpenAI tiene el formato "sk-...". El valor inicial del secreto en AWS no lo tiene. */

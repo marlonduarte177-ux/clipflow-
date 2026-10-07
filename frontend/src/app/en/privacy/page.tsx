@@ -74,11 +74,8 @@ export default function PrivacyPageEn() {
                   <strong>Amazon Web Services (AWS):</strong> hosts the app, the database and your files, on servers in the United States.
                 </li>
                 <li>
-                  <strong>AssemblyAI:</strong> receives the audio of your videos to transcribe it. When it is done, we delete the transcript
-                  from its service.
-                </li>
-                <li>
-                  <strong>OpenAI:</strong> receives the transcript text to pick the best moments and suggest titles. Under its business terms,
+                  <strong>OpenAI:</strong> receives the audio of your videos to transcribe it and the transcript text to pick the best moments
+                  and suggest titles. Under its business terms,
                   it does not use this data to train its models.
                 </li>
                 <li>

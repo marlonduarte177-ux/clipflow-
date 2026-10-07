@@ -33,8 +33,8 @@ describe("translateMessage", () => {
     expect(translateMessage("Nuestro servicio de descarga no respondió (proxy: sin saldo, 402). Lo intentaremos de nuevo.", "en")).toContain(
       "proxy: no balance, 402",
     );
-    expect(translateMessage("falló la transcripción: AssemblyAI tuvo un error temporal (503)", "en")).toBe(
-      "transcription failed: AssemblyAI had a temporary error (503)",
+    expect(translateMessage("falló la transcripción: OpenAI tuvo un error temporal (503)", "en")).toBe(
+      "transcription failed: OpenAI had a temporary error (503)",
     );
   });
 

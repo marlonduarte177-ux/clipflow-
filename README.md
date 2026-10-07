@@ -14,7 +14,6 @@ En construcción por fases. Ver `docs/`:
 - [Fase 5 — Subida de videos e infraestructura base](docs/fase-5-subida-videos.md)
 - [Fases 6 y 7 — Cola de trabajos y procesador de video](docs/fase-6-7-procesamiento.md)
 - [Fase 8 — Análisis con IA (OpenAI)](docs/fase-8-ia-openai.md)
-- [Transcripción con AssemblyAI y duración obligatoria de los clips](docs/transcripcion-assemblyai.md)
 - [Interfaz para celular y subtítulos en el video](docs/interfaz-movil.md)
 - [Importar videos por enlace (con aviso de derechos de autor)](docs/importar-por-enlace.md)
 - [Fase 10 — Producción: alertas y pendientes](docs/fase-10-produccion.md)

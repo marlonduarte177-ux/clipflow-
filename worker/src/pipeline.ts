@@ -1015,7 +1015,7 @@ async function runAI(
     const e = err as AIProviderError;
     // Solo lo que se recupera solo en minutos: límite por minuto (429), errores de OpenAI (5xx) o la red.
     const temporary =
-      err instanceof AIProviderError && e.retryable && (e.status === 429 || (e.status ?? 0) >= 500 || /^No se pudo conectar con (OpenAI|AssemblyAI)$/.test(e.message));
+      err instanceof AIProviderError && e.retryable && (e.status === 429 || (e.status ?? 0) >= 500 || /^No se pudo conectar con OpenAI$/.test(e.message));
     const retryLater = temporary && ids.canRetry === true;
     deps.log.warn(
       { step, error: e.message, status: e.status, code: e.code, limit: e.limit, retryLater },

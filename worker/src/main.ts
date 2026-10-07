@@ -3,10 +3,8 @@ import { SQSClient } from "@aws-sdk/client-sqs";
 import pino from "pino";
 import { loadProductConfig } from "@clipflow/shared";
 import { createDb, databaseUrlFromEnv } from "@clipflow/shared/db";
-import { AssemblyAITranscriber } from "./ai/assemblyai.js";
-import { ClipFlowAI } from "./ai/clipflow-ai.js";
 import { OpenAIProvider } from "./ai/openai.js";
-import { describeProxyValue, loadWorkerConfig, looksLikeAssemblyAIKey, looksLikeOpenAIKey, parseProxyUrl } from "./config.js";
+import { describeProxyValue, loadWorkerConfig, looksLikeOpenAIKey, parseProxyUrl } from "./config.js";
 import { runConsumer } from "./consumer.js";
 import { createS3WorkerStorage } from "./storage.js";
 
@@ -15,37 +13,23 @@ const log = pino({ level: config.LOG_LEVEL, base: { service: "worker", env: conf
 const database = createDb(databaseUrlFromEnv(), { ssl: config.DATABASE_SSL, maxConnections: 3 });
 const workerId = `${os.hostname()}-${process.pid}`;
 
-// IA: AssemblyAI transcribe y GPT (OpenAI) elige los momentos. Hacen falta las dos claves.
-// Las claves nunca se registran.
+// IA: Whisper de OpenAI transcribe y GPT elige los momentos (una sola clave). Nunca se registra.
 const openaiKey = config.OPENAI_API_KEY?.trim();
-const assemblyKey = config.ASSEMBLYAI_API_KEY?.trim();
 const ai =
-  config.AI_PROVIDER === "openai" && looksLikeOpenAIKey(openaiKey) && looksLikeAssemblyAIKey(assemblyKey)
-    ? new ClipFlowAI(
-        new AssemblyAITranscriber({
-          apiKey: assemblyKey,
-          speechModels: config.ASSEMBLYAI_SPEECH_MODELS,
-          costPerHourUsd: config.ASSEMBLYAI_COST_PER_HOUR_USD,
-        }),
-        new OpenAIProvider({
-          apiKey: openaiKey,
-          transcribeModel: config.OPENAI_TRANSCRIBE_MODEL,
-          analysisModel: config.OPENAI_ANALYSIS_MODEL,
-          visionModel: config.OPENAI_VISION_MODEL || undefined,
-          prices: {
-            transcribePerMinuteUsd: config.OPENAI_TRANSCRIBE_COST_PER_MINUTE_USD,
-            inputPer1MUsd: config.OPENAI_INPUT_COST_PER_1M_TOKENS_USD,
-            outputPer1MUsd: config.OPENAI_OUTPUT_COST_PER_1M_TOKENS_USD,
-          },
-        }),
-      )
+  config.AI_PROVIDER === "openai" && looksLikeOpenAIKey(openaiKey)
+    ? new OpenAIProvider({
+        apiKey: openaiKey,
+        transcribeModel: config.OPENAI_TRANSCRIBE_MODEL,
+        analysisModel: config.OPENAI_ANALYSIS_MODEL,
+        visionModel: config.OPENAI_VISION_MODEL || undefined,
+        prices: {
+          transcribePerMinuteUsd: config.OPENAI_TRANSCRIBE_COST_PER_MINUTE_USD,
+          inputPer1MUsd: config.OPENAI_INPUT_COST_PER_1M_TOKENS_USD,
+          outputPer1MUsd: config.OPENAI_OUTPUT_COST_PER_1M_TOKENS_USD,
+        },
+      })
     : null;
-const aiDisabledReason =
-  config.AI_PROVIDER === "none"
-    ? "IA desactivada por configuración"
-    : !looksLikeAssemblyAIKey(assemblyKey)
-      ? "Falta la clave de AssemblyAI en Secrets Manager"
-      : "Falta la clave de OpenAI en Secrets Manager";
+const aiDisabledReason = config.AI_PROVIDER === "none" ? "IA desactivada por configuración" : "Falta la clave de OpenAI en Secrets Manager";
 
 const downloadProxyUrl = parseProxyUrl(config.DOWNLOAD_PROXY_URL);
 
@@ -60,7 +44,7 @@ process.on("SIGINT", () => stop("SIGINT"));
 log.info(
   {
     workerId,
-    ai: ai ? "assemblyai + openai" : `desactivada (${aiDisabledReason})`,
+    ai: ai ? "openai (whisper + gpt)" : `desactivada (${aiDisabledReason})`,
     vision: config.AI_VISION_ENABLED,
     faces: config.FACE_TRACKING_ENABLED,
     // Solo el host del proxy: nunca el usuario ni la contraseña.
