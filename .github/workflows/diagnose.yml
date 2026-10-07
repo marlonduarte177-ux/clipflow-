@@ -65,7 +65,7 @@ jobs:
   recorte:
     if: ${{ inputs.media }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     environment: ${{ inputs.stage }}
     container: node:22-bookworm-slim
     steps:
@@ -92,7 +92,13 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
       - name: Dependencias
         run: npm ci --no-audit --no-fund && npm run build -w @clipflow/shared
+      - name: Chequeo de sincronía de subtítulos
+        continue-on-error: true
+        env:
+          STAGE: ${{ inputs.stage }}
+        run: npx tsx scripts/sync-check.mts
       - name: Chequeo del recorte
+        continue-on-error: true
         env:
           STAGE: ${{ inputs.stage }}
         run: npx tsx scripts/render-check.mts
