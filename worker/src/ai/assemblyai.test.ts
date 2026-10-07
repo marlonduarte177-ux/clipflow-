@@ -15,7 +15,6 @@ type Call = { url: string; method: string; headers: Record<string, string>; body
 /** AssemblyAI de prueba: sube, "procesa" (una vez en cola), devuelve frases y registra cada pedido. */
 function fakeAssembly(options: { failStatus?: number; transcriptStatus?: string } = {}) {
   const calls: Call[] = [];
-  let uploads = 0;
   const polls = new Map<string, number>();
   const impl = (async (url: string | URL, init?: RequestInit) => {
     const u = String(url);
@@ -24,7 +23,10 @@ function fakeAssembly(options: { failStatus?: number; transcriptStatus?: string 
     if (typeof init?.body === "string") call.body = JSON.parse(init.body);
     calls.push(call);
     if (options.failStatus) return new Response("{}", { status: options.failStatus });
-    if (u.endsWith("/v2/upload")) return Response.json({ upload_url: `https://cdn.example/${++uploads}` });
+    // Cada trozo se reconoce por su tamaño (se suben a la vez: el orden de llegada varía).
+    if (u.endsWith("/v2/upload")) {
+      return Response.json({ upload_url: `https://cdn.example/${(init?.body as Buffer).length === 1024 ? 1 : 2}` });
+    }
     if (u.endsWith("/v2/transcript") && call.method === "POST") {
       const n = (call.body as { audio_url: string }).audio_url.split("/").pop();
       return Response.json({ id: `t${n}`, status: "queued" });
