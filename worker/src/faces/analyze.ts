@@ -48,7 +48,7 @@ export async function analyzeFaces(
     tools.ffmpegPath,
     [
       "-hide_banner", "-nostdin", "-loglevel", "error",
-      "-ss", segment.startSeconds.toFixed(3), "-i", input, "-t", segment.durationSeconds.toFixed(3), "-an",
+      "-ss", segment.startSeconds.toFixed(3), ...(steady ? ["-reinit_filter", "0"] : []), "-i", input, "-t", segment.durationSeconds.toFixed(3), "-an",
       "-vf", `${steady}crop=${area.width}:${area.height}:${area.x}:${area.y},fps=${FACE_SAMPLES_PER_SECOND},scale=${width}:${height}`,
       "-f", "rawvideo", "-pix_fmt", "bgr24", "pipe:1",
     ],
