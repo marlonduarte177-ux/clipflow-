@@ -279,8 +279,8 @@ describe("procesamiento con IA", () => {
     expect(transcribeCalls).toBe(1);
     expect(first.costs!.transcriptionUsd).toBeCloseTo(0.004);
     // Guardada en la carpeta de ESE usuario y ESE video, con el modelo en el nombre.
-    const key = transcriptCacheKey(job.userId, video.id, "fake", "whisper-1");
-    expect(key).toBe(`transcripts/${job.userId}/${video.id}/fake-whisper-1.json`);
+    const key = transcriptCacheKey(job.userId, video.id, "fake", "whisper-1-sync");
+    expect(key).toBe(`transcripts/${job.userId}/${video.id}/fake-whisper-1-sync.json`);
     expect(existsSync(path.join(root, key))).toBe(true);
 
     // Otro procesamiento del mismo video (p. ej. otra duración de clips): sin volver a transcribir.
@@ -356,7 +356,7 @@ describe("procesamiento con IA", () => {
     expect(transcribeCalls).toBe(1);
     expect(result.costs!.transcriptionUsd).toBe(0);
     // Queda una copia propia para el video nuevo (se borra con él).
-    expect(existsSync(path.join(root, transcriptCacheKey(job.userId, same.video.id, "fake", "whisper-1")))).toBe(true);
+    expect(existsSync(path.join(root, transcriptCacheKey(job.userId, same.video.id, "fake", "whisper-1-sync")))).toBe(true);
 
     // OTRO usuario con el mismo enlace: no recibe la transcripción ajena, se transcribe para él.
     const other = await seedVideoJob(db, root, { sample, importUrl: link });
