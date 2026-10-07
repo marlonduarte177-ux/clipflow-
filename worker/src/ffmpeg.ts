@@ -396,6 +396,13 @@ export interface VerticalCrop {
  * Esto lleva cada fotograma al tamaño del inicio (lo que mide ffprobe) antes de recortar: si el
  * tamaño no cambia, no hace nada visible.
  */
+/**
+ * Opción de entrada: FFmpeg NO rearma los filtros si el video cambia de tamaño o formato a mitad. El
+ * primer filtro (`steadySize`, un scale) se adapta solo a cada fotograma y lo que sigue (el recorte)
+ * nunca se reconfigura. Va antes de cada "-i" que use `steadySize`.
+ */
+export const NO_FILTER_REINIT = ["-reinit_filter", "0"];
+
 export function steadySize(size?: { width: number; height: number } | null): string {
   if (!size) return "";
   const { width: w, height: h } = size;
@@ -559,7 +566,7 @@ async function bestWindow(
     const at = segment.startSeconds + (segment.durationSeconds * (i + 0.5)) / samples;
     const px = await runRaw(
       tools.ffmpegPath,
-      ["-hide_banner", "-nostdin", "-loglevel", "error", "-ss", at.toFixed(3), "-i", input, "-frames:v", "1",
+      ["-hide_banner", "-nostdin", "-loglevel", "error", "-ss", at.toFixed(3), ...(steady ? NO_FILTER_REINIT : []), "-i", input, "-frames:v", "1",
         "-vf", `${steady}crop=${area.width}:${area.height}:${area.x}:${area.y},scale=${w}:${h},format=gray`,
         "-f", "rawvideo", "-"],
       signal,
@@ -654,6 +661,7 @@ export async function renderVerticalClip(
       "-nostats",
       "-ss",
       segment.startSeconds.toFixed(3),
+      ...(options.crop?.source ? NO_FILTER_REINIT : []),
       "-i",
       input,
       "-t",
@@ -701,6 +709,7 @@ export async function renderThumbnail(
       ...FFMPEG_BASE,
       "-ss",
       atSeconds.toFixed(3),
+      ...(crop?.source ? NO_FILTER_REINIT : []),
       "-i",
       input,
       "-filter_complex",
@@ -803,7 +812,7 @@ export async function buildFrameSheets(
   await run(
     tools.ffmpegPath,
     [
-      ...FFMPEG_BASE, "-progress", "pipe:1", "-nostats", "-i", input, "-an",
+      ...FFMPEG_BASE, "-progress", "pipe:1", "-nostats", ...(options.box ? NO_FILTER_REINIT : []), "-i", input, "-an",
       "-vf",
       `${crop}fps=1/${options.intervalSeconds},scale=${tw}:${th}:force_original_aspect_ratio=decrease,` +
         `pad=${tw}:${th}:(ow-iw)/2:(oh-ih)/2,tile=${columns}x${rows}`,

@@ -299,6 +299,8 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     return { file: downloaded.file, analysisCopy };
   };
 
+  /** Lo que midió ffprobe del video (para los registros si FFmpeg falla). */
+  let probed: ProbeResult | undefined;
   try {
     await mkdir(dir, { recursive: true });
     const [video] = await deps.db
@@ -334,6 +336,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     let info;
     try {
       info = await probe(deps.tools, input);
+      probed = info;
     } catch {
       await rejectVideo(deps.db, video.id, "El archivo no es un video válido o está dañado.");
       throw new JobError("invalid_video", "El archivo no es un video válido o está dañado.", false);
@@ -764,7 +767,11 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     if (stopped) throw stopped;
     if (err instanceof JobError || err instanceof JobStopped) throw err;
     if (err instanceof FfmpegError) {
-      deps.log.warn({ jobId: job.id, stderr: err.stderrTail }, "FFmpeg falló");
+      // Medidas y formato del video: ayudan a entender el error (sin datos del usuario).
+      const video = probed
+        ? { width: probed.width, height: probed.height, codec: probed.videoCodec, pixelFormat: probed.pixelFormat, seconds: Math.round(probed.durationSeconds) }
+        : null;
+      deps.log.warn({ jobId: job.id, step, video, stderr: err.stderrTail }, "FFmpeg falló");
       throw new JobError("ffmpeg_failed", "No pudimos procesar este video. Lo intentaremos de nuevo.", true);
     }
     const code = errorCode(err);
