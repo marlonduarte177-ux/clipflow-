@@ -386,27 +386,6 @@ export interface VerticalCrop {
   path?: PathPiece[];
   /** "blur": el recorte se muestra entero y lo que falte del 9:16 se rellena con el mismo video difuminado. */
   fill?: "blur";
-  /** Tamaño del video sobre el que se calculó el recorte (ver `steadySize`). */
-  source?: { width: number; height: number };
-}
-
-/**
- * Algunos videos cambian de tamaño a mitad (p. ej. editados con partes de distinta resolución). FFmpeg
- * rearma los filtros y un recorte fijo ya no entra ("Failed to configure input pad on Parsed_crop").
- * Esto lleva cada fotograma al tamaño del inicio (lo que mide ffprobe) antes de recortar: si el
- * tamaño no cambia, no hace nada visible.
- */
-/**
- * Opción de entrada: FFmpeg NO rearma los filtros si el video cambia de tamaño o formato a mitad. El
- * primer filtro (`steadySize`, un scale) se adapta solo a cada fotograma y lo que sigue (el recorte)
- * nunca se reconfigura. Va antes de cada "-i" que use `steadySize`.
- */
-export const NO_FILTER_REINIT = ["-reinit_filter", "0"];
-
-export function steadySize(size?: { width: number; height: number } | null): string {
-  if (!size) return "";
-  const { width: w, height: h } = size;
-  return `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2,setsar=1,`;
 }
 
 /**
@@ -458,21 +437,7 @@ export async function chooseVerticalCrop(
   signal?: AbortSignal,
   options: CropOptions = {},
 ): Promise<VerticalCrop> {
-  const crop = await chooseCrop(tools, input, info, box, segment, signal, options);
-  return { ...crop, source: { width: info.width, height: info.height } };
-}
-
-async function chooseCrop(
-  tools: FfmpegTools,
-  input: string,
-  info: ProbeResult,
-  box: ContentBox | null,
-  segment: { startSeconds: number; durationSeconds: number },
-  signal?: AbortSignal,
-  options: CropOptions = {},
-): Promise<VerticalCrop> {
   const frame = { x: 0, y: 0, width: info.width, height: info.height };
-  const steady = steadySize(info);
 
   if (info.height > info.width) {
     // Vertical sin franjas, o con una imagen también vertical dentro: se muestra entera.
@@ -484,7 +449,7 @@ async function chooseCrop(
     const height = even(Math.min(info.height, (width * info.height) / info.width));
     const centerY = box.y + box.height / 2;
     const y = even(Math.min(info.height - height, Math.max(0, centerY - height / 2)));
-    const offset = await bestWindow(tools, input, box, width, segment, signal, steady);
+    const offset = await bestWindow(tools, input, box, width, segment, signal);
     const top = Math.max(0, box.y - y);
     const content = { y: top, height: Math.min(height, box.y + box.height - y) - top };
     return { width, height, x: box.x + offset, y, fit: true, content };
@@ -497,10 +462,10 @@ async function chooseCrop(
     // La imagen ya es tan angosta como el recorte: se muestra entera.
     return { width: even(area.width), height: even(area.height), x: area.x, y: area.y, fill: "blur" };
   }
-  const action = async () => area.x + (await bestWindow(tools, input, area, targetWidth, segment, signal, steady));
+  const action = async () => area.x + (await bestWindow(tools, input, area, targetWidth, segment, signal));
   if (options.faces) {
     try {
-      const followed = await followFaces(tools, input, area, targetWidth, segment, action, signal, options.speaking, steady);
+      const followed = await followFaces(tools, input, area, targetWidth, segment, action, signal, options.speaking);
       if (followed) return { ...followed, fill: "blur" };
     } catch (err) {
       if (signal?.aborted) throw err;
@@ -524,9 +489,8 @@ async function followFaces(
   action: () => Promise<number>,
   signal?: AbortSignal,
   speaking?: (t: number) => boolean,
-  steady = "",
 ): Promise<VerticalCrop | null> {
-  const analysis = await analyzeFaces(tools, input, area, segment, signal, steady);
+  const analysis = await analyzeFaces(tools, input, area, segment, signal);
   const { samples, scale } = analysis;
   const dt = 1 / FACE_SAMPLES_PER_SECOND;
   const cropW = targetWidth / scale;
@@ -555,7 +519,6 @@ async function bestWindow(
   targetWidth: number,
   segment: { startSeconds: number; durationSeconds: number },
   signal?: AbortSignal,
-  steady = "",
 ): Promise<number> {
   if (targetWidth >= area.width) return 0;
   const w = 160;
@@ -566,8 +529,8 @@ async function bestWindow(
     const at = segment.startSeconds + (segment.durationSeconds * (i + 0.5)) / samples;
     const px = await runRaw(
       tools.ffmpegPath,
-      ["-hide_banner", "-nostdin", "-loglevel", "error", "-ss", at.toFixed(3), ...(steady ? NO_FILTER_REINIT : []), "-i", input, "-frames:v", "1",
-        "-vf", `${steady}crop=${area.width}:${area.height}:${area.x}:${area.y},scale=${w}:${h},format=gray`,
+      ["-hide_banner", "-nostdin", "-loglevel", "error", "-ss", at.toFixed(3), "-i", input, "-frames:v", "1",
+        "-vf", `crop=${area.width}:${area.height}:${area.x}:${area.y},scale=${w}:${h},format=gray`,
         "-f", "rawvideo", "-"],
       signal,
     );
@@ -608,7 +571,7 @@ async function bestWindow(
 /** Filtros de FFmpeg: recorte elegido → 1080x1920 (rellenando o mostrando completo). */
 export function verticalFilter(crop: VerticalCrop | null): string {
   const x = crop?.path?.length ? `'${pathExpression(crop.path)}'` : crop?.x;
-  let cut = crop ? `${steadySize(crop.source)}crop=${crop.width}:${crop.height}:${x}:${crop.y},` : "";
+  let cut = crop ? `crop=${crop.width}:${crop.height}:${x}:${crop.y},` : "";
   if (crop?.content) {
     const { y, height } = crop.content;
     if (y > 0) cut += `drawbox=x=0:y=0:w=iw:h=${y}:color=black:t=fill,`;
@@ -661,7 +624,6 @@ export async function renderVerticalClip(
       "-nostats",
       "-ss",
       segment.startSeconds.toFixed(3),
-      ...(options.crop?.source ? NO_FILTER_REINIT : []),
       "-i",
       input,
       "-t",
@@ -709,7 +671,6 @@ export async function renderThumbnail(
       ...FFMPEG_BASE,
       "-ss",
       atSeconds.toFixed(3),
-      ...(crop?.source ? NO_FILTER_REINIT : []),
       "-i",
       input,
       "-filter_complex",
@@ -806,13 +767,11 @@ export async function buildFrameSheets(
   const rows = options.rows ?? 3;
   const tw = options.tileWidth ?? 512;
   const th = options.tileHeight ?? 288;
-  const crop = options.box
-    ? `${steadySize(info)}crop=${options.box.width}:${options.box.height}:${options.box.x}:${options.box.y},`
-    : "";
+  const crop = options.box ? `crop=${options.box.width}:${options.box.height}:${options.box.x}:${options.box.y},` : "";
   await run(
     tools.ffmpegPath,
     [
-      ...FFMPEG_BASE, "-progress", "pipe:1", "-nostats", ...(options.box ? NO_FILTER_REINIT : []), "-i", input, "-an",
+      ...FFMPEG_BASE, "-progress", "pipe:1", "-nostats", "-i", input, "-an",
       "-vf",
       `${crop}fps=1/${options.intervalSeconds},scale=${tw}:${th}:force_original_aspect_ratio=decrease,` +
         `pad=${tw}:${th}:(ow-iw)/2:(oh-ih)/2,tile=${columns}x${rows}`,

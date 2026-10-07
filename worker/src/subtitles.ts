@@ -7,10 +7,6 @@ import type { SubtitleStyle, TranscriptSegment, TranscriptWord } from "@clipflow
  * - "highlight": de a 1–3 palabras en MAYÚSCULAS, la que suena en verde lima (estilo TikTok).
  *   Usa el tiempo de cada palabra de Whisper; si no lo hay, lo reparte según el largo de cada una.
  * - "classic": frases cortas en una caja oscura, en mayúsculas y minúsculas.
- * - "word": una sola palabra a la vez, grande, con un pequeño salto al aparecer.
- * - "yellow": de a 1–3 palabras en amarillo; la que suena, más grande.
- * - "neon": de a 1–3 palabras blancas con brillo naranja; la que suena, en naranja.
- * - "minimal": frases en minúsculas, sin borde, con una sombra suave.
  *
  * El video final mide 1080x1920; el texto queda en la parte baja de la imagen central.
  */
@@ -21,15 +17,12 @@ const FONT = "Montserrat ExtraBold";
 /** Verde de ClipFlow (#c6f432) en el formato de color de ASS (&HBBGGRR). */
 const LIME = "&H32F4C6&";
 const WHITE = "&HFFFFFF&";
-/** Naranja de ClipFlow (#ff5a1f) en formato ASS. */
-const ORANGE = "&H1F5AFF&";
 /** Distancia del texto al borde inferior (px de un video de 1920 de alto). */
 const MARGIN_V = 470;
 
 const HIGHLIGHT_MAX_WORDS = 3;
 const HIGHLIGHT_MAX_CHARS = 16;
 const CLASSIC_MAX_CHARS = 52;
-const MINIMAL_MAX_CHARS = 42;
 /** Pausas más largas que esto cortan el grupo de palabras. */
 const GAP_BREAK_SECONDS = 0.5;
 /** Pausas más cortas que esto no dejan la pantalla vacía (evita parpadeos). */
@@ -43,7 +36,7 @@ export function buildAss(
 ): string | null {
   const words = timedWords(segments, clipDurationSeconds);
   if (words.length === 0) return null;
-  const events = EVENTS[style](words, clipDurationSeconds);
+  const events = style === "highlight" ? highlightEvents(words, clipDurationSeconds) : classicEvents(words, clipDurationSeconds);
   if (events.length === 0) return null;
   return [
     "[Script Info]",
@@ -59,14 +52,6 @@ export function buildAss(
     `Style: Highlight,${FONT},86,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,0,0,0,0,100,100,1,0,1,7,3,2,80,80,${MARGIN_V},1`,
     // Clásico: caja negra semitransparente detrás del texto (BorderStyle 3).
     `Style: Classic,${FONT},64,&H00FFFFFF,&H00FFFFFF,&H5A000000,&H00000000,0,0,0,0,100,100,0,0,3,16,0,2,110,110,${MARGIN_V},1`,
-    // Una palabra: muy grande, borde negro grueso.
-    `Style: Word,${FONT},120,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,0,0,0,0,100,100,1,0,1,9,4,2,80,80,${MARGIN_V},1`,
-    // Amarillo: letras amarillas con borde negro.
-    `Style: Yellow,${FONT},86,&H0000FFFF,&H0000FFFF,&H00000000,&H64000000,0,0,0,0,100,100,1,0,1,7,3,2,80,80,${MARGIN_V},1`,
-    // Neón: letras blancas con un borde naranja difuminado (brillo).
-    `Style: Neon,${FONT},84,&H00FFFFFF,&H00FFFFFF,&H001F5AFF,&H00000000,0,0,0,0,100,100,1,0,1,5,0,2,80,80,${MARGIN_V},1`,
-    // Minimal: más chico, sin borde, con sombra suave.
-    `Style: Minimal,${FONT},54,&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,0,3,2,110,110,${MARGIN_V},1`,
     "",
     "[Events]",
     "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
@@ -78,7 +63,7 @@ export function buildAss(
 interface AssEvent {
   start: number;
   end: number;
-  style: "Highlight" | "Classic" | "Word" | "Yellow" | "Neon" | "Minimal";
+  style: "Highlight" | "Classic";
   text: string;
 }
 
@@ -143,17 +128,7 @@ function groupEnds(groups: TranscriptWord[][], clipDurationSeconds: number): num
   });
 }
 
-/**
- * De a 1–3 palabras en mayúsculas; un evento por palabra que suena, con `active` marcando esa palabra.
- * `prefix` va al inicio de cada línea (p. ej. el brillo del neón).
- */
-function wordGroupEvents(
-  words: TranscriptWord[],
-  clipDurationSeconds: number,
-  style: AssEvent["style"],
-  active: (word: string) => string,
-  prefix = "",
-): AssEvent[] {
+function highlightEvents(words: TranscriptWord[], clipDurationSeconds: number): AssEvent[] {
   const groups = group(words, HIGHLIGHT_MAX_WORDS, HIGHLIGHT_MAX_CHARS);
   const ends = groupEnds(groups, clipDurationSeconds);
   const events: AssEvent[] = [];
@@ -163,51 +138,20 @@ function wordGroupEvents(
       const start = w.startSeconds;
       const end = i === g.length - 1 ? ends[gi]! : g[i + 1]!.startSeconds;
       if (end - start < 0.02) return;
-      const text = prefix + upper.map((t, j) => (j === i ? active(t) : t)).join(" ");
-      events.push({ start, end, style, text });
+      const text = upper.map((t, j) => (j === i ? `{\\c${LIME}}${t}{\\c${WHITE}}` : t)).join(" ");
+      events.push({ start, end, style: "Highlight", text });
     });
   });
   return events;
 }
 
-/** Frases completas (hasta `maxChars`), una por evento. */
-function phraseEvents(
-  words: TranscriptWord[],
-  clipDurationSeconds: number,
-  style: AssEvent["style"],
-  maxChars: number,
-  format: (text: string) => string = (t) => t,
-): AssEvent[] {
-  const groups = group(words, Number.POSITIVE_INFINITY, maxChars);
+function classicEvents(words: TranscriptWord[], clipDurationSeconds: number): AssEvent[] {
+  const groups = group(words, Number.POSITIVE_INFINITY, CLASSIC_MAX_CHARS);
   const ends = groupEnds(groups, clipDurationSeconds);
   return groups
-    .map((g, i) => ({ start: g[0]!.startSeconds, end: ends[i]!, style, text: format(g.map((w) => w.text).join(" ")) }))
+    .map((g, i) => ({ start: g[0]!.startSeconds, end: ends[i]!, style: "Classic" as const, text: g.map((w) => w.text).join(" ") }))
     .filter((e) => e.end - e.start >= 0.02);
 }
-
-/** Una palabra a la vez, que aparece con un pequeño salto (de 85 % a 100 % en 0,09 s). */
-function singleWordEvents(words: TranscriptWord[], clipDurationSeconds: number): AssEvent[] {
-  const groups = words.map((w) => [w]);
-  const ends = groupEnds(groups, clipDurationSeconds);
-  return words
-    .map((w, i) => ({
-      start: w.startSeconds,
-      end: ends[i]!,
-      style: "Word" as const,
-      text: `{\\fscx85\\fscy85\\t(0,90,\\fscx100\\fscy100)}${w.text.toLocaleUpperCase()}`,
-    }))
-    .filter((e) => e.end - e.start >= 0.02);
-}
-
-const EVENTS: Record<Exclude<SubtitleStyle, "none">, (words: TranscriptWord[], clipDurationSeconds: number) => AssEvent[]> = {
-  highlight: (w, d) => wordGroupEvents(w, d, "Highlight", (t) => `{\\c${LIME}}${t}{\\c${WHITE}}`),
-  classic: (w, d) => phraseEvents(w, d, "Classic", CLASSIC_MAX_CHARS),
-  word: singleWordEvents,
-  yellow: (w, d) => wordGroupEvents(w, d, "Yellow", (t) => `{\\fscx118\\fscy118}${t}{\\fscx100\\fscy100}`),
-  neon: (w, d) =>
-    wordGroupEvents(w, d, "Neon", (t) => `{\\c${ORANGE}\\3c${WHITE}}${t}{\\c${WHITE}\\3c${ORANGE}}`, "{\\blur4}"),
-  minimal: (w, d) => phraseEvents(w, d, "Minimal", MINIMAL_MAX_CHARS, (t) => t.toLocaleLowerCase()),
-};
 
 /** Quita lo que ASS interpretaría como comandos ({…} y \) y los saltos de línea. */
 function clean(text: string): string {

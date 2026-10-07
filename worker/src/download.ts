@@ -60,11 +60,6 @@ export interface DownloadOptions {
    * generan después con tramos en 720p (`downloadSection`).
    */
   quality?: "analysis";
-  /**
-   * Solo este tramo del video (segundos del original): el usuario eligió, p. ej., 1 h de un stream de
-   * 8 h. yt-dlp baja solo esa parte; un enlace directo se recorta después de bajarlo.
-   */
-  section?: { startSeconds: number; endSeconds: number } | null;
 }
 
 export interface Downloaded {
@@ -79,8 +74,7 @@ export async function downloadFromUrl(url: string, dir: string, options: Downloa
   // También aquí: un enlace guardado antes de un cambio de reglas (p. ej. YouTube) se rechaza claro.
   const checked = checkImportUrl(url);
   if (!checked.ok && !options.allowHosts?.includes(new URL(url).hostname)) throw new DownloadError(checked.message, false);
-  let result = isPlatformUrl(url) ? await downloadWithYtDlp(url, dir, options) : await downloadDirect(url, dir, options);
-  if (options.section && !isPlatformUrl(url)) result = { ...result, file: await cutSection(result.file, options.section, options) };
+  const result = isPlatformUrl(url) ? await downloadWithYtDlp(url, dir, options) : await downloadDirect(url, dir, options);
   const size = (await stat(result.file)).size;
   if (size === 0) throw new DownloadError("El enlace no devolvió ningún video.", false);
   if (size > options.maxBytes) throw new DownloadError("El video supera el tamaño máximo permitido.", false);
@@ -425,11 +419,8 @@ async function runYtDlp(url: string, dir: string, options: DownloadOptions, prox
     ...(proxy ? ["--proxy", proxy] : []),
     "--merge-output-format",
     "mp4",
-    // Con un tramo elegido, el video original puede durar más que el máximo: cuenta el tramo (lo
-    // valida la API), así que solo se filtra lo que está en vivo.
-    ...(options.section ? ["--download-sections", `*${options.section.startSeconds}-${options.section.endSeconds}`] : []),
     "--match-filters",
-    options.section ? "!is_live" : `duration <=? ${Math.floor(options.maxDurationSeconds)} & !is_live`,
+    `duration <=? ${Math.floor(options.maxDurationSeconds)} & !is_live`,
     "--max-filesize",
     String(options.maxBytes),
     "--socket-timeout",
@@ -572,33 +563,6 @@ function request(url: URL, options: DownloadOptions): Promise<IncomingMessage> {
       reject(err instanceof DownloadError || (err as Error).name === "AbortError" ? err : new DownloadError("No se pudo conectar con el enlace.", true)),
     );
   });
-}
-
-/** Recorta un archivo ya bajado al tramo elegido (sin volver a codificar: corta en fotogramas clave). */
-async function cutSection(
-  file: string,
-  section: { startSeconds: number; endSeconds: number },
-  options: Pick<DownloadOptions, "ffmpegPath" | "signal">,
-): Promise<string> {
-  const output = file.replace(/(\.[a-z0-9]+)$/i, "-section$1");
-  const args = ["-hide_banner", "-nostats", "-loglevel", "error", "-y", "-ss", String(section.startSeconds), "-to", String(section.endSeconds), "-i", file, "-c", "copy", "-map", "0", "-avoid_negative_ts", "make_zero", output];
-  // -ss y -to antes de -i: segundos del archivo original.
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(options.ffmpegPath, args, { stdio: ["ignore", "ignore", "pipe"] });
-    const onAbort = () => child.kill("SIGKILL");
-    options.signal?.addEventListener("abort", onAbort, { once: true });
-    let stderr = "";
-    child.stderr.on("data", (c: Buffer) => (stderr = (stderr + c.toString()).slice(-2000)));
-    child.on("error", (err) => reject(new DownloadError(`No se pudo recortar el video (${err.message}).`, true)));
-    child.on("close", (code) => {
-      options.signal?.removeEventListener("abort", onAbort);
-      if (options.signal?.aborted) return reject(new DOMException("Cancelado", "AbortError"));
-      if (code === 0 && existsSync(output)) return resolve();
-      reject(new DownloadError("No pudimos recortar el tramo elegido del video.", false, false, stderr.trim().split("\n").pop()?.slice(0, 300)));
-    });
-  });
-  await rm(file, { force: true });
-  return output;
 }
 
 async function downloadDirect(raw: string, dir: string, options: DownloadOptions): Promise<Omit<Downloaded, "sizeBytes">> {

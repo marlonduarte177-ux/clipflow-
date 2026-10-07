@@ -37,23 +37,6 @@ describe("subtítulos dibujados en el video (ASS)", () => {
     expect(lines[1]).toBe("Dialogue: 0,0:00:01.10,0:00:01.60,Classic,,0,0,0,,para");
   });
 
-  it("palabra: una sola palabra a la vez, grande y con un salto al aparecer", () => {
-    const lines = dialogues(buildAss(segments, "word", 30)!);
-    expect(lines).toHaveLength(5);
-    expect(lines[0]).toBe("Dialogue: 0,0:00:00.20,0:00:00.40,Word,,0,0,0,,{\\fscx85\\fscy85\\t(0,90,\\fscx100\\fscy100)}Y");
-    expect(lines[4]).toContain("}PARA");
-  });
-
-  it("amarillo, neón y minimal: cada uno con su estilo", () => {
-    const yellow = buildAss(segments, "yellow", 30)!;
-    expect(yellow).toContain("Style: Yellow,Montserrat ExtraBold,86,&H0000FFFF");
-    expect(dialogues(yellow)[0]).toBe("Dialogue: 0,0:00:00.20,0:00:00.40,Yellow,,0,0,0,,{\\fscx118\\fscy118}Y{\\fscx100\\fscy100} YO LE");
-    const neon = dialogues(buildAss(segments, "neon", 30)!);
-    expect(neon[1]).toBe("Dialogue: 0,0:00:00.40,0:00:00.60,Neon,,0,0,0,,{\\blur4}Y {\\c&H1F5AFF&\\3c&HFFFFFF&}YO{\\c&HFFFFFF&\\3c&H1F5AFF&} LE");
-    const minimal = dialogues(buildAss(segments, "minimal", 30)!);
-    expect(minimal[0]).toBe("Dialogue: 0,0:00:00.20,0:00:01.10,Minimal,,0,0,0,,y yo le digo:");
-  });
-
   it("sin tiempos por palabra los reparte según el largo de cada una", () => {
     const words = timedWords([{ startSeconds: 10, endSeconds: 13, text: "uno dos tres" }], 60);
     expect(words.map((w) => w.text)).toEqual(["uno", "dos", "tres"]);
