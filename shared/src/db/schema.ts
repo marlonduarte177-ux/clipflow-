@@ -164,6 +164,12 @@ export const videos = pgTable(
     sourceUrl: text("source_url"),
     /** Cuándo el usuario confirmó tener derechos o permiso para usar el video del enlace. */
     rightsConfirmedAt: timestamp("rights_confirmed_at", { withTimezone: true }),
+    /**
+     * Tramo del enlace que eligió el usuario (segundos del video original). Solo se descarga ese
+     * tramo: el video guardado empieza en `sourceStartSeconds`. Null = el video entero.
+     */
+    sourceStartSeconds: integer("source_start_seconds"),
+    sourceEndSeconds: integer("source_end_seconds"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     uploadedAt: timestamp("uploaded_at", { withTimezone: true }),

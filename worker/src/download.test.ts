@@ -80,6 +80,16 @@ describe("descarga por enlace directo", () => {
     expect(progress.at(-1)).toBe(1);
   });
 
+  it("un enlace directo con tramo se recorta después de bajarlo", async () => {
+    const result = await downloadFromUrl(`${base}/video.mp4`, target("cut"), options({ section: { startSeconds: 0, endSeconds: 1 } }));
+    const seconds = Number(
+      execFileSync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", result.file]).toString().trim(),
+    );
+    expect(seconds).toBeGreaterThan(0.5);
+    expect(seconds).toBeLessThan(1.5);
+    expect(result.sizeBytes).toBeLessThan(sample.length);
+  });
+
   it("nunca se conecta a direcciones internas: ni locales ni redirigiendo a los metadatos de AWS", async () => {
     // Sin la excepción del test, 127.0.0.1 está prohibido.
     await expect(downloadFromUrl(`${base}/video.mp4`, target("local"), options({ allowHosts: [] }))).rejects.toThrow(/dirección privada/);
@@ -170,6 +180,8 @@ describe("proxy residencial para plataformas que bloquean a AWS", () => {
         '  [ "$prev" = "-S" ] && sort="$a"',
         '  [ "$prev" = "--extractor-args" ] && xargs="$xargs $a"',
         '  [ "$prev" = "--plugin-dirs" ] && xargs="$xargs plugins=$a"',
+        '  [ "$prev" = "--download-sections" ] && xargs="$xargs sections=$a"',
+        '  [ "$prev" = "--match-filters" ] && xargs="$xargs filters=$a"',
         '  prev="$a"',
         "done",
         'echo "call proxy=$proxy sort=$sort$xargs" >> "$(dirname "$0")/calls.log"',
@@ -199,6 +211,20 @@ describe("proxy residencial para plataformas que bloquean a AWS", () => {
     expect(calls[0]).toMatch(/^call proxy= sort=res:1080,vcodec:h264,acodec:aac( |$)/);
     expect(calls[1]).toMatch(/proxy=http:\/\/user:secreto_country-US_session-[A-Za-z0-9]{8}_lifetime-60@rp\.evomi\.com:1000/);
     expect(calls[1]).toContain("sort=res:720,");
+  });
+
+  it("con un tramo elegido, yt-dlp baja solo esa parte (y el largo del stream completo no importa)", async () => {
+    const yt = fakeYtDlp("section");
+    await downloadFromUrl("https://kick.com/punicher/videos/01a0b24f-2b40-7d20-b9d1-f1238dd1b2e7", yt.work, {
+      ...options(),
+      ytDlpPath: yt.script,
+      proxyUrl: "http://user:secreto@rp.evomi.com:1000",
+      section: { startSeconds: 3600, endSeconds: 7200 },
+    });
+    const [call] = yt.calls();
+    expect(call).toContain(" sections=*3600-7200");
+    expect(call).toContain(" filters=!is_live");
+    expect(call).not.toContain("duration");
   });
 
   it("Twitch: también baja hasta 720p", async () => {

@@ -44,6 +44,32 @@ describe("importar videos por enlace", () => {
     expect(ctx!.storage.uploads.size).toBe(0);
   });
 
+  it("con un tramo elegido (stream largo), guarda solo ese tramo; sin fin, hasta el máximo de 3 h", async () => {
+    const projectId = await newProject("alice");
+    const url = "https://kick.com/westcol/videos/01a0f415-f000-7000-8000-000000000000";
+    const res = await importVideo("alice", { projectId, url, rightsConfirmed: true, startSeconds: 3600, endSeconds: 9000 });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().video.sourceRange).toEqual({ startSeconds: 3600, endSeconds: 9000 });
+    const [row] = await ctx!.database.db.select().from(schema.videos).where(eq(schema.videos.id, res.json().video.id));
+    expect([row!.sourceStartSeconds, row!.sourceEndSeconds]).toEqual([3600, 9000]);
+
+    const open = await importVideo("alice", { projectId, url, rightsConfirmed: true, startSeconds: 7200 });
+    expect(open.json().video.sourceRange).toEqual({ startSeconds: 7200, endSeconds: 7200 + 3 * 3600 });
+    // Sin tramo: el video entero.
+    const whole = await importVideo("alice", { projectId, url, rightsConfirmed: true });
+    expect(whole.json().video.sourceRange).toBeNull();
+  });
+
+  it("rechaza tramos al revés, muy cortos o más largos que el máximo", async () => {
+    const projectId = await newProject("alice");
+    const url = "https://kick.com/westcol/videos/01a0f415-f000-7000-8000-000000000000";
+    const tryRange = (startSeconds: number, endSeconds: number) => importVideo("alice", { projectId, url, rightsConfirmed: true, startSeconds, endSeconds });
+    expect((await tryRange(600, 300)).json().error).toMatchObject({ code: "invalid_range", message: "El final del tramo debe ser después del inicio." });
+    expect((await tryRange(0, 10)).json().error.message).toBe("El tramo debe durar al menos 30 segundos.");
+    expect((await tryRange(0, 4 * 3600)).json().error.message).toBe("El tramo puede durar como máximo 3 h.");
+    expect(ctx!.queue.sent).toEqual([]);
+  });
+
   it("sin confirmar los derechos no se importa", async () => {
     const projectId = await newProject("alice");
     for (const rightsConfirmed of [undefined, false]) {

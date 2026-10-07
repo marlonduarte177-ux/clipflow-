@@ -41,7 +41,7 @@ export interface ProductConfig {
 }
 
 export const DEFAULT_PRODUCT_CONFIG: ProductConfig = {
-  clipDurationsSeconds: [15, 30, 45, 60, 90],
+  clipDurationsSeconds: [15, 30, 45, 60, 90, 180, 240],
   defaultClipDurationSeconds: 30,
   scoreWeights: { audio: 0.2, speech: 0.35, visual: 0.15, action: 0.3, vision: 0.35, ocr: 0.05, reaction: 0.1, chat: 0.4 },
   minClipScore: 0.6,

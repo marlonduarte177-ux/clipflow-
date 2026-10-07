@@ -36,6 +36,13 @@
       "when": 1791084087081,
       "tag": "0004_clip_ai_reason",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791336523581,
+      "tag": "0005_source_range",
+      "breakpoints": true
     }
   ]
 }

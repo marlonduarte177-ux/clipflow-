@@ -77,6 +77,11 @@ export interface ChatOptions {
   signal?: AbortSignal;
   /** Fecha límite (ms epoch): lo que no se leyó a tiempo se trata como sin datos. */
   deadline?: number;
+  /**
+   * Segundo del VOD donde empieza el video de ClipFlow (el usuario eligió un tramo). La serie que se
+   * devuelve empieza en 0 = ese segundo.
+   */
+  startSeconds?: number;
 }
 
 type Sample = { rate: number; messages: number } | null;
@@ -121,6 +126,7 @@ export async function fetchTwitchChatActivity(
 ): Promise<ChatActivity | null> {
   const duration = Math.max(0, Math.floor(durationSeconds));
   if (duration < 1) return null;
+  const base = Math.max(0, Math.floor(options.startSeconds ?? 0));
   const fetchFn = options.fetch ?? fetch;
   const maxRequests = options.maxRequests ?? 900;
   const step = Math.max(options.stepSeconds ?? 15, Math.ceil(duration / maxRequests));
@@ -138,16 +144,17 @@ export async function fetchTwitchChatActivity(
       const start = offsets[i]!;
       const end = Math.min(duration, start + step);
       try {
-        const page = await readPage(videoId, start, fetchFn, options.signal);
+        const page = await readPage(videoId, base + start, fetchFn, options.signal);
         if (!page) {
           videoMissing = true;
           return;
         }
+        // Tiempos del chat relativos al inicio del tramo.
         const inWindow = page.nodes.filter((n) => {
-          const o = n.contentOffsetSeconds ?? -1;
+          const o = (n.contentOffsetSeconds ?? -1) - base;
           return o >= start && o < end;
         });
-        const lastOffset = page.nodes.at(-1)?.contentOffsetSeconds ?? start;
+        const lastOffset = (page.nodes.at(-1)?.contentOffsetSeconds ?? base + start) - base;
         // Si la página se acabó antes del final de la ventana, el chat iba muy rápido:
         // medimos sobre el tramo que sí cubre la página.
         const covered = page.hasNextPage && lastOffset < end ? Math.max(1, lastOffset - start) : end - start;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
 import {
   checkImportUrl,
   translateMessage,
@@ -12,26 +12,28 @@ import {
   type ProjectDto,
   type ProjectListResponse,
   type SubtitleStyle,
-  type VideoDto,
 } from "@clipflow/shared";
 import { DEFAULT_DURATION, DurationPicker, SubtitlePicker } from "@/components/clip-options";
 import { CheckIcon, CloseIcon, DownIcon, DownloadIcon, LinesIcon, UploadIcon } from "@/components/icons";
 import { RightsDialog } from "@/components/rights-dialog";
+import { useUpload } from "@/components/upload-manager";
 import { Alert } from "@/components/ui";
 import { errorMessage } from "@/i18n/locale";
 import { useLocale, useT } from "@/i18n/provider";
 import { apiConfigured, apiFetch, formatBytes, formatDuration } from "@/lib/api";
-import { readVideoDuration, uploadVideo, type UploadProgress } from "@/lib/uploader";
+import { parseClock } from "@/lib/clock-input";
+import { readVideoDuration } from "@/lib/uploader";
 
 // Límites mostrados al usuario; la API los vuelve a comprobar siempre.
 const LIMITS = DEFAULT_PRODUCT_CONFIG.upload;
-
-type Phase = "idle" | "uploading" | "uploaded" | "starting" | "error";
+/** Parte mínima de un enlace (la API pide lo mismo). */
+const MIN_RANGE_SECONDS = 30;
 
 /**
  * Subir video: el archivo empieza a subirse apenas se elige y, mientras tanto, el usuario elige
  * la duración de los clips y el estilo de subtítulos. "Crear clips" confirma: si la subida no
- * terminó, el procesamiento empieza solo en cuanto termine.
+ * terminó, el procesamiento empieza solo en cuanto termine. La subida sigue en segundo plano si el
+ * usuario se va a otra pantalla de la app (ver UploadProvider).
  */
 export function UploadView() {
   const t = useT();
@@ -40,14 +42,16 @@ export function UploadView() {
   const params = useSearchParams();
   const [projects, setProjects] = useState<ProjectDto[] | null>(null);
   const [projectId, setProjectId] = useState(params.get("projectId") ?? "");
-  const [file, setFile] = useState<File | null>(null);
-  const [videoSeconds, setVideoSeconds] = useState<number | null>(null);
-  const [phase, setPhase] = useState<Phase>("idle");
-  const [progress, setProgress] = useState<UploadProgress | null>(null);
-  const [error, setError] = useState("");
+  const { upload, start, confirm, cancel, clear } = useUpload();
+  const file = upload?.file ?? null;
+  const videoSeconds = upload?.videoSeconds ?? null;
+  const phase = upload?.phase ?? "idle";
+  const progress = upload?.progress ?? null;
+  const confirmed = upload?.confirmed ?? false;
+  const [localError, setError] = useState("");
+  const error = localError || upload?.error || "";
   const [clipSeconds, setClipSeconds] = useState(DEFAULT_DURATION);
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>("highlight");
-  const [confirmed, setConfirmed] = useState(false);
   // Subir un archivo o importar desde un enlace (lo descarga el worker).
   const [source, setSource] = useState<"file" | "link">("file");
   const [link, setLink] = useState("");
@@ -55,11 +59,10 @@ export function UploadView() {
   const [importing, setImporting] = useState(false);
   /** Por enlace: crear clips o solo bajar el video. */
   const [importMode, setImportMode] = useState<"clips" | "download">("clips");
-
-  const abortRef = useRef<AbortController | null>(null);
-  const videoRef = useRef<VideoDto | null>(null);
-  // "Crear clips" resuelve esta promesa; la subida la espera antes de confirmar.
-  const confirmRef = useRef<((options: { clipDurationSeconds: number; subtitleStyle: SubtitleStyle }) => void) | null>(null);
+  /** Por enlace: usar solo una parte (p. ej. de un stream largo). */
+  const [useRange, setUseRange] = useState(false);
+  const [rangeFrom, setRangeFrom] = useState("");
+  const [rangeTo, setRangeTo] = useState("");
 
   useEffect(() => {
     if (!apiConfigured) return;
@@ -71,23 +74,13 @@ export function UploadView() {
       .catch((err: Error) => setError(errorMessage(err)));
   }, []);
 
-  // Durante la subida: avisa antes de cerrar la pestaña y evita que la pantalla se apague
-  // (en el celular, con la pantalla bloqueada el navegador pausa la subida).
-  const uploading = phase === "uploading" || phase === "uploaded" || phase === "starting";
+  // Subida terminada (y "Crear clips" ya confirmado) estando en esta pantalla: al video.
   useEffect(() => {
-    if (!uploading) return;
-    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
-    window.addEventListener("beforeunload", warn);
-    let lock: WakeLockSentinel | null = null;
-    navigator.wakeLock
-      ?.request("screen")
-      .then((l) => (lock = l))
-      .catch(() => undefined);
-    return () => {
-      window.removeEventListener("beforeunload", warn);
-      void lock?.release().catch(() => undefined);
-    };
-  }, [uploading]);
+    if (upload?.phase === "done" && upload.videoId) {
+      router.push(`/dashboard/videos/${upload.videoId}`);
+      clear();
+    }
+  }, [upload?.phase, upload?.videoId, router, clear]);
 
   async function ensureProject(): Promise<string> {
     if (projectId) return projectId;
@@ -115,49 +108,33 @@ export function UploadView() {
       setError(t.upload.tooLong(formatDuration(seconds), formatDuration(LIMITS.maxDurationSeconds)));
       return;
     }
-    setFile(selected);
-    setVideoSeconds(seconds);
-    void start(selected, seconds);
+    start(selected, seconds, ensureProject);
   }
 
-  async function start(selected: File, seconds: number | null) {
-    const controller = new AbortController();
-    abortRef.current = controller;
-    videoRef.current = null;
-    setConfirmed(false);
-    setPhase("uploading");
-    setProgress({ uploadedBytes: 0, totalBytes: selected.size });
-    const confirmation = new Promise<{ clipDurationSeconds: number; subtitleStyle: SubtitleStyle }>((resolve) => {
-      confirmRef.current = resolve;
-    });
-    try {
-      const project = await ensureProject();
-      const video = await uploadVideo({
-        file: selected,
-        projectId: project,
-        durationSeconds: seconds,
-        signal: controller.signal,
-        onProgress: setProgress,
-        onCreated: (v) => (videoRef.current = v),
-        onUploaded: () => setPhase((p) => (p === "uploading" ? "uploaded" : p)),
-        completeWith: () => confirmation,
-      });
-      router.push(`/dashboard/videos/${video.id}`);
-    } catch (err) {
-      if (controller.signal.aborted) return;
-      setError(errorMessage(err));
-      setPhase("error");
-      // Libera la subida en S3 para no dejar partes huérfanas. (El tipo se fuerza: TS no ve la
-      // asignación que hace onCreated dentro de la subida.)
-      const created = videoRef.current as VideoDto | null;
-      if (created) await apiFetch(`/videos/${created.id}/abort`, { method: "POST" }).catch(() => undefined);
-    }
+  /** La parte elegida del enlace: lo que se manda a la API y el texto que la explica, o un error. */
+  function linkRange(): { ok: true; body: { startSeconds?: number; endSeconds?: number }; note: string } | { ok: false; message: string } {
+    if (!useRange) return { ok: true, body: {}, note: "" };
+    const from = parseClock(rangeFrom);
+    const to = parseClock(rangeTo);
+    if (Number.isNaN(from) || Number.isNaN(to)) return { ok: false, message: t.upload.rangeInvalid };
+    const start = from ?? 0;
+    const max = formatDuration(LIMITS.maxDurationSeconds);
+    if (to === null) return { ok: true, body: { startSeconds: start }, note: t.upload.rangeToEnd(max) };
+    if (to <= start) return { ok: false, message: t.upload.rangeOrder };
+    if (to - start < MIN_RANGE_SECONDS) return { ok: false, message: t.upload.rangeTooShort };
+    if (to - start > LIMITS.maxDurationSeconds) return { ok: false, message: t.upload.rangeTooLong(max) };
+    return { ok: true, body: { startSeconds: start, endSeconds: to }, note: t.upload.rangeLength(formatDuration(to - start)) };
   }
 
   function onImportClick(mode: "clips" | "download") {
     const checked = checkImportUrl(link);
     if (!checked.ok) {
       setError(translateMessage(checked.message, locale));
+      return;
+    }
+    const range = linkRange();
+    if (!range.ok) {
+      setError(range.message);
       return;
     }
     setError("");
@@ -169,12 +146,16 @@ export function UploadView() {
     setImporting(true);
     try {
       const project = await ensureProject();
+      const range = linkRange();
       const { video } = await apiFetch<ImportVideoResponse>("/videos/import", {
         method: "POST",
-        body:
-          importMode === "download"
-            ? { projectId: project, url: link.trim(), rightsConfirmed: true, downloadOnly: true }
-            : { projectId: project, url: link.trim(), rightsConfirmed: true, clipDurationSeconds: clipSeconds, subtitleStyle },
+        body: {
+          projectId: project,
+          url: link.trim(),
+          rightsConfirmed: true,
+          ...(range.ok ? range.body : {}),
+          ...(importMode === "download" ? { downloadOnly: true } : { clipDurationSeconds: clipSeconds, subtitleStyle }),
+        },
       });
       router.push(`/dashboard/videos/${video.id}`);
     } catch (err) {
@@ -185,19 +166,12 @@ export function UploadView() {
   }
 
   function onCreateClips() {
-    setConfirmed(true);
-    setPhase((p) => (p === "uploaded" ? "starting" : p));
-    confirmRef.current?.({ clipDurationSeconds: clipSeconds, subtitleStyle });
+    confirm({ clipDurationSeconds: clipSeconds, subtitleStyle });
   }
 
   async function onCancel() {
-    abortRef.current?.abort();
-    const created = videoRef.current;
-    setFile(null);
-    setProgress(null);
-    setPhase("idle");
-    setConfirmed(false);
-    if (created) await apiFetch(`/videos/${created.id}/abort`, { method: "POST" }).catch(() => undefined);
+    setError("");
+    await cancel();
   }
 
   if (!apiConfigured) {
@@ -258,6 +232,27 @@ export function UploadView() {
             }}
             placeholder="https://www.tiktok.com/@…/video/…"
             className="h-12 w-full rounded-xl border border-line bg-background px-3.5 text-base outline-none focus:border-accent"
+          />
+          <RangeFields
+            enabled={useRange}
+            onEnabled={(on) => {
+              setUseRange(on);
+              setError("");
+            }}
+            from={rangeFrom}
+            to={rangeTo}
+            onFrom={(v) => {
+              setRangeFrom(v);
+              setError("");
+            }}
+            onTo={(v) => {
+              setRangeTo(v);
+              setError("");
+            }}
+            note={(() => {
+              const r = linkRange();
+              return r.ok ? r.note : "";
+            })()}
           />
           {/* Otra acción con el mismo enlace: bajar el video tal cual, sin clips (si está activada). */}
           {FEATURES.downloadOnly ? (
@@ -371,6 +366,52 @@ export function UploadView() {
           onCancel={() => setAskRights(false)}
           onConfirm={onConfirmImport}
         />
+      ) : null}
+    </div>
+  );
+}
+
+/** "Usar solo una parte del video": desde / hasta, escritos como 1:30:00. */
+function RangeFields({
+  enabled,
+  onEnabled,
+  from,
+  to,
+  onFrom,
+  onTo,
+  note,
+}: {
+  enabled: boolean;
+  onEnabled: (on: boolean) => void;
+  from: string;
+  to: string;
+  onFrom: (value: string) => void;
+  onTo: (value: string) => void;
+  note: string;
+}) {
+  const t = useT();
+  const field = "h-11 w-full rounded-xl border border-line bg-background px-3 text-base tabular-nums outline-none focus:border-accent";
+  return (
+    <div className="space-y-2.5 rounded-xl border border-line/70 p-3">
+      <label className="flex cursor-pointer items-center justify-between gap-3">
+        <span className="text-sm font-semibold">{t.upload.rangeToggle}</span>
+        <input type="checkbox" checked={enabled} onChange={(e) => onEnabled(e.target.checked)} className="h-5 w-5 accent-accent" />
+      </label>
+      <p className="text-xs leading-[17px] text-muted">{t.upload.rangeHint}</p>
+      {enabled ? (
+        <>
+          <div className="grid grid-cols-2 gap-2.5">
+            <label className="space-y-1">
+              <span className="text-xs text-muted">{t.upload.rangeFrom}</span>
+              <input value={from} onChange={(e) => onFrom(e.target.value)} placeholder="0:00:00" autoComplete="off" className={field} />
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs text-muted">{t.upload.rangeTo}</span>
+              <input value={to} onChange={(e) => onTo(e.target.value)} placeholder={t.upload.rangeToPlaceholder} autoComplete="off" className={field} />
+            </label>
+          </div>
+          {note ? <p className="text-xs font-semibold text-accent">{note}</p> : null}
+        </>
       ) : null}
     </div>
   );

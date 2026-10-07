@@ -40,6 +40,8 @@ export interface VideoDto {
   clipCount?: number;
   /** Enlace de origen, si se importó por enlace. */
   sourceUrl?: string | null;
+  /** Tramo del enlace que se usó (segundos del original), si el usuario eligió uno. */
+  sourceRange?: { startSeconds: number; endSeconds: number } | null;
 }
 
 /** Respuesta al importar un video por enlace. */
@@ -94,8 +96,17 @@ export interface JobDto {
   finishedAt: string | null;
 }
 
-/** "highlight": palabra que suena en color (estilo TikTok); "classic": frase en caja; "none": sin subtítulos en el video. */
-export type SubtitleStyle = "highlight" | "classic" | "none";
+/**
+ * Subtítulos dibujados en el video:
+ * - "highlight": de a 1–3 palabras, la que suena en color (estilo TikTok);
+ * - "classic": frase en caja oscura;
+ * - "word": una sola palabra a la vez, grande, con un pequeño salto;
+ * - "yellow": de a 1–3 palabras en amarillo, la que suena más grande;
+ * - "neon": de a 1–3 palabras con brillo naranja, la que suena en naranja;
+ * - "minimal": frase en minúsculas, fina, sin borde;
+ * - "none": sin subtítulos en el video.
+ */
+export type SubtitleStyle = "highlight" | "classic" | "word" | "yellow" | "neon" | "minimal" | "none";
 
 export interface JobParams {
   clipDurationSeconds?: number;
