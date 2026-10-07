@@ -171,10 +171,6 @@ export function VideoView({ videoId }: { videoId: string }) {
   let origin: string | null = null;
   try {
     origin = video.sourceUrl ? t.video.from(new URL(video.sourceUrl).hostname.replace(/^www\./, "")) : null;
-    // Parte elegida de un stream: "desde kick.com (1:00:00–2:30:00)".
-    if (origin && video.sourceRange) {
-      origin += ` (${formatDuration(video.sourceRange.startSeconds)}–${formatDuration(video.sourceRange.endSeconds)})`;
-    }
   } catch {
     origin = null;
   }

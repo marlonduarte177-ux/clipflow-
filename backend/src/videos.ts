@@ -64,33 +64,7 @@ export function toVideoDto(row: VideoRow, extras: Pick<VideoDto, "thumbnailUrl" 
     createdAt: row.createdAt.toISOString(),
     uploadedAt: row.uploadedAt?.toISOString() ?? null,
     sourceUrl: row.sourceUrl,
-    sourceRange:
-      row.sourceStartSeconds !== null && row.sourceEndSeconds !== null
-        ? { startSeconds: row.sourceStartSeconds, endSeconds: row.sourceEndSeconds }
-        : null,
   };
-}
-
-/** Tramo mínimo de un enlace (en segundos). */
-const MIN_RANGE_SECONDS = 30;
-
-/**
- * Tramo elegido de un enlace. Sin inicio ni fin: el video entero (null). Sin fin: hasta el máximo
- * permitido desde el inicio (si el video termina antes, se descarga hasta su final).
- */
-function sourceRange(
-  product: ProductConfig,
-  startSeconds: number | undefined,
-  endSeconds: number | undefined,
-): { ok: true; range: { startSeconds: number; endSeconds: number } | null } | { ok: false; message: string } {
-  if (startSeconds === undefined && endSeconds === undefined) return { ok: true, range: null };
-  const max = product.upload.maxDurationSeconds;
-  const start = startSeconds ?? 0;
-  const end = endSeconds ?? start + max;
-  if (end <= start) return { ok: false, message: "El final del tramo debe ser después del inicio." };
-  if (end - start < MIN_RANGE_SECONDS) return { ok: false, message: `El tramo debe durar al menos ${MIN_RANGE_SECONDS} segundos.` };
-  if (end - start > max) return { ok: false, message: `El tramo puede durar como máximo ${Math.round((max / 3600) * 10) / 10} h.` };
-  return { ok: true, range: { startSeconds: start, endSeconds: end } };
 }
 
 /** Nombre que se muestra mientras se descarga (el worker lo cambia por el título real). */
@@ -309,8 +283,6 @@ export function videoRoutes(deps: VideoRouteDeps) {
       if (!input.success) return sendValidationError(reply, input.error);
       const checked = checkImportUrl(input.data.url);
       if (!checked.ok) return sendError(reply, 400, "invalid_url", checked.message);
-      const range = sourceRange(product, input.data.startSeconds, input.data.endSeconds);
-      if (!range.ok) return sendError(reply, 400, "invalid_range", range.message);
       // "Solo descargar": sin opciones de clips. Si después quiere clips, usa "Crear clips" en el video.
       const downloadOnly = input.data.downloadOnly === true;
       if (downloadOnly && !FEATURES.downloadOnly) return sendError(reply, 403, "download_disabled", DOWNLOAD_DISABLED_MESSAGE);
@@ -342,6 +314,9 @@ export function videoRoutes(deps: VideoRouteDeps) {
           `Ya tienes ${product.upload.maxPendingUploads} videos subiéndose o descargándose. Espera a que terminen.`,
         );
       }
+      if (!downloadOnly) {
+      }
+
       const videoId = crypto.randomUUID();
       const [row] = await db
         .insert(videos)
@@ -356,8 +331,6 @@ export function videoRoutes(deps: VideoRouteDeps) {
           s3Key: `originals/${userId}/${videoId}/original.mp4`,
           sourceUrl: checked.url,
           rightsConfirmedAt: new Date(),
-          sourceStartSeconds: range.range?.startSeconds ?? null,
-          sourceEndSeconds: range.range?.endSeconds ?? null,
         })
         .returning();
       const { job } = await createJob(db, {
@@ -369,7 +342,7 @@ export function videoRoutes(deps: VideoRouteDeps) {
         params: { ...options.params },
       });
       // Solo el dominio en los registros: el enlace completo puede llevar datos privados.
-      request.log.info({ videoId, host: new URL(checked.url).hostname, downloadOnly, range: range.range }, "importación por enlace iniciada");
+      request.log.info({ videoId, host: new URL(checked.url).hostname, downloadOnly }, "importación por enlace iniciada");
       await enqueue(queue, job, request.log);
       wakeWorkers(db, launcher, request.log);
       return reply.code(201).send({ video: toVideoDto(row!), job: toJobDto(job) } satisfies ImportVideoResponse);

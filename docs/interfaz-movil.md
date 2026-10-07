@@ -89,21 +89,3 @@ Toda la app está en **español e inglés**. El usuario elige en **Cuenta → Id
   `name`) y se muestra en Cuenta. Sin nombre, la fila dice «Agregar nombre».
 - **Redes conectadas** se quitó hasta que exista la función (publicar directo exige que cada red apruebe
   la app).
-
-## Más opciones (07/10/2026)
-
-- **Duraciones:** 15, 30, 45, 60 y 90 s, 3 min y 4 min. Cada clip dura lo elegido ±5 s.
-- **Estilos de subtítulos:**
-  - Resaltado
-  - Clásico
-  - **Palabra** (una sola palabra, grande, con un salto)
-  - **Amarillo**
-  - **Neón** (brillo naranja)
-  - **Minimal** (minúsculas, sin borde)
-  - Sin subtítulos
-- **Subida en segundo plano:**
-  - La subida de un archivo vive en el layout del panel (`UploadProvider`), así que sigue mientras el
-    usuario va a Mis videos o Cuenta.
-  - Una barra flotante muestra el avance y lleva a elegir las opciones o al video terminado.
-  - Solo se corta si se cierra o recarga la página: el navegador avisa antes y pide que la pantalla
-    no se apague. Un navegador no permite seguir subiendo con la página cerrada.
