@@ -15,6 +15,10 @@ on:
       hours:
         description: Horas hacia atrás a revisar
         default: "24"
+      media:
+        description: Medir los últimos videos y clips (solo números)
+        type: boolean
+        default: true
 
 permissions:
   id-token: write # necesario para OIDC
@@ -46,8 +50,55 @@ jobs:
           # El rol de GitHub no puede etiquetar sesiones (sts:TagSession) en los roles de CDK.
           role-skip-session-tagging: true
           aws-region: ${{ vars.AWS_REGION }}
+      - name: Instalar FFmpeg (para medir videos)
+        if: ${{ inputs.media }}
+        run: sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
       - name: Diagnóstico
         env:
+          MEDIA: ${{ inputs.media }}
           STAGE: ${{ inputs.stage }}
           HOURS: ${{ inputs.hours }}
         run: python3 scripts/diagnose.py
+
+  # Prueba del recorte con el MISMO FFmpeg que el procesador (Debian 12, FFmpeg 5.1) sobre los últimos
+  # videos: solo imprime medidas, el encuadre elegido y el error de FFmpeg si lo hay.
+  recorte:
+    if: ${{ inputs.media }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: ${{ inputs.stage }}
+    container: node:22-bookworm-slim
+    steps:
+      - name: Herramientas
+        run: apt-get update -q && apt-get install -y -q --no-install-recommends ffmpeg git ca-certificates curl unzip
+      - uses: actions/checkout@v5
+      - name: Credenciales temporales de AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Rol de solo lectura
+        run: |
+          account=$(node -e "console.log(process.argv[1].split(':')[4])" "${{ vars.AWS_DEPLOY_ROLE_ARN }}")
+          echo "::add-mask::$account"
+          echo "AWS_ACCOUNT_ID=$account" >> "$GITHUB_ENV"
+          echo "LOOKUP_ROLE=arn:aws:iam::${account}:role/cdk-hnb659fds-lookup-role-${account}-${AWS_REGION}" >> "$GITHUB_ENV"
+      - name: Pasar al rol de solo lectura
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ env.LOOKUP_ROLE }}
+          role-chaining: true
+          role-skip-session-tagging: true
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Dependencias
+        run: npm ci --no-audit --no-fund && npm run build -w @clipflow/shared
+      - name: Chequeo de sincronía de subtítulos
+        continue-on-error: true
+        env:
+          STAGE: ${{ inputs.stage }}
+        run: npx tsx scripts/sync-check.mts
+      - name: Chequeo del recorte
+        continue-on-error: true
+        env:
+          STAGE: ${{ inputs.stage }}
+        run: npx tsx scripts/render-check.mts

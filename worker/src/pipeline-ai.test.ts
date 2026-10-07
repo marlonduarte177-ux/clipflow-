@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { fullTranscriptKey, transcriptCacheKey, type AIAnalysisProvider, type AudioChunk, type FrameSheet, type TranscriptSegment } from "@clipflow/shared";
 import { claimJob, createJob, schema, type DbHandle } from "@clipflow/shared/db";
 import { createTestDb } from "@clipflow/shared/db/testing";
@@ -362,6 +362,16 @@ describe("procesamiento con IA", () => {
     const other = await seedVideoJob(db, root, { sample, importUrl: link });
     await processAnalyzeJob((await claimJob(db, other.job.id, "test-worker"))!, deps);
     expect(transcribeCalls).toBe(2);
+
+    // Si los videos anteriores duran otra cosa (se bajaron desde otro punto), sus tiempos no sirven:
+    // se transcribe de nuevo para que los subtítulos no queden corridos.
+    await db
+      .update(schema.videos)
+      .set({ durationSeconds: 999 })
+      .where(and(eq(schema.videos.userId, job.userId), eq(schema.videos.sourceUrl, link)));
+    const shifted = await importAgain(job.userId, video.projectId);
+    await processAnalyzeJob((await claimJob(db, shifted.job.id, "test-worker"))!, deps);
+    expect(transcribeCalls).toBe(3);
   });
 
   it("sin habla real (gameplay) no inventa títulos ni subtítulos y lo indica", async () => {
