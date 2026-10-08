@@ -65,6 +65,42 @@ def secrets() -> None:
         out(f"- `{s['Name']}`: {state}")
 
 
+def billing() -> None:
+    """Pagos: qué valores de Paddle le llegaron a la API (solo si están llenos, nunca su contenido)."""
+    out("")
+    out("## Pagos (Paddle): valores que recibió la API")
+    tasks, err = aws("ecs", "list-task-definitions", "--family-prefix", f"{PREFIX}-api", "--sort", "DESC", "--max-items", "1")
+    arns = (tasks or {}).get("taskDefinitionArns", [])
+    if err or not arns:
+        # El nombre de la familia lo pone CDK: se busca la que tenga el contenedor "api".
+        listed, err = aws("ecs", "list-task-definitions", "--sort", "DESC", "--max-items", "40")
+        arns = [a for a in (listed or {}).get("taskDefinitionArns", []) if "ApiTask" in a and PREFIX.replace("-", "") in a.replace("-", "")][:1]
+    if not arns:
+        out(f"- no se encontró la definición de la API: {err or 'sin resultados'}")
+        return
+    described, err = aws("ecs", "describe-task-definition", "--task-definition", arns[0])
+    if err:
+        out(f"- no se pudo leer: {err}")
+        return
+    containers = described["taskDefinition"]["containerDefinitions"]
+    env = {e["name"]: e.get("value", "") for c in containers for e in c.get("environment", [])}
+    secrets = {s["name"] for c in containers for s in c.get("secrets", [])}
+    keys = ["BILLING_ENABLED", "PADDLE_ENVIRONMENT", "PADDLE_CLIENT_TOKEN", "PADDLE_PRICE_TRIAL_FEE", "PADDLE_PRICE_BASIC_TRIAL",
+            "PADDLE_PRICE_BASIC", "PADDLE_PRICE_PRO", "PADDLE_PRICE_MAX", "PADDLE_PORTAL_URL", "BILLING_FREE_EMAILS"]
+    for k in keys:
+        if k not in env:
+            out(f"- `{k}`: no existe (falta desplegar esta versión)")
+        elif k in ("BILLING_ENABLED", "PADDLE_ENVIRONMENT"):
+            out(f"- `{k}`: {env[k] or 'vacío'}")
+        else:
+            v = env[k]
+            ok = bool(v) and (not k.startswith("PADDLE_PRICE") or v.startswith("pri_")) and (k != "PADDLE_CLIENT_TOKEN" or v.startswith(("test_", "live_")))
+            # Los ids de precio no son secretos; aun así solo se muestra cómo empiezan (pri_, pro_, 9.99…).
+            hint = f" (empieza con «{v[:4]}», debería ser «pri_»)" if v and not ok and k.startswith("PADDLE_PRICE") else ""
+            out(f"- `{k}`: {'ok' if ok else ('vacío' if not v else 'formato raro' + hint)}")
+    out(f"- `PADDLE_WEBHOOK_SECRET`: {'conectado a Secrets Manager' if 'PADDLE_WEBHOOK_SECRET' in secrets else 'no conectado'}")
+
+
 def stopped_tasks() -> None:
     out("")
     out("## Procesadores detenidos (ECS)")
@@ -209,6 +245,7 @@ def main() -> None:
     out(f"# Diagnóstico de ClipFlow ({STAGE})")
     out("")
     secrets()
+    billing()
     if os.environ.get("MEDIA", "true") == "true":
         media()
     stopped_tasks()
