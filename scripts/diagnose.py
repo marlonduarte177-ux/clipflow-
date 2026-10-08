@@ -95,7 +95,9 @@ def billing() -> None:
         else:
             v = env[k]
             ok = bool(v) and (not k.startswith("PADDLE_PRICE") or v.startswith("pri_")) and (k != "PADDLE_CLIENT_TOKEN" or v.startswith(("test_", "live_")))
-            out(f"- `{k}`: {'ok' if ok else ('vacío' if not v else 'formato raro')}")
+            # Los ids de precio no son secretos; aun así solo se muestra cómo empiezan (pri_, pro_, 9.99…).
+            hint = f" (empieza con «{v[:4]}», debería ser «pri_»)" if v and not ok and k.startswith("PADDLE_PRICE") else ""
+            out(f"- `{k}`: {'ok' if ok else ('vacío' if not v else 'formato raro' + hint)}")
     out(f"- `PADDLE_WEBHOOK_SECRET`: {'conectado a Secrets Manager' if 'PADDLE_WEBHOOK_SECRET' in secrets else 'no conectado'}")
 
 
