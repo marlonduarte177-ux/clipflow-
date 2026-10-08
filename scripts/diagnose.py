@@ -99,6 +99,9 @@ def billing() -> None:
             hint = f" (empieza con «{v[:4]}», debería ser «pri_»)" if v and not ok and k.startswith("PADDLE_PRICE") else ""
             out(f"- `{k}`: {'ok' if ok else ('vacío' if not v else 'formato raro' + hint)}")
     out(f"- `PADDLE_WEBHOOK_SECRET`: {'conectado a Secrets Manager' if 'PADDLE_WEBHOOK_SECRET' in secrets else 'no conectado'}")
+    meta, err = aws("secretsmanager", "describe-secret", "--secret-id", f"{PREFIX}/paddle-webhook-secret")
+    if not err and meta:
+        out(f"- clave de avisos cambiada por última vez: {meta.get('LastChangedDate', '?')} (la API la lee al arrancar)")
 
 
 def stopped_tasks() -> None:
@@ -190,7 +193,7 @@ def paddle_events() -> None:
         except (json.JSONDecodeError, KeyError):
             continue
         parts = [entry.get("msg", ""), f"id={entry.get('reqId')}" if entry.get("reqId") else ""]
-        for key in ("event", "status", "plan", "applied", "reason", "responseTime"):
+        for key in ("event", "status", "plan", "applied", "reason", "clave"):
             if key in entry:
                 parts.append(f"{key}={entry[key]}")
         if isinstance(entry.get("req"), dict):

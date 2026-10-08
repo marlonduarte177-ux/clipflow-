@@ -68,6 +68,8 @@ describe("pagos con Paddle", () => {
     expect(paddleWebhookSecret(JSON.stringify({ secret: SECRET }))).toBe(SECRET);
     expect(paddleWebhookSecret("Ab3$kL9!mN2#pQ5%rS8&tU1*vW4^xY7(")).toBeNull();
     expect(paddleWebhookSecret(undefined)).toBeNull();
+    expect(paddleWebhookSecret(`Secret key: ${SECRET}\n`)).toBe(SECRET);
+    expect(paddleWebhookSecret(SECRET.replace("pdl_", "Pdl_"))).toBe(SECRET);
   });
 
   it("sin pagos activados se procesa sin plan (como hasta ahora)", async () => {
