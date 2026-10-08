@@ -170,13 +170,27 @@ def paddle_events() -> None:
     if not events:
         out("- ninguno: Paddle no envió avisos a la API (revisa la URL en Paddle → Notifications)")
         return
+    # Respuesta de cada aviso: el registro "request completed" lleva el mismo reqId.
+    req_ids = []
+    for e in events:
+        try:
+            rid = json.loads(e["message"]).get("reqId")
+        except (json.JSONDecodeError, KeyError):
+            rid = None
+        if rid and rid not in req_ids:
+            req_ids.append(rid)
+    if req_ids:
+        related, _ = aws("logs", "filter-log-events", "--log-group-name", f"/clipflow/{STAGE}/api", "--start-time", str(start),
+                         "--filter-pattern", "{ " + " || ".join(f'($.reqId = "{r}")' for r in req_ids[-10:]) + " }", "--max-items", "500")
+        seen = {e["eventId"] for e in events}
+        events = sorted(events + [e for e in (related or {}).get("events", []) if e["eventId"] not in seen], key=lambda e: e["timestamp"])[-40:]
     for e in events:
         try:
             entry = json.loads(e["message"])
         except (json.JSONDecodeError, KeyError):
             continue
-        parts = [entry.get("msg", "")]
-        for key in ("event", "status", "plan", "applied", "reason"):
+        parts = [entry.get("msg", ""), f"id={entry.get('reqId')}" if entry.get("reqId") else ""]
+        for key in ("event", "status", "plan", "applied", "reason", "responseTime"):
             if key in entry:
                 parts.append(f"{key}={entry[key]}")
         if isinstance(entry.get("req"), dict):
