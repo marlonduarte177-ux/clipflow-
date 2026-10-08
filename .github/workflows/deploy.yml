@@ -48,13 +48,30 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
       - name: cdk deploy
         working-directory: infrastructure
-        # Correo de alertas y presupuesto: variables del environment en GitHub (pueden estar vacías).
+        # Correo de alertas, presupuesto y pagos (Paddle): variables del environment en GitHub
+        # (pueden estar vacías). Son valores públicos; la clave secreta de Paddle está en AWS.
         env:
           ALERT_EMAIL: ${{ vars.ALERT_EMAIL }}
           MONTHLY_BUDGET_USD: ${{ vars.MONTHLY_BUDGET_USD }}
+          BILLING_ENABLED: ${{ vars.BILLING_ENABLED }}
+          # Correos exentos de pagar: como secreto, para que no aparezcan en los registros públicos.
+          BILLING_FREE_EMAILS: ${{ secrets.BILLING_FREE_EMAILS }}
+          PADDLE_ENVIRONMENT: ${{ vars.PADDLE_ENVIRONMENT }}
+          PADDLE_CLIENT_TOKEN: ${{ vars.PADDLE_CLIENT_TOKEN }}
+          PADDLE_PRICE_TRIAL_FEE: ${{ vars.PADDLE_PRICE_TRIAL_FEE }}
+          PADDLE_PRICE_BASIC_TRIAL: ${{ vars.PADDLE_PRICE_BASIC_TRIAL }}
+          PADDLE_PRICE_BASIC: ${{ vars.PADDLE_PRICE_BASIC }}
+          PADDLE_PRICE_PRO: ${{ vars.PADDLE_PRICE_PRO }}
+          PADDLE_PRICE_MAX: ${{ vars.PADDLE_PRICE_MAX }}
+          PADDLE_PORTAL_URL: ${{ vars.PADDLE_PORTAL_URL }}
         run: >-
           npx cdk deploy --all -c stage=${{ inputs.stage }}
           -c alertEmail="$ALERT_EMAIL" -c monthlyBudgetUsd="$MONTHLY_BUDGET_USD"
+          -c billingEnabled="$BILLING_ENABLED" -c billingFreeEmails="$BILLING_FREE_EMAILS"
+          -c paddleEnvironment="$PADDLE_ENVIRONMENT" -c paddleClientToken="$PADDLE_CLIENT_TOKEN"
+          -c paddlePriceTrialFee="$PADDLE_PRICE_TRIAL_FEE" -c paddlePriceBasicTrial="$PADDLE_PRICE_BASIC_TRIAL"
+          -c paddlePriceBasic="$PADDLE_PRICE_BASIC" -c paddlePricePro="$PADDLE_PRICE_PRO"
+          -c paddlePriceMax="$PADDLE_PRICE_MAX" -c paddlePortalUrl="$PADDLE_PORTAL_URL"
           --require-approval never --outputs-file cdk-outputs.json
       - name: Resumen
         working-directory: infrastructure

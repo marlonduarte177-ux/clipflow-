@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type { ComponentProps, ReactNode } from "react";
 import { useT } from "@/i18n/provider";
 import { Logo } from "./logo";
@@ -47,11 +48,22 @@ export function SubmitButton({ loading, children }: { loading: boolean; children
 }
 
 export function Alert({ kind, children }: { kind: "error" | "info"; children: ReactNode }) {
+  const t = useT();
   if (!children) return null;
   const styles = kind === "error" ? "border-red-500/40 bg-red-500/10 text-red-200" : "border-accent/40 bg-accent/10 text-foreground";
+  // Errores por falta de plan o de minutos: con el enlace para elegir un plan.
+  const aboutPlan = kind === "error" && typeof children === "string" && /\b(plan|planes|plans)\b/i.test(children);
   return (
     <p role={kind === "error" ? "alert" : "status"} className={`rounded-lg border px-3 py-2 text-sm ${styles}`}>
       {children}
+      {aboutPlan ? (
+        <>
+          {" "}
+          <Link href="/dashboard/planes" className="font-semibold text-foreground underline underline-offset-2">
+            {t.plans.seePlans}
+          </Link>
+        </>
+      ) : null}
     </p>
   );
 }

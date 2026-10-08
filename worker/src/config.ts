@@ -54,6 +54,14 @@ const EnvSchema = z.object({
   OPENAI_INPUT_COST_PER_1M_TOKENS_USD: z.coerce.number().nonnegative().default(0.15),
   OPENAI_OUTPUT_COST_PER_1M_TOKENS_USD: z.coerce.number().nonnegative().default(0.6),
 
+
+  // --- Pagos: con "true", cada video descuenta sus minutos del plan (ver docs/pagos-paddle.md) ---
+  BILLING_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+  /** Correos que no necesitan plan, separados por coma. */
+  BILLING_FREE_EMAILS: z.string().optional(),
 });
 
 export type WorkerConfig = z.infer<typeof EnvSchema>;

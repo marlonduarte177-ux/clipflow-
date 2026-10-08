@@ -141,7 +141,7 @@ describe("base de datos", () => {
 });
 
 describe("API", () => {
-  it("todas las rutas excepto /health exigen token de Cognito", () => {
+  it("todas las rutas excepto /health y el aviso de Paddle exigen token de Cognito", () => {
     t.api.hasResourceProperties("AWS::ApiGatewayV2::Route", {
       RouteKey: "GET /{proxy+}",
       AuthorizationType: "JWT",
@@ -154,6 +154,23 @@ describe("API", () => {
       RouteKey: "GET /health",
       AuthorizationType: "NONE",
     });
+    // Los avisos de Paddle no traen sesión: la API comprueba su firma.
+    t.api.hasResourceProperties("AWS::ApiGatewayV2::Route", {
+      RouteKey: "POST /billing/paddle-webhook",
+      AuthorizationType: "NONE",
+    });
+  });
+
+  it("pagos: la clave de los avisos de Paddle vive en Secrets Manager y los pagos empiezan apagados", () => {
+    t.api.hasResourceProperties("AWS::SecretsManager::Secret", {
+      Name: "clipflow-staging/paddle-webhook-secret",
+      GenerateSecretString: { PasswordLength: 32, RequireEachIncludedType: true },
+    });
+    const [taskDef] = Object.values(t.api.findResources("AWS::ECS::TaskDefinition"));
+    const container = (taskDef as { Properties: { ContainerDefinitions: Record<string, unknown>[] } }).Properties.ContainerDefinitions[0]!;
+    expect((container.Secrets as { Name: string }[]).map((e) => e.Name)).toContain("PADDLE_WEBHOOK_SECRET");
+    const env = Object.fromEntries((container.Environment as { Name: string; Value: string }[]).map((e) => [e.Name, e.Value]));
+    expect(env).toMatchObject({ BILLING_ENABLED: "false", PADDLE_ENVIRONMENT: "sandbox" });
   });
 
   it("tiene límite de tráfico y CORS solo para la web", () => {

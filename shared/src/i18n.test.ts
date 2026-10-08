@@ -36,6 +36,9 @@ describe("translateMessage", () => {
     expect(translateMessage("falló la transcripción: OpenAI tuvo un error temporal (503)", "en")).toBe(
       "transcription failed: OpenAI had a temporary error (503)",
     );
+    expect(translateMessage("Este video dura 12 min y te quedan 3 min de tu plan. Se recargan con la próxima renovación.", "en")).toBe(
+      "This video is 12 min long and you have 3 min left in your plan. They refill at your next renewal.",
+    );
   });
 
   it("cada mensaje fijo de la API, la validación y el procesador tiene traducción al inglés", () => {

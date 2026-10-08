@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import type { MeResponse, ProductConfig } from "@clipflow/shared";
 import { getCreditBalance, type Database } from "@clipflow/shared/db";
 import { accountRoutes } from "./account.js";
+import { BILLING_OFF, billingRoutes, type BillingSettings } from "./billing.js";
 import type { ApiConfig } from "./config.js";
 import { requireAuth, type EmailLookup, type TokenVerifier } from "./auth.js";
 import { clipRoutes } from "./clips.js";
@@ -22,11 +23,13 @@ export interface AppDeps {
   queue: JobQueue;
   launcher: WorkerLauncher;
   product: ProductConfig;
+  /** Pagos con Paddle. Sin esto (tests, local) se procesa sin plan. */
+  billing?: BillingSettings;
   /** false en tests para no llenar la salida de logs. */
   logger?: boolean;
 }
 
-export async function buildApp({ config, verifyToken, lookupEmail, db, storage, queue, launcher, product, logger = true }: AppDeps): Promise<FastifyInstance> {
+export async function buildApp({ config, verifyToken, lookupEmail, db, storage, queue, launcher, product, billing = BILLING_OFF, logger = true }: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
     logger: logger
       ? {
@@ -93,12 +96,13 @@ export async function buildApp({ config, verifyToken, lookupEmail, db, storage, 
     return { userId: request.user!.id, email: request.user!.email, creditMinutes };
   });
   await app.register(accountRoutes({ db, auth, storage }));
+  await app.register(billingRoutes({ db, auth, settings: billing }));
 
   await app.register(projectRoutes({ db, auth, storage }));
   await app.register(
-    videoRoutes({ db, auth, storage, queue, launcher, product, uploadUrlExpiresSeconds: config.S3_UPLOAD_URL_EXPIRES_SECONDS }),
+    videoRoutes({ db, auth, storage, queue, launcher, product, billing, uploadUrlExpiresSeconds: config.S3_UPLOAD_URL_EXPIRES_SECONDS }),
   );
-  await app.register(jobRoutes({ db, auth, queue, launcher }));
+  await app.register(jobRoutes({ db, auth, queue, launcher, billing }));
   await app.register(clipRoutes({ db, auth, storage }));
 
   return app;

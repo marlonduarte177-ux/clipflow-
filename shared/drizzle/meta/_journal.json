@@ -43,6 +43,13 @@
       "when": 1791336523581,
       "tag": "0005_source_range",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791437852811,
+      "tag": "0006_billing_paddle",
+      "breakpoints": true
     }
   ]
 }

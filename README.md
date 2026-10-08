@@ -17,7 +17,7 @@ En construcción por fases. Ver `docs/`:
 - [Interfaz para celular y subtítulos en el video](docs/interfaz-movil.md)
 - [Importar videos por enlace (con aviso de derechos de autor)](docs/importar-por-enlace.md)
 - [Fase 10 — Producción: alertas y pendientes](docs/fase-10-produccion.md)
-- [Planes, minutos y descargas (decisiones, pendiente de la pasarela)](docs/planes-y-creditos.md)
+- [Planes, minutos y descargas](docs/planes-y-creditos.md) · [Pagos con Paddle (pasos)](docs/pagos-paddle.md)
 
 ## Estructura
 

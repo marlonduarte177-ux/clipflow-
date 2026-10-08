@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { deleteUser, signOut } from "aws-amplify/auth";
-import type { MeResponse } from "@clipflow/shared";
+import type { BillingResponse } from "@clipflow/shared";
 import { LEGAL_PATHS } from "@/components/legal-page";
 import { errorMessage } from "@/i18n/locale";
 import { LOCALE_NAMES } from "@/i18n/messages";
@@ -26,24 +26,25 @@ import {
   UserIcon,
 } from "@/components/icons";
 
-/** Página "Próximamente" para lo que todavía no tiene función (el título sale de `t.soon.topics`). */
-const soon = (topic: "planes" | "creditos") => `/dashboard/proximamente?que=${topic}`;
 
 export function AccountView({ name, email }: { name: string | null; email: string }) {
   const t = useT();
   const { locale } = useLocale();
   const router = useRouter();
-  const [credits, setCredits] = useState<number | null>(null);
+  const [billing, setBilling] = useState<BillingResponse | null>(null);
   const [leaving, setLeaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
-    apiFetch<MeResponse>("/me", { signal: controller.signal })
-      .then((me) => setCredits(me.creditMinutes ?? 0))
+    apiFetch<BillingResponse>("/billing", { signal: controller.signal })
+      .then(setBilling)
       .catch(() => undefined);
     return () => controller.abort();
   }, []);
+
+  const status = billing?.subscription?.status;
+  const planActive = status === "trialing" || status === "active" || status === "past_due";
 
   async function onSignOut() {
     setLeaving(true);
@@ -65,15 +66,23 @@ export function AccountView({ name, email }: { name: string | null; email: strin
           <Row
             icon={<CrownIcon size={20} />}
             label={t.account.subscription}
-            href={soon("planes")}
+            href="/dashboard/planes"
             value={
-              <span className="flex items-center gap-2">
-                {t.account.free}
-                <span className="inline-flex h-6 items-center rounded-full bg-accent px-2.5 text-[13px] font-bold text-on-accent">{t.account.upgrade}</span>
-              </span>
+              !billing ? (
+                "…"
+              ) : planActive ? (
+                `${t.plans.names[billing.subscription!.planCode]} · ${t.plans.status[billing.subscription!.status]}`
+              ) : (
+                <span className="flex items-center gap-2">
+                  {billing.exempt ? t.plans.exempt : t.account.noPlan}
+                  {billing.exempt ? null : (
+                    <span className="inline-flex h-6 items-center rounded-full bg-accent px-2.5 text-[13px] font-bold text-on-accent">{t.account.upgrade}</span>
+                  )}
+                </span>
+              )
             }
           />
-          <Row icon={<BoltIcon size={20} />} label={t.account.credits} href={soon("creditos")} value={credits === null ? "…" : t.account.minutes(credits)} />
+          <Row icon={<BoltIcon size={20} />} label={t.account.credits} href="/dashboard/planes" value={billing ? t.account.minutes(billing.creditMinutes) : "…"} />
         </Group>
 
         <Group>

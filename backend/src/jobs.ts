@@ -3,6 +3,7 @@ import { and, count, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import type { JobDto, JobListResponse } from "@clipflow/shared";
 import { requestCancel, resetJobForRetry, schema, type Database, type Job } from "@clipflow/shared/db";
+import { replyIfBlocked, type BillingSettings } from "./billing.js";
 import { sendError } from "./http.js";
 import type { WorkerLauncher } from "./launcher.js";
 import type { JobQueue } from "./queue.js";
@@ -60,8 +61,14 @@ export function wakeWorkers(db: Database, launcher: WorkerLauncher, log: Fastify
   })().catch((err: Error) => log.warn({ reason: err.name }, "no se pudo encender un procesador"));
 }
 
-export function jobRoutes(deps: { db: Database; auth: preHandlerHookHandler; queue: JobQueue; launcher: WorkerLauncher }) {
-  const { db, queue, launcher } = deps;
+export function jobRoutes(deps: {
+  db: Database;
+  auth: preHandlerHookHandler;
+  queue: JobQueue;
+  launcher: WorkerLauncher;
+  billing: BillingSettings;
+}) {
+  const { db, queue, launcher, billing } = deps;
   const notFound = (reply: FastifyReply) => sendError(reply, 404, "not_found", "Trabajo no encontrado.");
 
   async function findOwnJob(id: string, userId: string) {
@@ -116,6 +123,8 @@ export function jobRoutes(deps: { db: Database; auth: preHandlerHookHandler; que
       const userId = request.user!.id;
       const existing = await findOwnJob(params.data.id, userId);
       if (!existing) return notFound(reply);
+      const downloadOnly = (existing.params as { downloadOnly?: boolean } | null)?.downloadOnly === true;
+      if (!downloadOnly && (await replyIfBlocked(db, billing, request.user!, reply))) return reply;
 
       let job: Job | undefined;
       if (existing.status === "queued" && Date.now() - existing.queuedAt.getTime() > STUCK_QUEUED_MS) {

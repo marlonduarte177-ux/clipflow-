@@ -3,6 +3,7 @@ import type { DbHandle } from "@clipflow/shared/db";
 import { createTestDb } from "@clipflow/shared/db/testing";
 import { DEFAULT_PRODUCT_CONFIG, type ProductConfig } from "@clipflow/shared";
 import { buildApp } from "./app.js";
+import type { BillingSettings } from "./billing.js";
 import type { TokenVerifier } from "./auth.js";
 import type { WorkerLauncher } from "./launcher.js";
 import type { JobQueue } from "./queue.js";
@@ -96,7 +97,10 @@ export interface TestContext {
   launcher: FakeLauncher;
 }
 
-export async function createTestApp(product: ProductConfig = DEFAULT_PRODUCT_CONFIG): Promise<TestContext> {
+export async function createTestApp(
+  product: ProductConfig = DEFAULT_PRODUCT_CONFIG,
+  billing?: BillingSettings,
+): Promise<TestContext> {
   const database = await createTestDb();
   const storage = new FakeStorage();
   const queue = new FakeQueue();
@@ -113,6 +117,7 @@ export async function createTestApp(product: ProductConfig = DEFAULT_PRODUCT_CON
     queue,
     launcher,
     product,
+    billing,
     verifyToken,
     lookupEmail: async (token) => `${token.split(".")[1]}@example.com`,
     logger: false,

@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { SQSClient } from "@aws-sdk/client-sqs";
 import { eq } from "drizzle-orm";
-import { schema, type DbHandle } from "@clipflow/shared/db";
+import { getCreditBalance, schema, setPlanMinutes, type DbHandle } from "@clipflow/shared/db";
 import { createTestDb } from "@clipflow/shared/db/testing";
 import { handleMessage, runConsumer, type ConsumerOptions } from "./consumer.js";
 import { makeDeps, makeSampleVideo, seedVideoJob } from "./test-helpers.js";
@@ -129,5 +129,40 @@ describe("consumidor de la cola", () => {
     expect(row).toMatchObject({ status: "failed", errorCode: "invalid_video" });
     expect(row!.errorMessage).toMatch(/no es un video válido/);
     expect(sqs.calls.map((c) => c.command)).toContain("DeleteMessageCommand");
+  });
+
+  describe("minutos del plan", () => {
+    const billing = { enabled: true, freeEmails: "duena@example.com" };
+    const runWith = async (minutes: number, overrides: Partial<ConsumerOptions["deps"]> = {}, maxAttempts?: number) => {
+      const { job } = await seedVideoJob(h!.db, root, { sample });
+      if (minutes) await setPlanMinutes(h!.db, { userId: job.userId, minutes, eventId: `e-${job.id}`, note: "plan" });
+      if (maxAttempts) await h!.db.update(schema.processingJobs).set({ maxAttempts }).where(eq(schema.processingJobs.id, job.id));
+      await handleMessage(message(JSON.stringify({ jobId: job.id })), options(fakeSqs().client, { billing, ...overrides }));
+      const [row] = await h!.db.select().from(schema.processingJobs).where(eq(schema.processingJobs.id, job.id));
+      return { row: row!, balance: await getCreditBalance(h!.db, job.userId) };
+    };
+
+    it("descuenta los minutos del video (redondeados hacia arriba)", async () => {
+      const { row, balance } = await runWith(5);
+      expect(row.status).toBe("completed");
+      expect(balance).toBe(4);
+    });
+
+    it("sin minutos suficientes no procesa y lo dice", async () => {
+      const { row, balance } = await runWith(0);
+      expect(row).toMatchObject({ status: "failed", errorCode: "no_minutes" });
+      expect(row.errorMessage).toMatch(/te quedan 0 min/);
+      expect(balance).toBe(0);
+    });
+
+    it("si falla del todo después de cobrar, devuelve los minutos", async () => {
+      const local = makeDeps(h!.db, root, path.join(root, "work")).storage;
+      const broken = { ...local, upload: async () => {
+        throw new Error("S3 no responde");
+      } };
+      const { row, balance } = await runWith(5, { storage: broken }, 1);
+      expect(row.status).toBe("failed");
+      expect(balance).toBe(5);
+    });
   });
 });

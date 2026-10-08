@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync, preHandlerHookHandler } from "fastify";
 import { and, eq, isNull } from "drizzle-orm";
-import { schema, type Database } from "@clipflow/shared/db";
+import { latestSubscription, schema, subscriptionAllowsProcessing, type Database } from "@clipflow/shared/db";
 import { deleteVideoRows, purgeVideoFiles } from "./cleanup.js";
 import type { VideoStorage } from "./storage.js";
 
@@ -17,6 +17,13 @@ export function accountRoutes(deps: { db: Database; auth: preHandlerHookHandler;
   return async (app) => {
     app.delete("/me", { preHandler: deps.auth }, async (request, reply) => {
       const userId = request.user!.id;
+      // Un plan que se sigue renovando seguiría cobrando: primero hay que cancelarlo.
+      const plan = await latestSubscription(deps.db, userId);
+      if (subscriptionAllowsProcessing(plan) && !plan!.cancelAtPeriodEnd) {
+        return reply.code(409).send({
+          error: { code: "active_plan", message: "Cancela tu plan antes de eliminar la cuenta (Cuenta → Plan → Gestionar suscripción)." },
+        });
+      }
       const own = await deps.db.select({ id: projects.id }).from(projects).where(eq(projects.userId, userId));
       for (const project of own) {
         const removed = await deleteVideoRows(deps.db, userId, { projectId: project.id });

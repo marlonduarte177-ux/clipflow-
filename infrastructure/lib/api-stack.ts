@@ -12,6 +12,7 @@ import * as iam from "aws-cdk-lib/aws-iam";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as rds from "aws-cdk-lib/aws-rds";
 import * as s3 from "aws-cdk-lib/aws-s3";
+import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as servicediscovery from "aws-cdk-lib/aws-servicediscovery";
 import type * as sqs from "aws-cdk-lib/aws-sqs";
 import type { Construct } from "constructs";
@@ -38,6 +39,22 @@ export interface ApiStackProps extends StackProps {
     taskFamily: string;
     securityGroup: ec2.ISecurityGroup;
   };
+  /** Pagos con Paddle: valores públicos (variables del environment de GitHub; nada secreto). */
+  billing?: BillingProps;
+}
+
+/** Configuración pública de pagos. La clave de los avisos va aparte, en Secrets Manager. */
+export interface BillingProps {
+  enabled?: boolean;
+  freeEmails?: string;
+  paddleEnvironment?: "sandbox" | "production";
+  paddleClientToken?: string;
+  paddlePriceTrialFee?: string;
+  paddlePriceBasicTrial?: string;
+  paddlePriceBasic?: string;
+  paddlePricePro?: string;
+  paddlePriceMax?: string;
+  paddlePortalUrl?: string;
 }
 
 /**
@@ -79,6 +96,16 @@ export class ApiStack extends Stack {
       },
     });
 
+    // Clave secreta de los avisos de Paddle: el usuario pega la real en Secrets Manager. El relleno
+    // lleva signos de puntuación: una clave real no los tiene, así la API sabe que falta.
+    const paddleWebhookSecret = new secretsmanager.Secret(this, "PaddleWebhookSecret", {
+      secretName: `${prefix}/paddle-webhook-secret`,
+      description: "Clave secreta de los avisos de Paddle (Developer tools → Notifications). Reemplaza el valor por la tuya.",
+      generateSecretString: { passwordLength: 32, requireEachIncludedType: true, excludeCharacters: "\"'\\ /@" },
+      removalPolicy: props.stage === "production" ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
+    });
+    const billing = props.billing ?? {};
+
     const dbSecret = props.database.secret!;
     taskDefinition.addContainer("api", {
       image: ecs.ContainerImage.fromAsset(REPO_ROOT, { file: "backend/Dockerfile", platform: Platform.LINUX_AMD64 }),
@@ -103,11 +130,22 @@ export class ApiStack extends Stack {
         DB_NAME: DATABASE_NAME,
         DATABASE_SSL: "true",
         RUN_MIGRATIONS_ON_START: "true",
+        BILLING_ENABLED: billing.enabled ? "true" : "false",
+        BILLING_FREE_EMAILS: billing.freeEmails ?? "",
+        PADDLE_ENVIRONMENT: billing.paddleEnvironment ?? "sandbox",
+        PADDLE_CLIENT_TOKEN: billing.paddleClientToken ?? "",
+        PADDLE_PRICE_TRIAL_FEE: billing.paddlePriceTrialFee ?? "",
+        PADDLE_PRICE_BASIC_TRIAL: billing.paddlePriceBasicTrial ?? "",
+        PADDLE_PRICE_BASIC: billing.paddlePriceBasic ?? "",
+        PADDLE_PRICE_PRO: billing.paddlePricePro ?? "",
+        PADDLE_PRICE_MAX: billing.paddlePriceMax ?? "",
+        PADDLE_PORTAL_URL: billing.paddlePortalUrl ?? "",
       },
       // Usuario y contraseña de la BD: los inyecta ECS desde Secrets Manager.
       secrets: {
         DB_USER: ecs.Secret.fromSecretsManager(dbSecret, "username"),
         DB_PASSWORD: ecs.Secret.fromSecretsManager(dbSecret, "password"),
+        PADDLE_WEBHOOK_SECRET: ecs.Secret.fromSecretsManager(paddleWebhookSecret),
       },
       healthCheck: {
         command: [
@@ -240,6 +278,8 @@ export class ApiStack extends Stack {
     });
 
     httpApi.addRoutes({ path: "/health", methods: [apigw.HttpMethod.GET], integration });
+    // Avisos de Paddle: sin sesión de usuario (los firma Paddle y la API comprueba la firma).
+    httpApi.addRoutes({ path: "/billing/paddle-webhook", methods: [apigw.HttpMethod.POST], integration });
     httpApi.addRoutes({
       path: "/{proxy+}",
       methods: [apigw.HttpMethod.GET, apigw.HttpMethod.POST, apigw.HttpMethod.PATCH, apigw.HttpMethod.DELETE],
@@ -254,5 +294,8 @@ export class ApiStack extends Stack {
     this.apiUrl = httpApi.apiEndpoint;
     this.httpApi = httpApi;
     new CfnOutput(this, "ApiUrl", { value: httpApi.apiEndpoint });
+    // Dirección que se pega en Paddle → Developer tools → Notifications.
+    new CfnOutput(this, "PaddleWebhookUrl", { value: `${httpApi.apiEndpoint}/billing/paddle-webhook` });
+    new CfnOutput(this, "PaddleWebhookSecretName", { value: paddleWebhookSecret.secretName });
   }
 }

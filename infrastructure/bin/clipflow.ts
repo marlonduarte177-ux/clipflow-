@@ -19,6 +19,25 @@ const env = {
   region: process.env.CDK_DEFAULT_REGION ?? "us-east-1",
 };
 
+// Pagos con Paddle: valores PÚBLICOS desde variables del environment de GitHub (ver
+// docs/pagos-paddle.md). La clave secreta de los avisos está en Secrets Manager, no aquí.
+const ctx = (name: string): string | undefined => {
+  const v = app.node.tryGetContext(name);
+  return typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
+};
+const billing = {
+  enabled: ctx("billingEnabled") === "true",
+  freeEmails: ctx("billingFreeEmails"),
+  paddleEnvironment: ctx("paddleEnvironment") === "production" ? ("production" as const) : ("sandbox" as const),
+  paddleClientToken: ctx("paddleClientToken"),
+  paddlePriceTrialFee: ctx("paddlePriceTrialFee"),
+  paddlePriceBasicTrial: ctx("paddlePriceBasicTrial"),
+  paddlePriceBasic: ctx("paddlePriceBasic"),
+  paddlePricePro: ctx("paddlePricePro"),
+  paddlePriceMax: ctx("paddlePriceMax"),
+  paddlePortalUrl: ctx("paddlePortalUrl"),
+};
+
 const auth = new AuthStack(app, `${prefix}-auth`, { env, stage });
 const network = new NetworkStack(app, `${prefix}-network`, { env, stage });
 const storage = new StorageStack(app, `${prefix}-storage`, { env, stage, webOrigins: config.webOrigins });
@@ -30,6 +49,7 @@ const worker = new WorkerStack(app, `${prefix}-worker`, {
   bucket: storage.bucket,
   database: database.instance,
   databaseSecurityGroup: database.securityGroup,
+  billing: { enabled: billing.enabled, freeEmails: billing.freeEmails },
 });
 const api = new ApiStack(app, `${prefix}-api`, {
   env,
@@ -48,6 +68,7 @@ const api = new ApiStack(app, `${prefix}-api`, {
     securityGroup: worker.securityGroup,
   },
   webOrigins: config.webOrigins,
+  billing,
 });
 
 // Alertas por correo y presupuesto. El correo y el presupuesto llegan desde variables de GitHub

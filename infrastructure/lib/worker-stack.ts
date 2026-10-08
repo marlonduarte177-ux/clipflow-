@@ -24,6 +24,8 @@ export interface WorkerStackProps extends StackProps {
   bucket: s3.IBucket;
   database: rds.DatabaseInstance;
   databaseSecurityGroup: ec2.ISecurityGroup;
+  /** Pagos: con `enabled`, cada video descuenta sus minutos del plan. */
+  billing?: { enabled?: boolean; freeEmails?: string };
 }
 
 /**
@@ -132,6 +134,8 @@ export class WorkerStack extends Stack {
         FACE_TRACKING_ENABLED: "true",
         // Importar por enlace (TikTok, Instagram, Facebook): yt-dlp instalado en la imagen.
         YTDLP_PATH: "/usr/local/bin/yt-dlp",
+        BILLING_ENABLED: props.billing?.enabled ? "true" : "false",
+        BILLING_FREE_EMAILS: props.billing?.freeEmails ?? "",
       },
       secrets: {
         // ECS lee el secreto al arrancar cada worker (como el worker escala a 0,

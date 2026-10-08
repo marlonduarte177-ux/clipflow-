@@ -39,7 +39,7 @@ const TEXT = {
   },
 } as const;
 
-const UPDATED_EN = "October 6, 2026";
+const UPDATED_EN = "October 8, 2026";
 
 /** Página legal pública (Términos, Privacidad, Reembolsos): misma estructura y estilo. */
 export function LegalPage({
