@@ -164,6 +164,7 @@ export function PlansView() {
           </Card>
         ) : (
           <>
+            {billing.checkout ? null : <Alert kind="info">{t.plans.unavailable}</Alert>}
             {billing.trialEligible ? (
               <PlanCard
                 name={t.plans.names.trial}
@@ -171,9 +172,9 @@ export function PlansView() {
                 period={t.plans.trialPeriod}
                 minutes={t.plans.minutes(PLANS.trial.minutes)}
                 note={t.plans.trialThen}
-                action={billing.checkout ? (opening === "trial" ? t.plans.opening : t.plans.startTrial) : null}
+                action={billing.checkout ? (opening === "trial" ? t.plans.opening : t.plans.startTrial) : t.plans.soon}
                 onAction={() => onBuy("trial")}
-                busy={opening !== null || activating}
+                busy={!billing.checkout || opening !== null || activating}
                 highlight
               />
             ) : null}
@@ -185,13 +186,12 @@ export function PlansView() {
                 period={t.plans.perMonth}
                 minutes={t.plans.monthlyMinutes(PLANS[plan].minutes)}
                 badge={plan === "pro" ? t.plans.popular : undefined}
-                action={billing.checkout ? (opening === plan ? t.plans.opening : t.plans.choose(t.plans.names[plan])) : null}
+                action={billing.checkout ? (opening === plan ? t.plans.opening : t.plans.choose(t.plans.names[plan])) : t.plans.soon}
                 onAction={() => onBuy(plan)}
-                busy={opening !== null || activating}
+                busy={!billing.checkout || opening !== null || activating}
                 highlight={!billing.trialEligible && plan === "pro"}
               />
             ))}
-            {billing.checkout ? null : <p className="text-center text-[15px] text-[#8B909A]">{t.plans.unavailable}</p>}
             <ul className="space-y-2 px-1 text-[15px]">
               {t.plans.features.map((f) => (
                 <li key={f} className="flex items-center gap-2">
