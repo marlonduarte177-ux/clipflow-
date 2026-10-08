@@ -40,6 +40,7 @@ export type BillingSettings = Pick<
   | "PADDLE_PRICE_BASIC"
   | "PADDLE_PRICE_PRO"
   | "PADDLE_PRICE_MAX"
+  | "PADDLE_DISCOUNT_TRIAL"
   | "PADDLE_PORTAL_URL"
   | "PADDLE_WEBHOOK_SECRET"
 >;
@@ -275,6 +276,8 @@ export function billingRoutes({ db, auth, settings }: BillingRouteDeps) {
                           { priceId: settings.PADDLE_PRICE_BASIC_TRIAL!, quantity: 1 },
                           { priceId: settings.PADDLE_PRICE_TRIAL_FEE!, quantity: 1 },
                         ],
+                        // Los 1.99 de la prueba se descuentan del primer mes de Básico.
+                        ...(settings.PADDLE_DISCOUNT_TRIAL ? { discountId: settings.PADDLE_DISCOUNT_TRIAL } : {}),
                       },
                     ]
                   : []),

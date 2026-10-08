@@ -16,6 +16,7 @@ const settings: BillingSettings = {
   PADDLE_PRICE_BASIC: "pri_basic",
   PADDLE_PRICE_PRO: "pri_pro",
   PADDLE_PRICE_MAX: "pri_max",
+  PADDLE_DISCOUNT_TRIAL: "dsc_trial",
   PADDLE_PORTAL_URL: "https://customer-portal.paddle.com/cpl_test",
   PADDLE_WEBHOOK_SECRET: SECRET,
 };
@@ -87,6 +88,7 @@ describe("pagos con Paddle", () => {
               { priceId: "pri_basic_trial", quantity: 1 },
               { priceId: "pri_fee", quantity: 1 },
             ],
+            discountId: "dsc_trial",
           },
           { plan: "basic", items: [{ priceId: "pri_basic", quantity: 1 }] },
           { plan: "pro", items: [{ priceId: "pri_pro", quantity: 1 }] },

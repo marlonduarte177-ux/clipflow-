@@ -86,7 +86,7 @@ def billing() -> None:
     env = {e["name"]: e.get("value", "") for c in containers for e in c.get("environment", [])}
     secrets = {s["name"] for c in containers for s in c.get("secrets", [])}
     keys = ["BILLING_ENABLED", "PADDLE_ENVIRONMENT", "PADDLE_CLIENT_TOKEN", "PADDLE_PRICE_TRIAL_FEE", "PADDLE_PRICE_BASIC_TRIAL",
-            "PADDLE_PRICE_BASIC", "PADDLE_PRICE_PRO", "PADDLE_PRICE_MAX", "PADDLE_PORTAL_URL", "BILLING_FREE_EMAILS"]
+            "PADDLE_PRICE_BASIC", "PADDLE_PRICE_PRO", "PADDLE_PRICE_MAX", "PADDLE_DISCOUNT_TRIAL", "PADDLE_PORTAL_URL", "BILLING_FREE_EMAILS"]
     for k in keys:
         if k not in env:
             out(f"- `{k}`: no existe (falta desplegar esta versión)")
@@ -94,7 +94,7 @@ def billing() -> None:
             out(f"- `{k}`: {env[k] or 'vacío'}")
         else:
             v = env[k]
-            ok = bool(v) and (not k.startswith("PADDLE_PRICE") or v.startswith("pri_")) and (k != "PADDLE_CLIENT_TOKEN" or v.startswith(("test_", "live_")))
+            ok = bool(v) and (not k.startswith("PADDLE_PRICE") or v.startswith("pri_")) and (k != "PADDLE_CLIENT_TOKEN" or v.startswith(("test_", "live_"))) and (k != "PADDLE_DISCOUNT_TRIAL" or v.startswith("dsc_"))
             # Los ids de precio no son secretos; aun así solo se muestra cómo empiezan (pri_, pro_, 9.99…).
             hint = f" (empieza con «{v[:4]}», debería ser «pri_»)" if v and not ok and k.startswith("PADDLE_PRICE") else ""
             out(f"- `{k}`: {'ok' if ok else ('vacío' if not v else 'formato raro' + hint)}")

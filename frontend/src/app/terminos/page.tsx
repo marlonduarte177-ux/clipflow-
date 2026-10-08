@@ -76,7 +76,7 @@ export default function TermsPage() {
               <ul>
                 <li>
                   <strong>Prueba:</strong> {LEGAL.plans.trial.priceUsd} USD por {LEGAL.plans.trial.days} días, con {LEGAL.plans.trial.minutes}{" "}
-                  minutos de video. Al terminar, pasa automáticamente al plan Básico, salvo que la canceles antes. Solo una vez por persona.
+                  minutos de video. Al terminar, pasa automáticamente al plan Básico, salvo que la canceles antes; del primer cobro de Básico se descuenta lo pagado por la prueba. Solo una vez por persona.
                 </li>
                 <li>
                   <strong>Básico:</strong> {LEGAL.plans.basic.priceUsd} USD al mes, con {LEGAL.plans.basic.minutes} minutos de video por mes.

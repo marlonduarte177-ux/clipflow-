@@ -35,6 +35,7 @@ const billing = {
   paddlePriceBasic: ctx("paddlePriceBasic"),
   paddlePricePro: ctx("paddlePricePro"),
   paddlePriceMax: ctx("paddlePriceMax"),
+  paddleDiscountTrial: ctx("paddleDiscountTrial"),
   paddlePortalUrl: ctx("paddlePortalUrl"),
 };
 

@@ -54,6 +54,7 @@ export interface BillingProps {
   paddlePriceBasic?: string;
   paddlePricePro?: string;
   paddlePriceMax?: string;
+  paddleDiscountTrial?: string;
   paddlePortalUrl?: string;
 }
 
@@ -139,6 +140,7 @@ export class ApiStack extends Stack {
         PADDLE_PRICE_BASIC: billing.paddlePriceBasic ?? "",
         PADDLE_PRICE_PRO: billing.paddlePricePro ?? "",
         PADDLE_PRICE_MAX: billing.paddlePriceMax ?? "",
+        PADDLE_DISCOUNT_TRIAL: billing.paddleDiscountTrial ?? "",
         PADDLE_PORTAL_URL: billing.paddlePortalUrl ?? "",
       },
       // Usuario y contraseña de la BD: los inyecta ECS desde Secrets Manager.
