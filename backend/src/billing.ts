@@ -58,17 +58,26 @@ export function looksLikePaddleWebhookSecret(value: string | undefined): value i
  * de AWS (JSON con un solo valor) y comillas alrededor. null si no parece una clave de Paddle.
  */
 export function paddleWebhookSecret(stored: string | undefined): string | null {
-  let value = stored?.trim() ?? "";
-  if (value.startsWith("{")) {
-    try {
-      const parsed = JSON.parse(value) as Record<string, unknown>;
-      value = String(Object.values(parsed).find((v) => typeof v === "string" && v.trim().startsWith("pdl_")) ?? "");
-    } catch {
-      return null;
-    }
-  }
-  value = value.trim().replace(/^["']|["']$/g, "").trim();
+  // La clave puede venir sola, entre comillas, en JSON (pestaña Key/value de AWS) o con texto alrededor:
+  // se toma el primer "pdl_ntfset_…" que aparezca (el prefijo, en minúsculas como lo entrega Paddle).
+  const found = /pdl_ntfset_[^\s"',}]+/i.exec(stored ?? "");
+  if (!found) return null;
+  const value = `pdl_ntfset_${found[0].slice("pdl_ntfset_".length)}`;
   return looksLikePaddleWebhookSecret(value) ? value : null;
+}
+
+/** Forma de lo guardado como clave, sin revelarla: sirve para saber qué se pegó mal. */
+export function describeStoredSecret(stored: string | undefined): Record<string, unknown> {
+  const v = stored ?? "";
+  return {
+    largo: v.length,
+    vacio: v.trim() === "",
+    json: v.trim().startsWith("{"),
+    espaciosOSaltos: /\s/.test(v.trim()),
+    comillas: /["']/.test(v),
+    contienePdl: /pdl/i.test(v),
+    contieneNtfset: /ntfset/i.test(v),
+  };
 }
 
 /**
@@ -318,7 +327,10 @@ export function billingRoutes({ db, auth, settings }: BillingRouteDeps) {
         const secret = paddleWebhookSecret(settings.PADDLE_WEBHOOK_SECRET);
         if (!secret) {
           // Nunca se registra la clave: solo que no tiene la forma esperada.
-          request.log.warn("aviso de Paddle sin aplicar: la clave de los avisos en Secrets Manager no empieza por pdl_ntfset_");
+          request.log.warn(
+            { clave: describeStoredSecret(settings.PADDLE_WEBHOOK_SECRET) },
+            "aviso de Paddle sin aplicar: la clave de los avisos en Secrets Manager no empieza por pdl_ntfset_",
+          );
           return sendError(reply, 503, "billing_not_configured", "Pagos no configurados.");
         }
         const raw = typeof request.body === "string" ? request.body : "";
