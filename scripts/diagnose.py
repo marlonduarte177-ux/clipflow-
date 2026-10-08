@@ -155,6 +155,37 @@ def log_errors(group: str, title: str) -> None:
         out(f"- {when(e['timestamp'])}: " + " · ".join(parts))
 
 
+def paddle_events() -> None:
+    """Avisos de Paddle que llegaron a la API y qué se hizo con ellos (sin datos del cliente)."""
+    out("")
+    out(f"## Avisos de Paddle recibidos (últimas {HOURS} h)")
+    start = int((time.time() - HOURS * 3600) * 1000)
+    pattern = '?"paddle-webhook" ?"aviso de Paddle" ?"suscripción actualizada" ?"minutos del plan" ?"precio que no es de ClipFlow"'
+    data, err = aws("logs", "filter-log-events", "--log-group-name", f"/clipflow/{STAGE}/api", "--start-time", str(start),
+                    "--filter-pattern", pattern, "--max-items", "500")
+    if err:
+        out(f"- no se pudieron leer: {err}")
+        return
+    events = data.get("events", [])[-25:]
+    if not events:
+        out("- ninguno: Paddle no envió avisos a la API (revisa la URL en Paddle → Notifications)")
+        return
+    for e in events:
+        try:
+            entry = json.loads(e["message"])
+        except (json.JSONDecodeError, KeyError):
+            continue
+        parts = [entry.get("msg", "")]
+        for key in ("event", "status", "plan", "applied", "reason"):
+            if key in entry:
+                parts.append(f"{key}={entry[key]}")
+        if isinstance(entry.get("req"), dict):
+            parts.append(f"{entry['req'].get('method')} {entry['req'].get('url')}")
+        if isinstance(entry.get("res"), dict):
+            parts.append(f"respuesta={entry['res'].get('statusCode')}")
+        out(f"- {when(e['timestamp'])}: " + " · ".join(str(p) for p in parts if p))
+
+
 def newest(bucket: str, prefix: str, suffix: str, count: int) -> list[str]:
     data, err = aws("s3api", "list-objects-v2", "--bucket", bucket, "--prefix", prefix, "--max-items", "5000")
     if err or not data:
@@ -251,6 +282,7 @@ def main() -> None:
     stopped_tasks()
     log_errors(f"/clipflow/{STAGE}/worker", "Errores del procesador")
     log_errors(f"/clipflow/{STAGE}/api", "Errores de la API")
+    paddle_events()
     if SUMMARY:
         with open(SUMMARY, "a", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
