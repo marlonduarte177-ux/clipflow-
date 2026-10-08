@@ -181,7 +181,7 @@ def paddle_events() -> None:
             req_ids.append(rid)
     if req_ids:
         related, _ = aws("logs", "filter-log-events", "--log-group-name", f"/clipflow/{STAGE}/api", "--start-time", str(start),
-                         "--filter-pattern", " ".join(f'?"{r}"' for r in req_ids[-10:]), "--max-items", "500")
+                         "--filter-pattern", "{ " + " || ".join(f'($.reqId = "{r}")' for r in req_ids[-10:]) + " }", "--max-items", "500")
         seen = {e["eventId"] for e in events}
         events = sorted(events + [e for e in (related or {}).get("events", []) if e["eventId"] not in seen], key=lambda e: e["timestamp"])[-40:]
     for e in events:
