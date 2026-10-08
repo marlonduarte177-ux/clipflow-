@@ -54,6 +54,24 @@ export function looksLikePaddleWebhookSecret(value: string | undefined): value i
 }
 
 /**
+ * La clave de los avisos tal como se pegó en Secrets Manager. Acepta también la pestaña «Key/value»
+ * de AWS (JSON con un solo valor) y comillas alrededor. null si no parece una clave de Paddle.
+ */
+export function paddleWebhookSecret(stored: string | undefined): string | null {
+  let value = stored?.trim() ?? "";
+  if (value.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(value) as Record<string, unknown>;
+      value = String(Object.values(parsed).find((v) => typeof v === "string" && v.trim().startsWith("pdl_")) ?? "");
+    } catch {
+      return null;
+    }
+  }
+  value = value.trim().replace(/^["']|["']$/g, "").trim();
+  return looksLikePaddleWebhookSecret(value) ? value : null;
+}
+
+/**
  * ¿Puede crear clips? null = sí. Si no, el error para la API (402). Solo se exige con los pagos
  * activados y para cuentas no exentas. Los minutos exactos los descuenta el procesador al medir el video.
  */
@@ -297,8 +315,10 @@ export function billingRoutes({ db, auth, settings }: BillingRouteDeps) {
       hooks.removeContentTypeParser("application/json");
       hooks.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body, done) => done(null, String(body)));
       hooks.post("/billing/paddle-webhook", async (request, reply) => {
-        const secret = settings.PADDLE_WEBHOOK_SECRET?.trim();
-        if (!looksLikePaddleWebhookSecret(secret)) {
+        const secret = paddleWebhookSecret(settings.PADDLE_WEBHOOK_SECRET);
+        if (!secret) {
+          // Nunca se registra la clave: solo que no tiene la forma esperada.
+          request.log.warn("aviso de Paddle sin aplicar: la clave de los avisos en Secrets Manager no empieza por pdl_ntfset_");
           return sendError(reply, 503, "billing_not_configured", "Pagos no configurados.");
         }
         const raw = typeof request.body === "string" ? request.body : "";

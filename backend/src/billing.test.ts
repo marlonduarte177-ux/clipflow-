@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { schema } from "@clipflow/shared/db";
-import { verifyPaddleSignature, type BillingSettings } from "./billing.js";
+import { paddleWebhookSecret, verifyPaddleSignature, type BillingSettings } from "./billing.js";
 import { bearer, closeTestApp, createTestApp, type TestContext } from "./test-helpers.js";
 
 const SECRET = "pdl_ntfset_01testtesttesttest_abcdefabcdef";
@@ -60,6 +60,14 @@ describe("pagos con Paddle", () => {
     expect(verifyPaddleSignature('{"a":2}', sign(body), SECRET)).toBe(false);
     expect(verifyPaddleSignature(body, sign(body, Math.floor(Date.now() / 1000) - 3600), SECRET)).toBe(false);
     expect(verifyPaddleSignature(body, undefined, SECRET)).toBe(false);
+  });
+
+  it("la clave de los avisos se acepta pegada sola, con comillas o en la pestaña Key/value de AWS", () => {
+    expect(paddleWebhookSecret(SECRET)).toBe(SECRET);
+    expect(paddleWebhookSecret(` "${SECRET}" `)).toBe(SECRET);
+    expect(paddleWebhookSecret(JSON.stringify({ secret: SECRET }))).toBe(SECRET);
+    expect(paddleWebhookSecret("Ab3$kL9!mN2#pQ5%rS8&tU1*vW4^xY7(")).toBeNull();
+    expect(paddleWebhookSecret(undefined)).toBeNull();
   });
 
   it("sin pagos activados se procesa sin plan (como hasta ahora)", async () => {
