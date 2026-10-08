@@ -14,7 +14,7 @@ const PADDLE_JS = "https://cdn.paddle.com/paddle/v2/paddle.js";
 
 interface PaddleGlobal {
   Environment: { set: (env: "sandbox") => void };
-  Initialize: (options: { token: string; eventCallback?: (event: { name?: string }) => void }) => void;
+  Initialize: (options: { token: string; eventCallback?: (event: PaddleEvent) => void }) => void;
   Checkout: {
     open: (options: {
       items: { priceId: string; quantity: number }[];
@@ -31,8 +31,20 @@ declare global {
   }
 }
 
+/** Aviso de Paddle.js (pago completado, error del pago…). */
+interface PaddleEvent {
+  name?: string;
+  type?: string;
+  code?: string;
+  detail?: string;
+  error?: { code?: string; detail?: string };
+}
+
 let paddleReady: Promise<PaddleGlobal> | null = null;
-function loadPaddle(checkout: NonNullable<BillingResponse["checkout"]>, onEvent: (name: string) => void): Promise<PaddleGlobal> {
+/** Paddle se inicializa una vez: los avisos van siempre a la página que está abierta. */
+let paddleListener: ((event: PaddleEvent) => void) | null = null;
+function loadPaddle(checkout: NonNullable<BillingResponse["checkout"]>, onEvent: (event: PaddleEvent) => void): Promise<PaddleGlobal> {
+  paddleListener = onEvent;
   paddleReady ??= new Promise<PaddleGlobal>((resolve, reject) => {
     const script = document.createElement("script");
     script.src = PADDLE_JS;
@@ -41,7 +53,7 @@ function loadPaddle(checkout: NonNullable<BillingResponse["checkout"]>, onEvent:
       const paddle = window.Paddle;
       if (!paddle) return reject(new Error("Paddle no cargó"));
       if (checkout.environment === "sandbox") paddle.Environment.set("sandbox");
-      paddle.Initialize({ token: checkout.clientToken, eventCallback: (e) => e.name && onEvent(e.name) });
+      paddle.Initialize({ token: checkout.clientToken, eventCallback: (e) => paddleListener?.(e) });
       resolve(paddle);
     };
     script.onerror = () => {
@@ -97,7 +109,15 @@ export function PlansView() {
     setError("");
     setOpening(plan);
     try {
-      const paddle = await loadPaddle(checkout, (name) => name === "checkout.completed" && void waitForPlan());
+      const paddle = await loadPaddle(checkout, (event) => {
+        const name = event.name ?? event.type;
+        if (name === "checkout.completed") void waitForPlan();
+        // Paddle rechazó el pago por su configuración: se muestra su código para poder corregirlo.
+        if (name === "checkout.error") {
+          const code = event.error?.code ?? event.code ?? event.error?.detail ?? event.detail;
+          setError(code ? `${t.plans.failed} (${code})` : t.plans.failed);
+        }
+      });
       paddle.Checkout.open({
         items: option.items,
         ...(option.discountId ? { discountId: option.discountId } : {}),
