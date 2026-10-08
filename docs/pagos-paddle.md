@@ -4,18 +4,23 @@ Implementado el 08/10/2026. Reglas del negocio: ver [planes-y-creditos.md](plane
 
 ## Cómo funciona
 
-| | Prueba | Pro |
+| Plan | Precio | Minutos |
 |---|---|---|
-| Cobro | **1 USD** al empezar | **15 USD/mes** |
-| Minutos | **60** durante 7 días | **600** cada mes |
-| Después | pasa sola a Pro (salvo que cancele) | se renueva cada mes |
+| **Prueba** | **1.99 USD** una vez | **60** durante 7 días; después pasa sola a Básico (salvo que cancele) |
+| **Básico** | **9.99 USD/mes** | **200** cada mes |
+| **Pro** | **19.99 USD/mes** | **400** cada mes |
+| **Max** | **39.99 USD/mes** | **1000** cada mes |
+
+La prueba solo se ofrece a quien nunca tuvo un plan. Los tres planes mensuales se pueden contratar
+directamente.
 
 - **La web** (Cuenta → Suscripción, o `/dashboard/planes`) muestra los planes. Al tocar «Empezar prueba» se
-  abre el pago de Paddle encima de la página (Paddle.js). ClipFlow nunca ve la tarjeta.
+  abre el pago de Paddle encima de la página (Paddle.js). ClipFlow nunca ve la tarjeta. Cada plan tiene su
+  botón («Empezar prueba por 1.99 USD», «Elegir Básico», «Elegir Pro», «Elegir Max»).
 - **Paddle avisa a la API** (webhook `POST /billing/paddle-webhook`). La API comprueba la **firma** de cada
   aviso con la clave secreta y:
   - guarda la suscripción (estado, fecha de renovación, si se cancela al final del periodo);
-  - con cada pago deja el saldo en **60** (prueba) o **600** (Pro). Los minutos **no se acumulan**;
+  - con cada pago deja el saldo en los minutos del plan (60, 200, 400 o 1000). Los minutos **no se acumulan**;
   - si la suscripción termina (cancelada o sin pago), el saldo queda en 0.
   Los avisos repetidos no cargan minutos dos veces y los avisos viejos no pisan el estado nuevo.
 - **Sin plan no se procesa:** la API responde «Necesitas un plan…» al subir, importar, crear clips o
@@ -46,11 +51,17 @@ ClipFlow no necesita la API key de Paddle.
 1. **Despliega** (Actions → Deploy → staging). En el resumen del despliegue aparecen
    `PaddleWebhookUrl` (la dirección de los avisos) y `PaddleWebhookSecretName`.
 2. Crea una cuenta en **sandbox-vendors.paddle.com**.
-3. **Catalog → Products → New product** «ClipFlow Pro» con **dos precios**:
-   - «Pro mensual»: 15 USD, **Recurring** cada 1 mes, sin prueba. Copia su id (`pri_…`).
-   - «Pro con prueba»: 15 USD, **Recurring** cada 1 mes, **Trial 7 days**. Copia su id.
-4. **Catalog → Products → New product** «Prueba ClipFlow 7 días» con un precio de **1 USD, One-time**.
-   Copia su id.
+3. **Catalog → Products → New product.** Crea estos productos y precios y copia el id de cada precio
+   (`pri_…`, en la lista de precios del producto):
+
+   | Producto | Precio | Tipo | Variable de GitHub |
+   |---|---|---|---|
+   | ClipFlow Básico | 9.99 USD | Recurring, cada 1 mes | `PADDLE_PRICE_BASIC` |
+   | ClipFlow Básico (mismo producto, otro precio) | 9.99 USD | Recurring, cada 1 mes, **Trial 7 days** | `PADDLE_PRICE_BASIC_TRIAL` |
+   | ClipFlow Pro | 19.99 USD | Recurring, cada 1 mes | `PADDLE_PRICE_PRO` |
+   | ClipFlow Max | 39.99 USD | Recurring, cada 1 mes | `PADDLE_PRICE_MAX` |
+   | Prueba ClipFlow 7 días | 1.99 USD | **One-time** | `PADDLE_PRICE_TRIAL_FEE` |
+4. Revisa que los 5 precios estén en **USD** y activos (Status: Active).
 5. **Developer tools → Authentication → Client-side tokens → New token**. Copia el token (`test_…`).
 6. **Checkout → Checkout settings → Default payment link:** `https://clipflowia.com/dashboard/planes`.
    (En la cuenta real, Paddle además aprueba tu dominio en **Checkout → Website approval**.)
@@ -64,17 +75,18 @@ ClipFlow no necesita la API key de Paddle.
 9. **Portal de clientes** (cambiar tarjeta, facturas, cancelar): en Paddle, **Checkout → Customer portal**,
    copia el enlace.
 10. **GitHub → Settings → Environments → staging:**
-    - **Variables:** `PADDLE_ENVIRONMENT` = `sandbox`, `PADDLE_CLIENT_TOKEN`, `PADDLE_PRICE_PRO`,
-      `PADDLE_PRICE_PRO_TRIAL`, `PADDLE_PRICE_TRIAL_FEE`, `PADDLE_PORTAL_URL`, y `BILLING_ENABLED` = `true`.
+    - **Variables:** `PADDLE_ENVIRONMENT` = `sandbox`, `PADDLE_CLIENT_TOKEN`, los 5 precios del paso 3
+      (`PADDLE_PRICE_TRIAL_FEE`, `PADDLE_PRICE_BASIC_TRIAL`, `PADDLE_PRICE_BASIC`, `PADDLE_PRICE_PRO`,
+      `PADDLE_PRICE_MAX`), `PADDLE_PORTAL_URL`, y `BILLING_ENABLED` = `true`.
     - **Secrets:** `BILLING_FREE_EMAILS` = tu correo de ClipFlow (varios, separados por coma).
 11. **Despliega otra vez** (Actions → Deploy → staging).
-12. **Prueba** con otra cuenta de ClipFlow: Cuenta → Suscripción → «Empezar prueba por 1 USD», tarjeta de
-    prueba `4242 4242 4242 4242`, cualquier fecha futura y CVC `100`. En unos segundos la página dice «Tu
-    plan está activo» con 60 min. Revisa en Paddle → Transactions que se cobró **1 USD**.
+12. **Prueba** con otra cuenta de ClipFlow: Cuenta → Suscripción → «Empezar prueba por 1.99 USD», tarjeta
+    de prueba `4242 4242 4242 4242`, cualquier fecha futura y CVC `100`. En unos segundos la página dice
+    «Tu plan está activo» con 60 min. Revisa en Paddle → Transactions que se cobró **1.99 USD**.
 
 ## Pasar a cobros reales
 
-Repite los pasos 3–10 en **vendors.paddle.com** (la cuenta real, ya aprobada por Paddle) y cambia
+Repite los pasos 3, 5–10 en **vendors.paddle.com** (la cuenta real, ya aprobada por Paddle) y cambia
 `PADDLE_ENVIRONMENT` a `production`. Los ids, el token y la clave de los avisos de la cuenta real son
 distintos a los de sandbox. Despliega de nuevo.
 

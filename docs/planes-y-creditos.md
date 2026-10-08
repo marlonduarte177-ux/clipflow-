@@ -9,11 +9,14 @@
 - **1 crédito = 1 minuto de video.** El libro de créditos (`credit_ledger`) ya existe; `GET /me`
   devuelve `creditMinutes` y la página Cuenta lo muestra.
 
-| | Prueba | Pro (mensual) |
+| Plan | Precio | Minutos |
 |---|---|---|
-| Precio | **1 USD por 7 días** | **15 USD/mes** |
-| Minutos | **60 min** | **600 min** por mes |
-| Al terminar | pasa solo a Pro, salvo que cancele | se renueva cada mes |
+| Prueba | **1.99 USD** por 7 días (una vez) | **60 min**; después pasa sola a Básico, salvo que cancele |
+| Básico | **9.99 USD/mes** | **200 min** por mes |
+| Pro | **19.99 USD/mes** | **400 min** por mes |
+| Max | **39.99 USD/mes** | **1000 min** por mes |
+
+(Precios decididos el 08/10/2026; antes eran Prueba 1 USD y Pro 15 USD con 600 min.)
 
 Reglas:
 - **Los minutos no se acumulan** de un mes a otro.
@@ -36,7 +39,8 @@ Reglas:
 ## Costos de referencia
 
 - ~0,01 USD por minuto de video (Whisper ~0,006 + GPT y servidor). Medido: 2,5 h ≈ 0,93 USD de OpenAI.
-- Prueba: hasta ~0,60 USD de costo por 1 USD. Pro: hasta ~6 USD de costo por 15 USD.
+- Costo máximo si se usan todos los minutos (~0,01 USD/min): Prueba ~0,60 USD de 1.99; Básico ~2 USD de
+  9.99; Pro ~4 USD de 19.99; Max ~10 USD de 39.99 (más la comisión de Paddle).
 
 ## Pendiente
 

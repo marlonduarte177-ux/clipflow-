@@ -71,7 +71,7 @@ export function AccountView({ name, email }: { name: string | null; email: strin
               !billing ? (
                 "…"
               ) : planActive ? (
-                `${billing.subscription!.planCode === "trial" ? t.plans.trialName : t.plans.proName} · ${t.plans.status[billing.subscription!.status]}`
+                `${t.plans.names[billing.subscription!.planCode]} · ${t.plans.status[billing.subscription!.status]}`
               ) : (
                 <span className="flex items-center gap-2">
                   {billing.exempt ? t.plans.exempt : t.account.noPlan}

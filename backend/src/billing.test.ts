@@ -11,9 +11,11 @@ const settings: BillingSettings = {
   BILLING_FREE_EMAILS: "Dueno@example.com",
   PADDLE_ENVIRONMENT: "sandbox",
   PADDLE_CLIENT_TOKEN: "test_0123456789abcdef",
-  PADDLE_PRICE_PRO: "pri_pro",
-  PADDLE_PRICE_PRO_TRIAL: "pri_pro_trial",
   PADDLE_PRICE_TRIAL_FEE: "pri_fee",
+  PADDLE_PRICE_BASIC_TRIAL: "pri_basic_trial",
+  PADDLE_PRICE_BASIC: "pri_basic",
+  PADDLE_PRICE_PRO: "pri_pro",
+  PADDLE_PRICE_MAX: "pri_max",
   PADDLE_PORTAL_URL: "https://customer-portal.paddle.com/cpl_test",
   PADDLE_WEBHOOK_SECRET: SECRET,
 };
@@ -65,11 +67,11 @@ describe("pagos con Paddle", () => {
     expect(await billing("alice")).toMatchObject({ enabled: false, checkout: null });
   });
 
-  it("prueba de 7 días → 60 min; renovación → 600 min; cancelado → 0 y se bloquea", async () => {
+  it("prueba de 7 días → 60 min; pasa a Básico → 200 min; cancelado → 0 y se bloquea", async () => {
     ctx = await createTestApp(undefined, settings);
     const { userId } = await me("alice");
 
-    // Sin plan: no deja empezar y ofrece la prueba (Pro con prueba + cargo de 1 USD).
+    // Sin plan: no deja empezar; ofrece la prueba (Básico con prueba + cargo de 1.99 USD) y los tres planes.
     const blocked = await startUpload("alice");
     expect(blocked.statusCode).toBe(402);
     expect(blocked.json().error.code).toBe("no_plan");
@@ -78,9 +80,17 @@ describe("pagos con Paddle", () => {
       trialEligible: true,
       checkout: {
         environment: "sandbox",
-        items: [
-          { priceId: "pri_pro_trial", quantity: 1 },
-          { priceId: "pri_fee", quantity: 1 },
+        options: [
+          {
+            plan: "trial",
+            items: [
+              { priceId: "pri_basic_trial", quantity: 1 },
+              { priceId: "pri_fee", quantity: 1 },
+            ],
+          },
+          { plan: "basic", items: [{ priceId: "pri_basic", quantity: 1 }] },
+          { plan: "pro", items: [{ priceId: "pri_pro", quantity: 1 }] },
+          { plan: "max", items: [{ priceId: "pri_max", quantity: 1 }] },
         ],
         customData: { userId },
         email: "alice@example.com",
@@ -97,7 +107,7 @@ describe("pagos con Paddle", () => {
     expect(forged.statusCode).toBe(401);
 
     // El pago llega antes que la suscripción (Paddle no garantiza el orden).
-    const trialPaid = { id: "txn_1", subscription_id: "sub_1", custom_data: { userId }, items: [{ price: { id: "pri_pro_trial" } }, { price: { id: "pri_fee" } }] };
+    const trialPaid = { id: "txn_1", subscription_id: "sub_1", custom_data: { userId }, items: [{ price: { id: "pri_basic_trial" } }, { price: { id: "pri_fee" } }] };
     expect((await webhook("transaction.completed", trialPaid)).statusCode).toBe(200);
     expect((await webhook("transaction.completed", trialPaid)).statusCode).toBe(200); // repetido
     const sub = {
@@ -105,7 +115,7 @@ describe("pagos con Paddle", () => {
       status: "trialing",
       customer_id: "ctm_1",
       custom_data: { userId },
-      items: [{ price: { id: "pri_pro_trial" } }],
+      items: [{ price: { id: "pri_basic_trial" } }],
       current_billing_period: { starts_at: "2026-10-08T00:00:00Z", ends_at: "2026-10-15T00:00:00Z" },
       scheduled_change: null,
     };
@@ -114,21 +124,26 @@ describe("pagos con Paddle", () => {
       creditMinutes: 60,
       trialEligible: false,
       subscription: { planCode: "trial", status: "trialing", currentPeriodEnd: "2026-10-15T00:00:00.000Z", cancelAtPeriodEnd: false },
-      checkout: { items: [{ priceId: "pri_pro", quantity: 1 }] },
+      checkout: { options: [{ plan: "basic" }, { plan: "pro" }, { plan: "max" }] },
     });
     expect((await startUpload("alice")).statusCode).toBe(201);
 
-    // Fin de la prueba: cobra Pro (sin customData: se reconoce por la suscripción) → 600.
+    // Fin de la prueba: cobra Básico (sin customData: se reconoce por la suscripción) → 200.
     await webhook("subscription.updated", { ...sub, status: "active", custom_data: null });
-    await webhook("transaction.completed", { id: "txn_2", subscription_id: "sub_1", items: [{ price_id: "pri_pro_trial" }] });
-    expect(await billing("alice")).toMatchObject({ creditMinutes: 600, subscription: { planCode: "pro", status: "active" } });
+    await webhook("transaction.completed", { id: "txn_2", subscription_id: "sub_1", items: [{ price_id: "pri_basic_trial" }] });
+    expect(await billing("alice")).toMatchObject({ creditMinutes: 200, subscription: { planCode: "basic", status: "active" } });
+
+    // Cambia a Max: el siguiente pago deja 1000 min.
+    await webhook("subscription.updated", { ...sub, status: "active", items: [{ price: { id: "pri_max" } }] });
+    await webhook("transaction.completed", { id: "txn_3", subscription_id: "sub_1", items: [{ price_id: "pri_max" }] });
+    expect(await billing("alice")).toMatchObject({ creditMinutes: 1000, subscription: { planCode: "max" } });
 
     // Un aviso viejo que llega tarde no pisa el estado.
     await webhook("subscription.updated", sub, "2020-01-01T00:00:00Z");
     expect((await billing("alice")).subscription.status).toBe("active");
 
     // Cancela al final del periodo: sigue activo hasta entonces.
-    await webhook("subscription.updated", { ...sub, status: "active", scheduled_change: { action: "cancel" } });
+    await webhook("subscription.updated", { ...sub, status: "active", items: [{ price: { id: "pri_max" } }], scheduled_change: { action: "cancel" } });
     expect((await billing("alice")).subscription).toMatchObject({ status: "active", cancelAtPeriodEnd: true });
     await webhook("subscription.canceled", { ...sub, status: "canceled", scheduled_change: null });
     expect(await billing("alice")).toMatchObject({ creditMinutes: 0, subscription: { status: "canceled" } });

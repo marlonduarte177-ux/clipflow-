@@ -8,9 +8,12 @@ import {
   NO_MINUTES_MESSAGE,
   NO_PLAN_CODE,
   NO_PLAN_MESSAGE,
+  MONTHLY_PLANS,
   PLANS,
   type BillingResponse,
   type BillingStatus,
+  type MonthlyPlanCode,
+  type PlanCode,
 } from "@clipflow/shared";
 import {
   getCreditBalance,
@@ -32,9 +35,11 @@ export type BillingSettings = Pick<
   | "BILLING_FREE_EMAILS"
   | "PADDLE_ENVIRONMENT"
   | "PADDLE_CLIENT_TOKEN"
-  | "PADDLE_PRICE_PRO"
-  | "PADDLE_PRICE_PRO_TRIAL"
   | "PADDLE_PRICE_TRIAL_FEE"
+  | "PADDLE_PRICE_BASIC_TRIAL"
+  | "PADDLE_PRICE_BASIC"
+  | "PADDLE_PRICE_PRO"
+  | "PADDLE_PRICE_MAX"
   | "PADDLE_PORTAL_URL"
   | "PADDLE_WEBHOOK_SECRET"
 >;
@@ -147,6 +152,14 @@ async function resolveUser(db: Database, customUserId: string | undefined, subsc
 
 export class RetryLater extends Error {}
 
+/** Plan mensual de cada precio de Paddle (Básico con prueba también es Básico). */
+function monthlyPlanOf(settings: BillingSettings, priceId: string): MonthlyPlanCode | null {
+  if (priceId === settings.PADDLE_PRICE_BASIC || priceId === settings.PADDLE_PRICE_BASIC_TRIAL) return "basic";
+  if (priceId === settings.PADDLE_PRICE_PRO) return "pro";
+  if (priceId === settings.PADDLE_PRICE_MAX) return "max";
+  return null;
+}
+
 /**
  * Aplica un aviso de Paddle. Idempotente: los avisos repetidos no cargan minutos dos veces y los
  * avisos viejos que llegan tarde no pisan el estado nuevo.
@@ -159,11 +172,12 @@ export async function applyPaddleEvent(db: Database, settings: BillingSettings, 
     const sub = PaddleSubscription.parse(event.data);
     const userId = await resolveUser(db, sub.custom_data?.userId, sub.id);
     if (!userId) throw new RetryLater("suscripción sin usuario");
-    const recurring = priceIds(sub.items).find((id) => id === settings.PADDLE_PRICE_PRO || id === settings.PADDLE_PRICE_PRO_TRIAL) ?? null;
+    const recurring = priceIds(sub.items).find((id) => monthlyPlanOf(settings, id)) ?? null;
     const status = STATUS[sub.status] ?? "expired";
+    const planCode: PlanCode = status === "trialing" ? "trial" : (recurring && monthlyPlanOf(settings, recurring)) || "basic";
     const values = {
       userId,
-      planCode: status === "trialing" ? PLANS.trial.code : PLANS.pro.code,
+      planCode,
       status,
       provider: "paddle",
       providerSubscriptionId: sub.id,
@@ -195,11 +209,12 @@ export async function applyPaddleEvent(db: Database, settings: BillingSettings, 
     const userId = await resolveUser(db, txn.custom_data?.userId, txn.subscription_id);
     if (!userId) throw new RetryLater("pago sin usuario");
     const ids = priceIds(txn.items);
-    // Pago de la prueba (1 USD) → 60 min. Pago de Pro (primer mes o renovación) → 600 min.
+    // Pago de la prueba (1.99 USD) → 60 min. Pago de un plan mensual (primer mes o renovación) → sus minutos.
+    const monthly = ids.map((id) => monthlyPlanOf(settings, id)).find(Boolean);
     const plan = settings.PADDLE_PRICE_TRIAL_FEE && ids.includes(settings.PADDLE_PRICE_TRIAL_FEE)
       ? PLANS.trial
-      : ids.some((id) => id === settings.PADDLE_PRICE_PRO || id === settings.PADDLE_PRICE_PRO_TRIAL)
-        ? PLANS.pro
+      : monthly
+        ? PLANS[monthly]
         : null;
     if (!plan) {
       log.warn({ event: event.event_type }, "pago con un precio que no es de ClipFlow: se ignora");
@@ -217,8 +232,16 @@ export interface BillingRouteDeps {
 }
 
 export function billingRoutes({ db, auth, settings }: BillingRouteDeps) {
+  const monthlyPrice: Record<MonthlyPlanCode, string | undefined> = {
+    basic: settings.PADDLE_PRICE_BASIC,
+    pro: settings.PADDLE_PRICE_PRO,
+    max: settings.PADDLE_PRICE_MAX,
+  };
   const checkoutReady = Boolean(
-    settings.PADDLE_CLIENT_TOKEN && settings.PADDLE_PRICE_PRO && settings.PADDLE_PRICE_PRO_TRIAL && settings.PADDLE_PRICE_TRIAL_FEE,
+    settings.PADDLE_CLIENT_TOKEN &&
+      settings.PADDLE_PRICE_TRIAL_FEE &&
+      settings.PADDLE_PRICE_BASIC_TRIAL &&
+      MONTHLY_PLANS.every((plan) => monthlyPrice[plan]),
   );
 
   return async (app: FastifyInstance) => {
@@ -232,7 +255,7 @@ export function billingRoutes({ db, auth, settings }: BillingRouteDeps) {
         creditMinutes: await getCreditBalance(db, user.id),
         subscription: sub
           ? {
-              planCode: sub.planCode === "trial" ? "trial" : "pro",
+              planCode: (sub.planCode in PLANS ? sub.planCode : "basic") as PlanCode,
               status: sub.status,
               currentPeriodEnd: sub.currentPeriodEnd?.toISOString() ?? null,
               cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
@@ -243,12 +266,20 @@ export function billingRoutes({ db, auth, settings }: BillingRouteDeps) {
           ? {
               environment: settings.PADDLE_ENVIRONMENT,
               clientToken: settings.PADDLE_CLIENT_TOKEN!,
-              items: trialEligible
-                ? [
-                    { priceId: settings.PADDLE_PRICE_PRO_TRIAL!, quantity: 1 },
-                    { priceId: settings.PADDLE_PRICE_TRIAL_FEE!, quantity: 1 },
-                  ]
-                : [{ priceId: settings.PADDLE_PRICE_PRO!, quantity: 1 }],
+              options: [
+                ...(trialEligible
+                  ? [
+                      {
+                        plan: "trial" as const,
+                        items: [
+                          { priceId: settings.PADDLE_PRICE_BASIC_TRIAL!, quantity: 1 },
+                          { priceId: settings.PADDLE_PRICE_TRIAL_FEE!, quantity: 1 },
+                        ],
+                      },
+                    ]
+                  : []),
+                ...MONTHLY_PLANS.map((plan) => ({ plan, items: [{ priceId: monthlyPrice[plan]!, quantity: 1 }] })),
+              ],
               customData: { userId: user.id },
               email: user.email,
             }

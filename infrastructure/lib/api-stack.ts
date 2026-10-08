@@ -49,9 +49,11 @@ export interface BillingProps {
   freeEmails?: string;
   paddleEnvironment?: "sandbox" | "production";
   paddleClientToken?: string;
-  paddlePricePro?: string;
-  paddlePriceProTrial?: string;
   paddlePriceTrialFee?: string;
+  paddlePriceBasicTrial?: string;
+  paddlePriceBasic?: string;
+  paddlePricePro?: string;
+  paddlePriceMax?: string;
   paddlePortalUrl?: string;
 }
 
@@ -132,9 +134,11 @@ export class ApiStack extends Stack {
         BILLING_FREE_EMAILS: billing.freeEmails ?? "",
         PADDLE_ENVIRONMENT: billing.paddleEnvironment ?? "sandbox",
         PADDLE_CLIENT_TOKEN: billing.paddleClientToken ?? "",
-        PADDLE_PRICE_PRO: billing.paddlePricePro ?? "",
-        PADDLE_PRICE_PRO_TRIAL: billing.paddlePriceProTrial ?? "",
         PADDLE_PRICE_TRIAL_FEE: billing.paddlePriceTrialFee ?? "",
+        PADDLE_PRICE_BASIC_TRIAL: billing.paddlePriceBasicTrial ?? "",
+        PADDLE_PRICE_BASIC: billing.paddlePriceBasic ?? "",
+        PADDLE_PRICE_PRO: billing.paddlePricePro ?? "",
+        PADDLE_PRICE_MAX: billing.paddlePriceMax ?? "",
         PADDLE_PORTAL_URL: billing.paddlePortalUrl ?? "",
       },
       // Usuario y contraseña de la BD: los inyecta ECS desde Secrets Manager.

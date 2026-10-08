@@ -76,13 +76,19 @@ export default function TermsPageEn() {
             <>
               <ul>
                 <li>
-                  <strong>Trial:</strong> USD {LEGAL.trial.priceUsd} for {LEGAL.trial.days} days, with {LEGAL.trial.minutes} minutes of
-                  video. When it ends, it automatically converts to the Pro plan unless you cancel before.
+                  <strong>Trial:</strong> USD {LEGAL.plans.trial.priceUsd} for {LEGAL.plans.trial.days} days, with {LEGAL.plans.trial.minutes}{" "}
+                  minutes of video. When it ends, it automatically converts to the Basic plan unless you cancel before. Once per person.
                 </li>
                 <li>
-                  <strong>Pro:</strong> USD {LEGAL.pro.priceUsd} per month, with {LEGAL.pro.minutes} minutes of video per month. It renews
-                  every month until you cancel.
+                  <strong>Basic:</strong> USD {LEGAL.plans.basic.priceUsd} per month, with {LEGAL.plans.basic.minutes} minutes of video per month.
                 </li>
+                <li>
+                  <strong>Pro:</strong> USD {LEGAL.plans.pro.priceUsd} per month, with {LEGAL.plans.pro.minutes} minutes of video per month.
+                </li>
+                <li>
+                  <strong>Max:</strong> USD {LEGAL.plans.max.priceUsd} per month, with {LEGAL.plans.max.minutes} minutes of video per month.
+                </li>
+                <li>Monthly plans renew every month until you cancel.</li>
                 <li>Minutes are deducted based on the length of each processed video and do not roll over to the next month.</li>
                 <li>You can cancel at any time and keep access until the end of the period you already paid for.</li>
                 <li>Prices may include taxes depending on your country. We will notify you in advance of any price change.</li>

@@ -3,11 +3,17 @@
  * Los precios reales los cobra Paddle; aquí solo se muestran.
  */
 export const PLANS = {
-  trial: { code: "trial", minutes: 60, priceUsd: 1, days: 7 },
-  pro: { code: "pro", minutes: 600, priceUsd: 15 },
+  /** Prueba: 1.99 USD una vez, 60 min por 7 días; después pasa sola a Básico (salvo que cancele). */
+  trial: { code: "trial", minutes: 60, priceUsd: 1.99, days: 7 },
+  basic: { code: "basic", minutes: 200, priceUsd: 9.99 },
+  pro: { code: "pro", minutes: 400, priceUsd: 19.99 },
+  max: { code: "max", minutes: 1000, priceUsd: 39.99 },
 } as const;
 
 export type PlanCode = keyof typeof PLANS;
+/** Planes mensuales (los que se pueden contratar directamente). */
+export const MONTHLY_PLANS = ["basic", "pro", "max"] as const;
+export type MonthlyPlanCode = (typeof MONTHLY_PLANS)[number];
 
 /** Estado de la suscripción tal como lo ve la web. */
 export type BillingStatus = "trialing" | "active" | "past_due" | "canceled" | "expired";
@@ -25,14 +31,14 @@ export interface BillingResponse {
     currentPeriodEnd: string | null;
     cancelAtPeriodEnd: boolean;
   } | null;
-  /** Puede usar la prueba de 7 días (nunca tuvo un plan). */
+  /** Puede usar la prueba de 7 días (nunca tuvo un plan): entonces hay opción "trial". */
   trialEligible: boolean;
   /** Datos públicos para abrir el pago (Paddle.js). null si los pagos no están configurados. */
   checkout: {
     environment: "sandbox" | "production";
     clientToken: string;
-    /** Precios a cobrar (la prueba incluye el cargo de 1 USD y el plan Pro con 7 días de prueba). */
-    items: { priceId: string; quantity: number }[];
+    /** Qué cobrar para cada opción. La prueba lleva el cargo de 1.99 USD y Básico con 7 días de prueba. */
+    options: { plan: PlanCode; items: { priceId: string; quantity: number }[] }[];
     customData: { userId: string };
     email: string | null;
   } | null;

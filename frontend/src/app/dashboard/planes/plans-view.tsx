@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import type { BillingResponse } from "@clipflow/shared";
+import { MONTHLY_PLANS, PLANS, type BillingResponse, type PlanCode } from "@clipflow/shared";
 import { BackIcon, CheckIcon } from "@/components/icons";
 import { Alert } from "@/components/ui";
 import { errorMessage } from "@/i18n/locale";
@@ -60,7 +60,7 @@ export function PlansView() {
   const { locale } = useLocale();
   const [billing, setBilling] = useState<BillingResponse | null>(null);
   const [error, setError] = useState("");
-  const [opening, setOpening] = useState(false);
+  const [opening, setOpening] = useState<PlanCode | null>(null);
   const [activating, setActivating] = useState(false);
   const [activated, setActivated] = useState(false);
   const polling = useRef(false);
@@ -89,15 +89,16 @@ export function PlansView() {
     polling.current = false;
   }, []);
 
-  async function onBuy() {
-    if (!billing?.checkout) return;
+  async function onBuy(plan: PlanCode) {
+    const checkout = billing?.checkout;
+    const option = checkout?.options.find((o) => o.plan === plan);
+    if (!checkout || !option) return;
     setError("");
-    setOpening(true);
+    setOpening(plan);
     try {
-      const checkout = billing.checkout;
       const paddle = await loadPaddle(checkout, (name) => name === "checkout.completed" && void waitForPlan());
       paddle.Checkout.open({
-        items: checkout.items,
+        items: option.items,
         ...(checkout.email ? { customer: { email: checkout.email } } : {}),
         customData: checkout.customData,
         settings: { displayMode: "overlay", theme: "dark", locale, allowLogout: false },
@@ -105,7 +106,7 @@ export function PlansView() {
     } catch {
       setError(t.plans.failed);
     } finally {
-      setOpening(false);
+      setOpening(null);
     }
   }
 
@@ -137,7 +138,7 @@ export function PlansView() {
           <Card>
             <p className="text-sm text-[#8B909A]">{t.plans.current}</p>
             <div className="mt-1 flex items-center gap-2">
-              <p className="text-xl font-bold">{sub.planCode === "trial" ? t.plans.trialName : t.plans.proName}</p>
+              <p className="text-xl font-bold">{t.plans.names[sub.planCode]}</p>
               <span className="inline-flex h-6 items-center rounded-full bg-accent px-2.5 text-[13px] font-bold text-on-accent">
                 {t.plans.status[sub.status]}
               </span>
@@ -165,36 +166,41 @@ export function PlansView() {
           <>
             {billing.trialEligible ? (
               <PlanCard
-                name={t.plans.trialName}
-                price={t.plans.trialPrice}
+                name={t.plans.names.trial}
+                price={usd(PLANS.trial.priceUsd)}
                 period={t.plans.trialPeriod}
-                minutes={t.plans.trialMinutes}
+                minutes={t.plans.minutes(PLANS.trial.minutes)}
                 note={t.plans.trialThen}
-                features={t.plans.features}
+                action={billing.checkout ? (opening === "trial" ? t.plans.opening : t.plans.startTrial) : null}
+                onAction={() => onBuy("trial")}
+                busy={opening !== null || activating}
                 highlight
               />
             ) : null}
-            <PlanCard
-              name={t.plans.proName}
-              price={t.plans.proPrice}
-              period={t.plans.proPeriod}
-              minutes={t.plans.proMinutes}
-              note={t.plans.noRollover}
-              features={t.plans.features}
-              highlight={!billing.trialEligible}
-            />
-            {billing.checkout ? (
-              <button
-                type="button"
-                onClick={onBuy}
-                disabled={opening || activating}
-                className="h-12 w-full rounded-2xl bg-accent text-[15px] font-bold text-on-accent disabled:opacity-50"
-              >
-                {opening ? t.plans.opening : billing.trialEligible ? t.plans.startTrial : t.plans.subscribe}
-              </button>
-            ) : (
-              <p className="text-center text-[15px] text-[#8B909A]">{t.plans.unavailable}</p>
-            )}
+            {MONTHLY_PLANS.map((plan) => (
+              <PlanCard
+                key={plan}
+                name={t.plans.names[plan]}
+                price={usd(PLANS[plan].priceUsd)}
+                period={t.plans.perMonth}
+                minutes={t.plans.monthlyMinutes(PLANS[plan].minutes)}
+                badge={plan === "pro" ? t.plans.popular : undefined}
+                action={billing.checkout ? (opening === plan ? t.plans.opening : t.plans.choose(t.plans.names[plan])) : null}
+                onAction={() => onBuy(plan)}
+                busy={opening !== null || activating}
+                highlight={!billing.trialEligible && plan === "pro"}
+              />
+            ))}
+            {billing.checkout ? null : <p className="text-center text-[15px] text-[#8B909A]">{t.plans.unavailable}</p>}
+            <ul className="space-y-2 px-1 text-[15px]">
+              {t.plans.features.map((f) => (
+                <li key={f} className="flex items-center gap-2">
+                  <CheckIcon size={16} className="shrink-0 text-accent" />
+                  {f}
+                </li>
+              ))}
+            </ul>
+            <p className="px-1 text-sm text-[#8B909A]">{t.plans.noRollover}</p>
           </>
         )}
       </div>
@@ -206,23 +212,46 @@ function Card({ children }: { children: ReactNode }) {
   return <section className="rounded-2xl border border-[#1C2029] bg-[#12151B] px-5 py-5">{children}</section>;
 }
 
-function PlanCard(props: { name: string; price: string; period: string; minutes: string; note: string; features: string[]; highlight?: boolean }) {
+const usd = (n: number) => `$${n.toFixed(2)}`;
+
+function PlanCard(props: {
+  name: string;
+  price: string;
+  period: string;
+  minutes: string;
+  note?: string;
+  badge?: string;
+  action: string | null;
+  onAction: () => void;
+  busy: boolean;
+  highlight?: boolean;
+}) {
   return (
     <section className={`rounded-2xl border px-5 py-5 ${props.highlight ? "border-accent/60 bg-accent/[0.06]" : "border-[#1C2029] bg-[#12151B]"}`}>
-      <p className="text-lg font-bold">{props.name}</p>
+      <div className="flex items-center gap-2">
+        <p className="text-lg font-bold">{props.name}</p>
+        {props.badge ? (
+          <span className="inline-flex h-6 items-center rounded-full bg-accent px-2.5 text-[12px] font-bold text-on-accent">{props.badge}</span>
+        ) : null}
+      </div>
       <p className="mt-1">
         <span className="text-[28px] font-extrabold tracking-tight">{props.price}</span>{" "}
         <span className="text-[15px] text-[#8B909A]">{props.period}</span>
       </p>
-      <ul className="mt-3 space-y-2 text-[15px]">
-        {[props.minutes, ...props.features].map((f) => (
-          <li key={f} className="flex items-center gap-2">
-            <CheckIcon size={16} className="shrink-0 text-accent" />
-            {f}
-          </li>
-        ))}
-      </ul>
-      <p className="mt-3 text-sm text-[#8B909A]">{props.note}</p>
+      <p className="mt-1 text-[15px]">{props.minutes}</p>
+      {props.note ? <p className="mt-2 text-sm text-[#8B909A]">{props.note}</p> : null}
+      {props.action ? (
+        <button
+          type="button"
+          onClick={props.onAction}
+          disabled={props.busy}
+          className={`mt-4 h-12 w-full rounded-2xl text-[15px] font-bold disabled:opacity-50 ${
+            props.highlight ? "bg-accent text-on-accent" : "border border-line"
+          }`}
+        >
+          {props.action}
+        </button>
+      ) : null}
     </section>
   );
 }

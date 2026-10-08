@@ -75,13 +75,19 @@ export default function TermsPage() {
             <>
               <ul>
                 <li>
-                  <strong>Prueba:</strong> {LEGAL.trial.priceUsd} USD por {LEGAL.trial.days} días, con {LEGAL.trial.minutes} minutos de video.
-                  Al terminar, pasa automáticamente al plan Pro, salvo que la canceles antes.
+                  <strong>Prueba:</strong> {LEGAL.plans.trial.priceUsd} USD por {LEGAL.plans.trial.days} días, con {LEGAL.plans.trial.minutes}{" "}
+                  minutos de video. Al terminar, pasa automáticamente al plan Básico, salvo que la canceles antes. Solo una vez por persona.
                 </li>
                 <li>
-                  <strong>Pro:</strong> {LEGAL.pro.priceUsd} USD al mes, con {LEGAL.pro.minutes} minutos de video por mes. Se renueva cada mes
-                  hasta que lo canceles.
+                  <strong>Básico:</strong> {LEGAL.plans.basic.priceUsd} USD al mes, con {LEGAL.plans.basic.minutes} minutos de video por mes.
                 </li>
+                <li>
+                  <strong>Pro:</strong> {LEGAL.plans.pro.priceUsd} USD al mes, con {LEGAL.plans.pro.minutes} minutos de video por mes.
+                </li>
+                <li>
+                  <strong>Max:</strong> {LEGAL.plans.max.priceUsd} USD al mes, con {LEGAL.plans.max.minutes} minutos de video por mes.
+                </li>
+                <li>Los planes mensuales se renuevan cada mes hasta que los canceles.</li>
                 <li>Los minutos se descuentan según la duración de cada video procesado y no se acumulan de un mes a otro.</li>
                 <li>Puedes cancelar cuando quieras: conservas el acceso hasta el final del período ya pagado.</li>
                 <li>Los precios pueden incluir impuestos según tu país. Te avisaremos con anticipación de cualquier cambio de precio.</li>
