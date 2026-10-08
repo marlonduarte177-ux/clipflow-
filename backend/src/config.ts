@@ -57,6 +57,8 @@ const EnvSchema = z.object({
   PADDLE_PRICE_BASIC: z.string().optional(),
   PADDLE_PRICE_PRO: z.string().optional(),
   PADDLE_PRICE_MAX: z.string().optional(),
+  /** Descuento de Paddle (dsc_…) de 1.99 USD en el primer cobro de Básico tras la prueba. Opcional. */
+  PADDLE_DISCOUNT_TRIAL: z.string().optional(),
   /** Portal de clientes de Paddle (cambiar tarjeta, facturas, cancelar). */
   PADDLE_PORTAL_URL: z.string().optional(),
   /** Clave secreta de los avisos de Paddle. En AWS la inyecta ECS desde Secrets Manager. */

@@ -63,6 +63,7 @@ jobs:
           PADDLE_PRICE_BASIC: ${{ vars.PADDLE_PRICE_BASIC }}
           PADDLE_PRICE_PRO: ${{ vars.PADDLE_PRICE_PRO }}
           PADDLE_PRICE_MAX: ${{ vars.PADDLE_PRICE_MAX }}
+          PADDLE_DISCOUNT_TRIAL: ${{ vars.PADDLE_DISCOUNT_TRIAL }}
           PADDLE_PORTAL_URL: ${{ vars.PADDLE_PORTAL_URL }}
         run: >-
           npx cdk deploy --all -c stage=${{ inputs.stage }}
@@ -72,6 +73,7 @@ jobs:
           -c paddlePriceTrialFee="$PADDLE_PRICE_TRIAL_FEE" -c paddlePriceBasicTrial="$PADDLE_PRICE_BASIC_TRIAL"
           -c paddlePriceBasic="$PADDLE_PRICE_BASIC" -c paddlePricePro="$PADDLE_PRICE_PRO"
           -c paddlePriceMax="$PADDLE_PRICE_MAX" -c paddlePortalUrl="$PADDLE_PORTAL_URL"
+          -c paddleDiscountTrial="$PADDLE_DISCOUNT_TRIAL"
           --require-approval never --outputs-file cdk-outputs.json
       - name: Resumen
         working-directory: infrastructure

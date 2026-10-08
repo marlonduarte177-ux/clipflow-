@@ -20,6 +20,7 @@ interface PaddleGlobal {
       items: { priceId: string; quantity: number }[];
       customer?: { email: string };
       customData?: Record<string, string>;
+      discountId?: string;
       settings?: { displayMode?: "overlay"; theme?: "dark" | "light"; locale?: string; allowLogout?: boolean };
     }) => void;
   };
@@ -99,6 +100,7 @@ export function PlansView() {
       const paddle = await loadPaddle(checkout, (name) => name === "checkout.completed" && void waitForPlan());
       paddle.Checkout.open({
         items: option.items,
+        ...(option.discountId ? { discountId: option.discountId } : {}),
         ...(checkout.email ? { customer: { email: checkout.email } } : {}),
         customData: checkout.customData,
         settings: { displayMode: "overlay", theme: "dark", locale, allowLogout: false },
@@ -171,7 +173,7 @@ export function PlansView() {
                 price={usd(PLANS.trial.priceUsd)}
                 period={t.plans.trialPeriod}
                 minutes={t.plans.minutes(PLANS.trial.minutes)}
-                note={t.plans.trialThen}
+                note={billing.checkout?.options.find((o) => o.plan === "trial")?.discountId ? t.plans.trialThenDiscount : t.plans.trialThen}
                 action={billing.checkout ? (opening === "trial" ? t.plans.opening : t.plans.startTrial) : t.plans.soon}
                 onAction={() => onBuy("trial")}
                 busy={!billing.checkout || opening !== null || activating}

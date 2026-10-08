@@ -38,7 +38,12 @@ export interface BillingResponse {
     environment: "sandbox" | "production";
     clientToken: string;
     /** Qué cobrar para cada opción. La prueba lleva el cargo de 1.99 USD y Básico con 7 días de prueba. */
-    options: { plan: PlanCode; items: { priceId: string; quantity: number }[] }[];
+    options: {
+      plan: PlanCode;
+      items: { priceId: string; quantity: number }[];
+      /** Descuento de Paddle (dsc_…): en la prueba, resta los 1.99 USD al primer cobro de Básico. */
+      discountId?: string;
+    }[];
     customData: { userId: string };
     email: string | null;
   } | null;
