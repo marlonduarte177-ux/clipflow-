@@ -395,7 +395,19 @@ export const creditLedger = pgTable(
   ],
 );
 
-/** Suscripciones, independientes del proveedor de pagos (se conectará después). */
+/**
+ * Cargas de minutos ya aplicadas por un pago (p. ej. "paddle:txn_…"). Si el proveedor repite el aviso,
+ * no se vuelven a cargar los minutos.
+ */
+export const billingEvents = pgTable("billing_events", {
+  id: text("id").primaryKey(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  createdAt: createdAt(),
+});
+
+/** Suscripciones (hoy, Paddle). Las crea y actualiza el aviso (webhook) del proveedor. */
 export const subscriptions = pgTable(
   "subscriptions",
   {
@@ -408,6 +420,11 @@ export const subscriptions = pgTable(
     /** Proveedor de pagos (null hasta integrarlo) y su identificador. */
     provider: text("provider"),
     providerSubscriptionId: text("provider_subscription_id"),
+    /** Cliente y precio en el proveedor (Paddle: ctm_…, pri_…). */
+    providerCustomerId: text("provider_customer_id"),
+    priceId: text("price_id"),
+    /** Momento del último aviso aplicado: los avisos viejos que llegan tarde se ignoran. */
+    providerEventAt: timestamp("provider_event_at", { withTimezone: true }),
     currentPeriodStart: timestamp("current_period_start", { withTimezone: true }),
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
     cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),

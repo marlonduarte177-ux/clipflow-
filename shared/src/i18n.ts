@@ -165,6 +165,14 @@ const EXACT: Record<string, string> = {
   "Análisis de imágenes con formato inesperado": "Image analysis with an unexpected format",
   "Transcripción con formato inesperado": "Transcript with an unexpected format",
   "Solo descarga": "Download only",
+  "Pagos no configurados.": "Payments are not configured.",
+  "Cancela tu plan antes de eliminar la cuenta (Cuenta → Plan → Gestionar suscripción).":
+    "Cancel your plan before deleting your account (Account → Plan → Manage subscription).",
+  "Firma inválida.": "Invalid signature.",
+  "No se pudo aplicar el aviso.": "The notification could not be applied.",
+  "Necesitas un plan para crear clips. Elige uno en Planes.": "You need a plan to create clips. Choose one in Plans.",
+  "Ya usaste todos los minutos de tu plan. Se recargan con la próxima renovación.":
+    "You've used all the minutes in your plan. They refill at your next renewal.",
   "OpenAI está saturado por ahora (límite de uso por minuto de tu cuenta). Lo reintentamos en unos minutos; la transcripción ya quedó guardada.":
     "OpenAI is saturated right now (your account's per-minute limit). We'll retry in a few minutes; the transcript is already saved.",
   "Tu cuenta de OpenAI llegó a su límite de uso por día (se recupera en unas horas; puedes subir de nivel en platform.openai.com → Limits)":
@@ -190,6 +198,10 @@ const RULES: Rule[] = [
   [/^OpenAI rechazó la solicitud \((.+)\)$/, (m) => `OpenAI rejected the request (${m[1]})`],
   [/^OpenAI tuvo un error temporal \((.+)\)$/, (m) => `OpenAI had a temporary error (${m[1]})`],
   [/^OpenAI respondió (.+)$/, (m) => `OpenAI responded ${m[1]}`],
+  [
+    /^Este video dura (\d+) min y te quedan (\d+) min de tu plan\. Se recargan con la próxima renovación\.$/,
+    (m) => `This video is ${m[1]} min long and you have ${m[2]} min left in your plan. They refill at your next renewal.`,
+  ],
   [/^El archivo supera el máximo de (.+) GB\.$/, (m) => `The file exceeds the maximum of ${m[1]} GB.`],
   [/^El video supera la duración máxima de (.+) h\.$/, (m) => `The video exceeds the maximum length of ${m[1]} h.`],
   [/^Ya tienes (\d+) subidas en curso\. Termínalas o cancélalas antes de empezar otra\.$/, (m) => `You already have ${m[1]} uploads in progress. Finish or cancel them before starting another one.`],

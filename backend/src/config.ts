@@ -36,6 +36,26 @@ const EnvSchema = z.object({
   WORKER_MAX_TASKS: z.coerce.number().int().positive().default(3),
   COGNITO_USER_POOL_ID: z.string().regex(/^[\w-]+_[0-9a-zA-Z]+$/, "formato esperado: us-east-1_XXXXXXX"),
   COGNITO_CLIENT_ID: z.string().min(1),
+
+  // --- Pagos (Paddle). Ver docs/pagos-paddle.md ---
+  /** "true" exige plan y minutos para crear clips. Mientras sea "false", se procesa sin plan. */
+  BILLING_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+  /** Correos que no necesitan plan (p. ej. el del dueño), separados por coma. */
+  BILLING_FREE_EMAILS: z.string().optional(),
+  PADDLE_ENVIRONMENT: z.enum(["sandbox", "production"]).default("sandbox"),
+  /** Token público de Paddle.js (live_… o test_…): no es secreto. */
+  PADDLE_CLIENT_TOKEN: z.string().optional(),
+  /** Precios de Paddle (pri_…): Pro mensual, Pro con 7 días de prueba y el cargo de 1 USD de la prueba. */
+  PADDLE_PRICE_PRO: z.string().optional(),
+  PADDLE_PRICE_PRO_TRIAL: z.string().optional(),
+  PADDLE_PRICE_TRIAL_FEE: z.string().optional(),
+  /** Portal de clientes de Paddle (cambiar tarjeta, facturas, cancelar). */
+  PADDLE_PORTAL_URL: z.string().optional(),
+  /** Clave secreta de los avisos de Paddle. En AWS la inyecta ECS desde Secrets Manager. */
+  PADDLE_WEBHOOK_SECRET: z.string().optional(),
 });
 
 export type ApiConfig = z.infer<typeof EnvSchema>;

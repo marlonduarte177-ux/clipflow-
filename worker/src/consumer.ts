@@ -7,8 +7,8 @@ import {
 } from "@aws-sdk/client-sqs";
 import { eq } from "drizzle-orm";
 import type { JobQueueMessage, WarmupQueueMessage } from "@clipflow/shared";
-import { claimJob, completeJob, failJob, markJobCancelled, schema } from "@clipflow/shared/db";
-import { JobError, JobStopped, processAnalyzeJob, type PipelineDeps } from "./pipeline.js";
+import { claimJob, completeJob, failJob, markJobCancelled, refundVideoMinutes, schema, type Job } from "@clipflow/shared/db";
+import { JobError, JobStopped, jobRun, processAnalyzeJob, type PipelineDeps } from "./pipeline.js";
 
 /**
  * Un aviso de encendido se mantiene "en proceso" (oculto) hasta este tiempo desde que se envió.
@@ -62,6 +62,16 @@ export async function runConsumer(options: ConsumerOptions): Promise<void> {
   }
 }
 
+/** Falló del todo o se canceló: se devuelven los minutos que cobró esta vuelta del trabajo. */
+async function giveBackMinutes(deps: PipelineDeps, job: Job): Promise<void> {
+  try {
+    const minutes = await refundVideoMinutes(deps.db, { userId: job.userId, videoId: job.videoId, run: jobRun(job) });
+    if (minutes) deps.log.info({ jobId: job.id, minutes }, "minutos devueltos");
+  } catch (err) {
+    deps.log.warn({ jobId: job.id, error: (err as Error).message }, "no se pudieron devolver los minutos");
+  }
+}
+
 /** Procesa un mensaje. Devuelve true si fue un trabajo real (para medir inactividad). */
 export async function handleMessage(message: Message, options: ConsumerOptions): Promise<boolean> {
   const { deps, sqs, queueUrl } = options;
@@ -112,7 +122,10 @@ export async function handleMessage(message: Message, options: ConsumerOptions):
     return true;
   } catch (err) {
     if (err instanceof JobStopped) {
-      if (err.reason === "cancel") await markJobCancelled(deps.db, job.id, deps.workerId);
+      if (err.reason === "cancel") {
+        await markJobCancelled(deps.db, job.id, deps.workerId);
+        await giveBackMinutes(deps, job);
+      }
       deps.log.info({ jobId, reason: err.reason }, "trabajo detenido");
       await remove();
       return true;
@@ -130,7 +143,10 @@ export async function handleMessage(message: Message, options: ConsumerOptions):
     );
     // Reintento: el mismo mensaje reaparece tras una espera creciente.
     if (result === "requeued") await delay(Math.min(900, 60 * job.attempts));
-    else await remove();
+    else {
+      if (result === "failed") await giveBackMinutes(deps, job);
+      await remove();
+    }
     return true;
   } finally {
     clearInterval(keepHidden);

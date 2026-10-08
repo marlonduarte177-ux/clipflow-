@@ -36,6 +36,7 @@ const app = await buildApp({
   queue: createSqsQueue({ queueUrl: config.SQS_QUEUE_URL, region: config.AWS_REGION }),
   launcher,
   product,
+  billing: config,
   verifyToken: createCognitoVerifier(config.COGNITO_USER_POOL_ID, config.COGNITO_CLIENT_ID),
   lookupEmail: createCognitoEmailLookup(config.AWS_REGION),
 });

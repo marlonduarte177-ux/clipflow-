@@ -9,6 +9,9 @@ import {
   clipDurationRange,
   fitToSentences,
   fullTranscriptKey,
+  isBillingExempt,
+  minutesForSeconds,
+  NO_MINUTES_CODE,
   transcriptCacheKey,
   segmentsForRange,
   selectAiMoments,
@@ -27,7 +30,15 @@ import {
   type SubtitleStyle,
   type TranscriptSegment,
 } from "@clipflow/shared";
-import { reportProgress, schema, type Database, type Job, type JobStage } from "@clipflow/shared/db";
+import {
+  chargeVideoMinutes,
+  InsufficientCreditsError,
+  reportProgress,
+  schema,
+  type Database,
+  type Job,
+  type JobStage,
+} from "@clipflow/shared/db";
 import {
   analyzeSignals,
   buildFrameSheets,
@@ -59,7 +70,7 @@ import {
 } from "./download.js";
 import { fetchTwitchChatActivity, twitchVideoId } from "./chat/twitch.js";
 
-const { clips, subtitles, usage, videos } = schema;
+const { clips, subtitles, usage, users, videos } = schema;
 
 /** Error con mensaje para el usuario y si vale la pena reintentar. */
 export class JobError extends Error {
@@ -118,6 +129,8 @@ export interface PipelineDeps {
   twitchChat?: typeof fetchTwitchChatActivity | false;
   /** Desde esta duración, un video guardado de Kick/Twitch se analiza con copia liviana (s). */
   longStreamMinSeconds?: number;
+  /** Pagos: con `enabled`, cada video descuenta sus minutos del plan (salvo los correos exentos). */
+  billing?: { enabled: boolean; freeEmails?: string };
   /** Análisis de imágenes con IA (experimental, tiene costo por imagen). */
   vision?: {
     enabled: boolean;
@@ -379,6 +392,9 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
         costs: { transcriptionUsd: 0, textUsd: 0, visionUsd: 0, computeUsd, totalUsd: computeUsd },
       };
     }
+    // Minutos del plan: se descuentan ahora que se sabe cuánto dura (si falla o se cancela, se devuelven).
+    await chargeMinutes(deps, job, video.id, info.durationSeconds);
+
     // Franjas negras "quemadas" en el video (p. ej. horizontal subido como vertical): se quitan.
     const contentBox = await detectContentBox(deps.tools, input, info, controller.signal);
     if (contentBox) deps.log.info({ jobId: job.id, contentBox }, "franjas negras detectadas");
@@ -795,6 +811,30 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
 }
 
 type Transcribed = Awaited<ReturnType<NonNullable<PipelineDeps["ai"]>["transcribe"]>>;
+
+/** Vuelta del trabajo: el mismo id con otra entrada a la cola (Reintentar) es otra vuelta. */
+export function jobRun(job: Pick<Job, "id" | "queuedAt">): string {
+  return `${job.id}@${job.queuedAt.toISOString()}`;
+}
+
+/** Descuenta los minutos del video. Sin minutos suficientes el trabajo termina con un mensaje claro. */
+async function chargeMinutes(deps: PipelineDeps, job: Job, videoId: string, durationSeconds: number): Promise<void> {
+  if (!deps.billing?.enabled) return;
+  const [owner] = await deps.db.select({ email: users.email }).from(users).where(eq(users.id, job.userId));
+  if (isBillingExempt(owner?.email, deps.billing.freeEmails)) return;
+  const minutes = minutesForSeconds(durationSeconds);
+  try {
+    const { charged, balance } = await chargeVideoMinutes(deps.db, { userId: job.userId, videoId, run: jobRun(job), minutes });
+    if (charged) deps.log.info({ jobId: job.id, minutes: charged, balance }, "minutos descontados");
+  } catch (err) {
+    if (!(err instanceof InsufficientCreditsError)) throw err;
+    throw new JobError(
+      NO_MINUTES_CODE,
+      `Este video dura ${minutes} min y te quedan ${err.balance} min de tu plan. Se recargan con la próxima renovación.`,
+      false,
+    );
+  }
+}
 
 /** Transcripción guardada por video (ver `transcriptCacheKey`). */
 const CachedTranscript = z.object({

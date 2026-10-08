@@ -27,6 +27,7 @@ import { createJob, schema, type Database } from "@clipflow/shared/db";
 import { deleteVideoRows, purgeVideoFiles } from "./cleanup.js";
 import { sendError, sendValidationError } from "./http.js";
 import { enqueue, toJobDto, wakeWorkers } from "./jobs.js";
+import { replyIfBlocked, type BillingSettings } from "./billing.js";
 import type { WorkerLauncher } from "./launcher.js";
 import type { JobQueue } from "./queue.js";
 import type { VideoStorage } from "./storage.js";
@@ -115,6 +116,7 @@ export interface VideoRouteDeps {
   queue: JobQueue;
   launcher: WorkerLauncher;
   product: ProductConfig;
+  billing: BillingSettings;
   uploadUrlExpiresSeconds: number;
 }
 
@@ -128,7 +130,7 @@ export interface VideoRouteDeps {
  * Todas las consultas filtran por el usuario del token.
  */
 export function videoRoutes(deps: VideoRouteDeps) {
-  const { db, storage, queue, launcher, product } = deps;
+  const { db, storage, queue, launcher, product, billing } = deps;
   const notFound = (reply: Parameters<preHandlerHookHandler>[1]) =>
     sendError(reply, 404, "not_found", "Video no encontrado.");
 
@@ -207,6 +209,8 @@ export function videoRoutes(deps: VideoRouteDeps) {
       const input = CreateVideoSchema.safeParse(request.body);
       if (!input.success) return sendValidationError(reply, input.error);
       const userId = request.user!.id;
+      // Sin plan no se sube: así no espera una subida larga para enterarse.
+      if (await replyIfBlocked(db, billing, request.user!, reply)) return reply;
       const { projectId, filename, sizeBytes, durationSeconds } = input.data;
       const limits = product.upload;
 
@@ -314,8 +318,7 @@ export function videoRoutes(deps: VideoRouteDeps) {
           `Ya tienes ${product.upload.maxPendingUploads} videos subiéndose o descargándose. Espera a que terminen.`,
         );
       }
-      if (!downloadOnly) {
-      }
+      if (!downloadOnly && (await replyIfBlocked(db, billing, request.user!, reply))) return reply;
 
       const videoId = crypto.randomUUID();
       const [row] = await db
@@ -484,6 +487,7 @@ export function videoRoutes(deps: VideoRouteDeps) {
       }
       const options = processingParams(product, input.data);
       if (!options.ok) return sendError(reply, 400, "invalid_duration", options.message);
+      if (await replyIfBlocked(db, billing, request.user!, reply)) return reply;
       const { job, created } = await createJob(db, {
         userId,
         videoId: row.id,

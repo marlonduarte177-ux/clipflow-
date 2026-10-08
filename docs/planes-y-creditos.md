@@ -1,7 +1,7 @@
 # Planes, minutos y descargas (decidido el 03/10/2026)
 
-Se implementa **junto con la pasarela de pago**, antes del lanzamiento. Hasta entonces no hay
-límites: staging sigue abierto para pruebas. No se cargarán minutos a mano.
+**Implementado con Paddle** (08/10/2026): ver [pagos-paddle.md](pagos-paddle.md). Se activa con
+`BILLING_ENABLED=true`; hasta entonces no hay límites. No se cargan minutos a mano.
 
 ## Cómo funciona
 
@@ -40,7 +40,5 @@ Reglas:
 
 ## Pendiente
 
-1. Elegir la pasarela. Stripe permite el cobro inicial de 1 USD con renovación automática, pero
-   no está en todos los países; alternativas: Mercado Pago, Paddle, Lemon Squeezy.
-2. Implementar: cobro y renovación (webhooks), carga de minutos por plan, descuento al procesar,
-   bloqueo sin minutos, página de planes («Mejorar»), tope de descargas por Evomi.
+1. Configurar Paddle y activar los cobros (pasos en [pagos-paddle.md](pagos-paddle.md)).
+2. Paquete extra de minutos (por decidir).

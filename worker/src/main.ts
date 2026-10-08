@@ -46,6 +46,7 @@ log.info(
     workerId,
     ai: ai ? "openai (whisper + gpt)" : `desactivada (${aiDisabledReason})`,
     vision: config.AI_VISION_ENABLED,
+    billing: config.BILLING_ENABLED,
     faces: config.FACE_TRACKING_ENABLED,
     // Solo el host del proxy: nunca el usuario ni la contraseña.
     downloadProxy: downloadProxyUrl ? new URL(downloadProxyUrl).hostname : describeProxyValue(config.DOWNLOAD_PROXY_URL),
@@ -71,6 +72,7 @@ try {
       aiDisabledReason,
       aiMaxAudioMinutes: config.OPENAI_MAX_AUDIO_MINUTES,
       faceTracking: config.FACE_TRACKING_ENABLED,
+      billing: { enabled: config.BILLING_ENABLED, freeEmails: config.BILLING_FREE_EMAILS },
       ytDlpPath: config.YTDLP_PATH,
       downloadProxyUrl,
       downloadProxyProblem: downloadProxyUrl ? null : describeProxyValue(config.DOWNLOAD_PROXY_URL),

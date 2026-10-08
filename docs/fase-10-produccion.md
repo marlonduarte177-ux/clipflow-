@@ -69,4 +69,4 @@ puede crear uno aparte y dejar `staging` solo para pruebas.
 
 - Revisar con Paddle si aceptan la política de 7 días / 15 minutos.
 - Activar las protecciones de producción en el entorno actual (ver arriba).
-- **Planes y pagos** con Paddle (ver `docs/planes-y-creditos.md`).
+- **Planes y pagos** con Paddle: implementado; falta configurarlo y activarlo (ver `docs/pagos-paddle.md`).
