@@ -1077,9 +1077,9 @@ async function runAI(
       });
       await onProgress(0.2);
       step = "la transcripción";
-      // Por partes, guardando cada una apenas sale: si una falla y el trabajo se reintenta, las que ya
+      // Por partes, guardando cada una apenas sale: si una falla y ESTE trabajo se reintenta, las que ya
       // salieron (y ya se pagaron) no se vuelven a enviar.
-      transcript = await transcribeByParts(deps, ai, chunks, cacheKey ? cacheKey.replace(/\.json$/, ".parts.json") : null, dir, onProgress);
+      transcript = await transcribeByParts(deps, ai, chunks, cacheKey ? cacheKey.replace(/\.json$/, `.${ids.jobId}.parts.json`) : null, dir, onProgress);
       analyzedSeconds = chunks.reduce((sum, c) => sum + c.durationSeconds, 0);
       if (cacheKey) {
         await saveTranscript(deps, cacheKey, path.join(dir, "transcript-cache.json"), {

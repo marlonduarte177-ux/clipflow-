@@ -199,7 +199,9 @@ describe("procesamiento con IA", () => {
 
     const usage = await db.select().from(schema.usage).where(eq(schema.usage.jobId, job.id));
     const metric = (m: string) => usage.find((u) => u.metric === m);
-    expect(metric("ai_audio_seconds")).toMatchObject({ quantity: 40, estimatedCostUsd: 0.004 });
+    // Segundos reales del audio enviado (de las partes), no lo que dice el proveedor.
+    expect(metric("ai_audio_seconds")!.quantity).toBeCloseTo(40, 0);
+    expect(metric("ai_audio_seconds")!.estimatedCostUsd).toBeCloseTo(0.004);
     expect(metric("ai_input_tokens")!.quantity).toBe(600);
     expect(metric("ai_output_tokens")!.quantity).toBe(70);
   });
