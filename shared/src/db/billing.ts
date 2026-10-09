@@ -157,7 +157,18 @@ export async function latestSubscription(db: DbExecutor, userId: string): Promis
   return row;
 }
 
-/** ¿Puede crear clips? Plan en prueba, activo o con el cobro pendiente (Paddle reintenta). */
-export function subscriptionAllowsProcessing(row: SubscriptionRow | undefined): boolean {
-  return row?.status === "trialing" || row?.status === "active" || row?.status === "past_due";
+/**
+ * Estado real del plan. La prueba es un pago único de 7 días: queda "trialing" en la base y vence sola
+ * al pasar `currentPeriodEnd` (no hay aviso de Paddle cuando termina).
+ */
+export function effectiveStatus(row: SubscriptionRow, now = new Date()): SubscriptionRow["status"] {
+  if (row.planCode === "trial" && row.status === "trialing" && row.currentPeriodEnd && row.currentPeriodEnd <= now) return "expired";
+  return row.status;
+}
+
+/** ¿Puede crear clips? Plan en prueba (sin vencer), activo o con el cobro pendiente (Paddle reintenta). */
+export function subscriptionAllowsProcessing(row: SubscriptionRow | undefined, now = new Date()): boolean {
+  if (!row) return false;
+  const status = effectiveStatus(row, now);
+  return status === "trialing" || status === "active" || status === "past_due";
 }

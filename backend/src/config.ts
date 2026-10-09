@@ -48,17 +48,11 @@ const EnvSchema = z.object({
   PADDLE_ENVIRONMENT: z.enum(["sandbox", "production"]).default("sandbox"),
   /** Token público de Paddle.js (live_… o test_…): no es secreto. */
   PADDLE_CLIENT_TOKEN: z.string().optional(),
-  /**
-   * Precios de Paddle (pri_…): el cargo de 1.99 USD de la prueba, Básico con 7 días de prueba, y los
-   * tres planes mensuales.
-   */
+  /** Precios de Paddle (pri_…): la prueba (pago único de 1.99 USD) y los tres planes mensuales. */
   PADDLE_PRICE_TRIAL_FEE: z.string().optional(),
-  PADDLE_PRICE_BASIC_TRIAL: z.string().optional(),
   PADDLE_PRICE_BASIC: z.string().optional(),
   PADDLE_PRICE_PRO: z.string().optional(),
   PADDLE_PRICE_MAX: z.string().optional(),
-  /** Descuento de Paddle (dsc_…) de 1.99 USD en el primer cobro de Básico tras la prueba. Opcional. */
-  PADDLE_DISCOUNT_TRIAL: z.string().optional(),
   /** Portal de clientes de Paddle (cambiar tarjeta, facturas, cancelar). */
   PADDLE_PORTAL_URL: z.string().optional(),
   /** Clave secreta de los avisos de Paddle. En AWS la inyecta ECS desde Secrets Manager. */

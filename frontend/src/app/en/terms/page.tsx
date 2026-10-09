@@ -77,7 +77,7 @@ export default function TermsPageEn() {
               <ul>
                 <li>
                   <strong>Trial:</strong> USD {LEGAL.plans.trial.priceUsd} for {LEGAL.plans.trial.days} days, with {LEGAL.plans.trial.minutes}{" "}
-                  minutes of video. When it ends, it automatically converts to the Basic plan unless you cancel before; what you paid for the trial is taken off the first Basic charge. Once per person.
+                  minutes of video. It is a one-time payment: it does not renew and nothing else is charged when it ends. Once per person.
                 </li>
                 <li>
                   <strong>Basic:</strong> USD {LEGAL.plans.basic.priceUsd} per month, with {LEGAL.plans.basic.minutes} minutes of video per month.

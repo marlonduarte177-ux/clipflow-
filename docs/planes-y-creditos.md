@@ -11,7 +11,7 @@
 
 | Plan | Precio | Minutos |
 |---|---|---|
-| Prueba | **1.99 USD** por 7 días (una vez) | **60 min**; después pasa sola a Básico, salvo que cancele |
+| Prueba | **1.99 USD** por 7 días (pago único, no se renueva) | **60 min**; al terminar elige un plan mensual |
 | Básico | **9.99 USD/mes** | **200 min** por mes |
 | Pro | **19.99 USD/mes** | **400 min** por mes |
 | Max | **39.99 USD/mes** | **1000 min** por mes |

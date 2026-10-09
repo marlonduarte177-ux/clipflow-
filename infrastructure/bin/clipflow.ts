@@ -31,11 +31,9 @@ const billing = {
   paddleEnvironment: ctx("paddleEnvironment") === "production" ? ("production" as const) : ("sandbox" as const),
   paddleClientToken: ctx("paddleClientToken"),
   paddlePriceTrialFee: ctx("paddlePriceTrialFee"),
-  paddlePriceBasicTrial: ctx("paddlePriceBasicTrial"),
   paddlePriceBasic: ctx("paddlePriceBasic"),
   paddlePricePro: ctx("paddlePricePro"),
   paddlePriceMax: ctx("paddlePriceMax"),
-  paddleDiscountTrial: ctx("paddleDiscountTrial"),
   paddlePortalUrl: ctx("paddlePortalUrl"),
 };
 
