@@ -58,6 +58,9 @@ const es = {
       { title: "ClipFlow lo analiza", text: "Transcribe el audio y detecta los momentos con más interés." },
       { title: "Revisa tus clips", text: "Verticales 9:16, con subtítulos. Aprueba, edita y descarga." },
     ],
+    pricing: "Planes y precios",
+    pricingText: "Precios en USD. Los planes mensuales se renuevan solos y puedes cancelar cuando quieras.",
+    pricingCta: "Crear cuenta",
   },
   auth: {
     email: "Email",
@@ -457,6 +460,9 @@ const en: Messages = {
       { title: "ClipFlow analyzes it", text: "It transcribes the audio and finds the most interesting moments." },
       { title: "Review your clips", text: "Vertical 9:16, with captions. Approve, edit and download." },
     ],
+    pricing: "Plans and pricing",
+    pricingText: "Prices in USD. Monthly plans renew automatically and you can cancel anytime.",
+    pricingCta: "Create account",
   },
   auth: {
     email: "Email",
