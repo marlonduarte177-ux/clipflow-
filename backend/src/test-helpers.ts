@@ -58,6 +58,10 @@ export class FakeStorage implements VideoStorage {
     keys.forEach((k) => this.objects.delete(k));
     return keys.length;
   }
+  async copyObject(sourceKey: string, targetKey: string) {
+    if (!this.objects.has(sourceKey)) throw new Error("NoSuchKey");
+    this.objects.set(targetKey, this.objects.get(sourceKey)!);
+  }
   async presignGet(key: string, expires: number, downloadName?: string) {
     return `https://s3.test/${key}?get=1&expires=${expires}${downloadName ? `&download=${downloadName}` : ""}`;
   }

@@ -74,6 +74,7 @@ const EXACT: Record<string, string> = {
   "Un video de este proyecto se está procesando. Cancélalo o espera a que termine.":
     "A video in this project is being processed. Cancel it or wait for it to finish.",
   "Video no encontrado.": "Video not found.",
+  "No tienes acceso a esta sección.": "You don't have access to this section.",
   "Clip no encontrado.": "Clip not found.",
   // Web (errores propios del navegador)
   "La API todavía no está configurada (NEXT_PUBLIC_API_URL).": "The API is not configured yet (NEXT_PUBLIC_API_URL).",
@@ -153,6 +154,7 @@ const EXACT: Record<string, string> = {
   "IA no configurada": "AI not configured",
   "La clave de OpenAI no es válida": "The OpenAI key is not valid",
   "La respuesta de OpenAI se cortó por larga": "The OpenAI response was cut off for being too long",
+  "No se detectó habla: la IA eligió por lo que se ve y se oye": "No speech detected: the AI picked moments by what it sees and hears",
   "No se detectó habla (p. ej. gameplay o música); los clips se eligieron por acción, sonido y movimiento":
     "No speech was detected (e.g. gameplay or music); the clips were picked by action, sound and motion",
   "No se pudo conectar con OpenAI": "Could not connect to OpenAI",

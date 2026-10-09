@@ -25,7 +25,26 @@ const ai =
         prices: {
           transcribePerMinuteUsd: config.OPENAI_TRANSCRIBE_COST_PER_MINUTE_USD,
           inputPer1MUsd: config.OPENAI_INPUT_COST_PER_1M_TOKENS_USD,
+          cachedInputPer1MUsd: config.OPENAI_CACHED_INPUT_COST_PER_1M_TOKENS_USD,
           outputPer1MUsd: config.OPENAI_OUTPUT_COST_PER_1M_TOKENS_USD,
+        },
+      })
+    : null;
+// Versión nueva: el mismo Whisper; los momentos los elige un modelo de gama alta que además oye los
+// sonidos marcados y ve fotogramas en baja resolución. Misma clave.
+const aiV2 =
+  ai && openaiKey
+    ? new OpenAIProvider({
+        apiKey: openaiKey,
+        transcribeModel: config.OPENAI_TRANSCRIBE_MODEL,
+        analysisModel: config.OPENAI_V2_MODEL,
+        analysisVersion: "v2",
+        reasoningEffort: config.OPENAI_V2_REASONING_EFFORT,
+        prices: {
+          transcribePerMinuteUsd: config.OPENAI_TRANSCRIBE_COST_PER_MINUTE_USD,
+          inputPer1MUsd: config.OPENAI_V2_INPUT_COST_PER_1M_TOKENS_USD,
+          cachedInputPer1MUsd: config.OPENAI_V2_CACHED_INPUT_COST_PER_1M_TOKENS_USD,
+          outputPer1MUsd: config.OPENAI_V2_OUTPUT_COST_PER_1M_TOKENS_USD,
         },
       })
     : null;
@@ -45,6 +64,9 @@ log.info(
   {
     workerId,
     ai: ai ? "openai (whisper + gpt)" : `desactivada (${aiDisabledReason})`,
+    pipeline: config.AI_PIPELINE,
+    v2Model: aiV2 ? config.OPENAI_V2_MODEL : null,
+    sounds: config.SOUND_DETECTION_ENABLED,
     vision: config.AI_VISION_ENABLED,
     billing: config.BILLING_ENABLED,
     faces: config.FACE_TRACKING_ENABLED,
@@ -70,6 +92,10 @@ try {
       costPerHourUsd: config.WORKER_COST_PER_HOUR_USD,
       ai,
       aiDisabledReason,
+      aiV2,
+      defaultPipeline: config.AI_PIPELINE,
+      frames: { minIntervalSeconds: config.AI_V2_FRAME_MIN_SECONDS, maxIntervalSeconds: config.AI_V2_FRAME_MAX_SECONDS },
+      ...(config.SOUND_DETECTION_ENABLED ? {} : { detectSounds: false as const }),
       aiMaxAudioMinutes: config.OPENAI_MAX_AUDIO_MINUTES,
       faceTracking: config.FACE_TRACKING_ENABLED,
       billing: { enabled: config.BILLING_ENABLED, freeEmails: config.BILLING_FREE_EMAILS },

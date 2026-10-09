@@ -52,6 +52,33 @@ export function VideoView({ videoId }: { videoId: string }) {
   const [saving, setSaving] = useState<"download" | "share" | null>(null);
   const [note, setNote] = useState("");
   const processing = isActive(data?.job);
+  // Herramienta interna: solo el dueño ve «Comparar versión actual y nueva».
+  const [admin, setAdmin] = useState(false);
+  const [comparing, setComparing] = useState(false);
+
+  useEffect(() => {
+    if (!apiConfigured) return;
+    apiFetch<{ admin: boolean }>("/admin/me")
+      .then((r) => setAdmin(r.admin))
+      .catch(() => setAdmin(false));
+  }, []);
+
+  async function startComparison() {
+    setComparing(true);
+    try {
+      await apiFetch(`/admin/compare/${videoId}`, {
+        method: "POST",
+        body: {
+          clipDurationSeconds: data?.job?.params.clipDurationSeconds ?? clipSeconds,
+          subtitleStyle: data?.job?.params.subtitleStyle ?? subtitleStyle,
+        },
+      });
+      router.push("/dashboard/comparar");
+    } catch (err) {
+      setError(errorMessage(err));
+      setComparing(false);
+    }
+  }
 
   useEffect(() => {
     if (!apiConfigured) return;
@@ -377,6 +404,21 @@ export function VideoView({ videoId }: { videoId: string }) {
             </ul>
           )}
         </section>
+      ) : null}
+
+      {admin && !processing && (video.status === "uploaded" || video.status === "ready") && video.sizeBytes > 0 ? (
+        <div className="mx-auto flex max-w-xl gap-2">
+          <button
+            onClick={startComparison}
+            disabled={comparing}
+            className="h-10 flex-1 rounded-xl border border-dashed border-line text-[13px] font-semibold text-muted disabled:opacity-50"
+          >
+            {comparing ? t.common.oneMoment : t.compare.start}
+          </button>
+          <Link href="/dashboard/comparar" className="grid h-10 place-items-center rounded-xl border border-line px-3 text-[13px] text-muted">
+            {t.compare.open}
+          </Link>
+        </div>
       ) : null}
 
       {viewer !== null && visible[viewer] ? (

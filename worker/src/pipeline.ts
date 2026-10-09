@@ -12,6 +12,7 @@ import {
   isBillingExempt,
   minutesForSeconds,
   NO_MINUTES_CODE,
+  reactionSignalFromSounds,
   transcriptCacheKey,
   segmentsForRange,
   selectAiMoments,
@@ -21,7 +22,11 @@ import {
   toVtt,
   visionSignalFromFrames,
   type AIAnalysisProvider,
+  type AnalysisPipeline,
   type FrameScore,
+  type SoundEvent,
+  type SoundKind,
+  type VideoFrame,
   type AIUsage,
   type JobParams,
   type JobResult,
@@ -46,6 +51,7 @@ import {
   cropAt,
   detectContentBox,
   extractAudioChunks,
+  extractFrames,
   FfmpegError,
   makePhoneCompatible,
   probe,
@@ -69,6 +75,7 @@ import {
   type StreamSource,
 } from "./download.js";
 import { fetchTwitchChatActivity, twitchVideoId } from "./chat/twitch.js";
+import { detectSounds } from "./sounds/detect.js";
 
 const { clips, subtitles, usage, users, videos } = schema;
 
@@ -105,6 +112,17 @@ export interface PipelineDeps {
   ai: AIAnalysisProvider | null;
   /** Por qué no hay IA (para mostrarlo al usuario). */
   aiDisabledReason?: string;
+  /**
+   * Versión nueva del análisis: modelo de gama alta que además "oye" los sonidos (risas, gritos…) y
+   * "ve" fotogramas en baja resolución. null = no configurada.
+   */
+  aiV2?: AIAnalysisProvider | null;
+  /** Versión que usan los trabajos normales (la prueba lado a lado elige la suya). Por defecto "classic". */
+  defaultPipeline?: AnalysisPipeline;
+  /** Fotogramas de la versión nueva: uno cada 5–10 s según el largo del video. */
+  frames?: { minIntervalSeconds: number; maxIntervalSeconds: number };
+  /** Detector de sonidos (se reemplaza en tests; false = apagado). */
+  detectSounds?: typeof detectSounds | false;
   /** Máximo de minutos de audio que se envían a la IA por video (control de costos). */
   aiMaxAudioMinutes: number;
   /** Clips que se generan a la vez (por defecto 2). */
@@ -419,13 +437,19 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     const clipDuration = deps.product.clipDurationsSeconds.includes(params.clipDurationSeconds ?? -1)
       ? params.clipDurationSeconds!
       : deps.product.defaultClipDurationSeconds;
-    const aiPromise = runAI(deps, info, input, dir, controller.signal, async (f) => void (await report("ai")(f)), {
+    // Versión del análisis: la del trabajo (prueba lado a lado) o la del servidor.
+    const pipeline: AnalysisPipeline = (params.pipeline ?? deps.defaultPipeline ?? "classic") === "v2" && deps.aiV2 ? "v2" : "classic";
+    const aiProvider = pipeline === "v2" ? deps.aiV2! : deps.ai;
+    const aiPromise = runAI(deps, aiProvider, info, input, dir, controller.signal, async (f) => void (await report("ai")(f)), {
       userId: job.userId,
       videoId: video.id,
       jobId: job.id,
       sourceUrl: video.sourceUrl,
       targetClipSeconds: clipDuration,
       canRetry: job.attempts < job.maxAttempts,
+      pipeline,
+      box: contentBox,
+      skipTranscriptCache: params.skipTranscriptCache === true,
     });
     // Las imágenes esperan al análisis de texto; si el trabajo se va a reintentar por OpenAI saturado,
     // no se gastan imágenes ahora. (Se marca como manejada: con la visión apagada nadie la espera.)
@@ -440,7 +464,10 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
         onProgress: (sec) => void report("signals")(sec / info.durationSeconds),
       }),
       aiPromise,
-      runVision(deps, info, input, dir, contentBox, controller.signal, async (f) => void (await report("vision")(f)), visionGate),
+      // La versión nueva ya le muestra los fotogramas a la IA que elige los momentos.
+      pipeline === "v2"
+        ? Promise.resolve<VisionOutcome>({ status: "disabled", frames: [], intervalSeconds: 0, usage: {} })
+        : runVision(deps, info, input, dir, contentBox, controller.signal, async (f) => void (await report("vision")(f)), visionGate),
       chatPromise,
     ]);
     check();
@@ -461,6 +488,8 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       signals.vision = visionSignalFromFrames(vision.frames, info.durationSeconds, vision.intervalSeconds);
     }
     if (chat.status === "used") signals.chat = chat.series;
+    // Versión nueva: risas, gritos, aplausos y vítores como señal de reacción.
+    if (ai.sounds?.length) signals.reaction = reactionSignalFromSounds(ai.sounds, info.durationSeconds);
     await progress("analyzing", 1, true);
 
     step = "elegir los momentos";
@@ -477,6 +506,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
           clipDurationSeconds: clipDuration,
           maxClips: deps.product.maxClipsPerVideo,
           segments: ai.segments,
+          sounds: ai.sounds,
         })
       : [];
     const selection = aiMoments.length ? "ai" : "signals";
@@ -500,11 +530,12 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
             ...m,
             ...(fitToSentences(m.startSeconds, m.endSeconds, ai.segments, bounds) ?? clampToRange(m.startSeconds, m.endSeconds, bounds)),
           }));
-    let titles: (string | null)[] = finalMoments.map(() => null);
-    if (deps.ai && ai.segments.length && finalMoments.length) {
+    // La versión nueva ya propone un título con gancho por momento; los que falten se piden aparte.
+    let titles: (string | null)[] = finalMoments.map((m) => m.title ?? null);
+    if (aiProvider && ai.segments.length && titles.some((t) => t === null)) {
       try {
-        const suggestion = await deps.ai.generateClipSuggestions(ai.segments, finalMoments);
-        titles = suggestion.titles;
+        const suggestion = await aiProvider.generateClipSuggestions(ai.segments, finalMoments);
+        titles = titles.map((t, i) => t ?? suggestion.titles[i] ?? null);
         addUsage(ai.usage, suggestion.usage);
       } catch (err) {
         deps.log.warn({ jobId: job.id, error: (err as Error).message }, "no se pudieron generar títulos");
@@ -513,7 +544,18 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     // Sin título de la transcripción (p. ej. gameplay sin voz): lo que se ve en el mejor fotograma.
     titles = titles.map((t, i) => t ?? bestFrameLabel(vision.frames, finalMoments[i]!.startSeconds, finalMoments[i]!.endSeconds));
     deps.log.info(
-      { jobId: job.id, moments: finalMoments.length, selection, clipDuration, ai: ai.status, vision: vision.status, chat: chat.status },
+      {
+        jobId: job.id,
+        moments: finalMoments.length,
+        selection,
+        clipDuration,
+        pipeline,
+        ai: ai.status,
+        vision: vision.status,
+        chat: chat.status,
+        sounds: ai.sounds?.length,
+        frames: ai.frames,
+      },
       "momentos elegidos",
     );
     await progress("detecting_moments", 1, true);
@@ -736,7 +778,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
                 metric: "ai_audio_seconds" as const,
                 quantity: ai.usage.audioSeconds,
                 estimatedCostUsd: ai.transcribeCostUsd,
-                details: { provider: deps.ai?.name },
+                details: { provider: aiProvider?.name, model: aiProvider?.transcriptionModel },
               },
             ]
           : []),
@@ -747,7 +789,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
                 metric: "ai_input_tokens" as const,
                 quantity: ai.usage.inputTokens,
                 estimatedCostUsd: textCostUsd,
-                details: { provider: deps.ai?.name, kind: "text" },
+                details: { provider: aiProvider?.name, model: aiProvider?.analysisModel, kind: "text", pipeline },
               },
               { ...base, metric: "ai_output_tokens" as const, quantity: ai.usage.outputTokens ?? 0, details: { kind: "text" } },
             ]
@@ -759,7 +801,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
                 metric: "ai_input_tokens" as const,
                 quantity: vision.usage.inputTokens,
                 estimatedCostUsd: visionCostUsd,
-                details: { provider: deps.ai?.name, kind: "vision", frames: vision.frames.length },
+                details: { provider: aiProvider?.name, kind: "vision", frames: vision.frames.length },
               },
               {
                 ...base,
@@ -777,6 +819,10 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       selection,
       ai: ai.status,
       ...(ai.reason ? { aiReason: ai.reason } : {}),
+      pipeline,
+      ...(aiProvider ? { models: { transcription: aiProvider.transcriptionModel, analysis: aiProvider.analysisModel } } : {}),
+      ...(ai.sounds ? { sounds: countSounds(ai.sounds) } : {}),
+      ...(ai.frames !== undefined ? { analysisFrames: ai.frames } : {}),
       language: ai.language,
       vision: vision.status,
       ...(vision.reason ? { visionReason: vision.reason } : {}),
@@ -890,6 +936,9 @@ interface AIOutcome {
   status: JobResult["ai"];
   reason?: string;
   segments: TranscriptSegment[];
+  /** Versión nueva: sonidos detectados y cuántos fotogramas vio la IA. */
+  sounds?: SoundEvent[];
+  frames?: number;
   highlights?: import("@clipflow/shared").ContentHighlight[];
   language: string | null;
   usage: AIUsage;
@@ -942,7 +991,8 @@ const TRANSCRIPT_CACHE_VERSION = "-sync";
 
 async function runAI(
   deps: PipelineDeps,
-  info: { durationSeconds: number; hasAudio: boolean },
+  provider: AIAnalysisProvider | null,
+  info: ProbeResult,
   input: string,
   dir: string,
   signal: AbortSignal,
@@ -955,28 +1005,39 @@ async function runAI(
     targetClipSeconds?: number;
     /** Quedan intentos del trabajo: un fallo temporal de OpenAI se reintenta más tarde. */
     canRetry?: boolean;
+    /** "v2": además se detectan los sonidos y se sacan fotogramas para la IA. */
+    pipeline?: AnalysisPipeline;
+    /** Zona del video sin franjas negras (para los fotogramas). */
+    box?: import("./ffmpeg.js").ContentBox | null;
+    /** No reutilizar transcripciones guardadas (prueba lado a lado: costo real). */
+    skipTranscriptCache?: boolean;
   },
 ): Promise<AIOutcome> {
   const empty = { segments: [], language: null, usage: {}, transcribeCostUsd: 0 };
-  if (!deps.ai) return { ...empty, status: "disabled", reason: deps.aiDisabledReason ?? "IA no configurada" };
+  if (!provider) return { ...empty, status: "disabled", reason: deps.aiDisabledReason ?? "IA no configurada" };
   if (!info.hasAudio) return { ...empty, status: "no_audio", reason: "El video no tiene audio" };
+  const ai = provider;
   let step = "la preparación del audio";
   // Si la transcripción salió bien y lo que falla es el análisis, se conserva (ya se pagó): sirve
   // para subtítulos, títulos y la transcripción completa.
   let transcribed: Transcribed | null = null;
+  let noSpeech = false;
+  const coveredSeconds = Math.min(info.durationSeconds, deps.aiMaxAudioMinutes * 60);
+  // Versión nueva: MIENTRAS se transcribe, el procesador detecta los sonidos y saca los fotogramas
+  // (todo local, sin costo de API). Nunca falla: si algo no sale, la IA sigue con lo demás.
+  const extrasPromise = ids.pipeline === "v2" ? v2Extras(deps, input, dir, info, ids.box ?? null, coveredSeconds, signal, ids.jobId) : null;
   try {
-    const coveredSeconds = Math.min(info.durationSeconds, deps.aiMaxAudioMinutes * 60);
     // ¿Ya se transcribió este video (reintento o nuevo procesamiento)? Se reutiliza: no se paga otra vez.
-    const cacheKey = deps.ai.transcriptionModel
-      ? transcriptCacheKey(ids.userId, ids.videoId, deps.ai.name, `${deps.ai.transcriptionModel}${TRANSCRIPT_CACHE_VERSION}`)
+    const cacheKey = ai.transcriptionModel
+      ? transcriptCacheKey(ids.userId, ids.videoId, ai.name, `${ai.transcriptionModel}${TRANSCRIPT_CACHE_VERSION}`)
       : null;
     const cacheFile = path.join(dir, "transcript-cache.json");
-    let cached = cacheKey ? await loadTranscript(deps, cacheKey, coveredSeconds, cacheFile) : null;
+    let cached = cacheKey && !ids.skipTranscriptCache ? await loadTranscript(deps, cacheKey, coveredSeconds, cacheFile) : null;
     // El MISMO enlace importado otra vez es otro video en ClipFlow: se busca la transcripción de los
     // videos anteriores de ESTE usuario con ese enlace (nunca de otros usuarios). Solo si duran lo
     // mismo: si el anterior se bajó desde otro punto (o el stream seguía creciendo), sus tiempos no
     // coinciden con este video y los subtítulos quedarían corridos.
-    if (!cached && cacheKey && ids.sourceUrl && deps.ai.transcriptionModel) {
+    if (!cached && cacheKey && ids.sourceUrl && ai.transcriptionModel && !ids.skipTranscriptCache) {
       const earlier = await deps.db
         .select({ id: videos.id, durationSeconds: videos.durationSeconds })
         .from(videos)
@@ -985,7 +1046,7 @@ async function runAI(
         .limit(5);
       for (const other of earlier) {
         if (other.durationSeconds == null || Math.abs(other.durationSeconds - info.durationSeconds) > 1) continue;
-        const otherKey = transcriptCacheKey(ids.userId, other.id, deps.ai.name, `${deps.ai.transcriptionModel}${TRANSCRIPT_CACHE_VERSION}`);
+        const otherKey = transcriptCacheKey(ids.userId, other.id, ai.name, `${ai.transcriptionModel}${TRANSCRIPT_CACHE_VERSION}`);
         cached = await loadTranscript(deps, otherKey, coveredSeconds, cacheFile);
         if (cached) {
           // Copia propia para este video (se borra con él, igual que la original con el suyo).
@@ -1010,7 +1071,7 @@ async function runAI(
       const chunks = await extractAudioChunks(deps.tools, input, dir, { maxSeconds: coveredSeconds, signal });
       await onProgress(0.2);
       step = "la transcripción";
-      transcript = await deps.ai.transcribe(chunks);
+      transcript = await ai.transcribe(chunks);
       analyzedSeconds = chunks.reduce((sum, c) => sum + c.durationSeconds, 0);
       if (cacheKey) {
         await saveTranscript(deps, cacheKey, path.join(dir, "transcript-cache.json"), {
@@ -1024,10 +1085,12 @@ async function runAI(
     }
     transcribed = transcript;
 
-    // Sin habla real (p. ej. gameplay o música): no se inventan títulos ni subtítulos,
-    // y los momentos se eligen por acción, sonido y movimiento.
+    // Sin habla real (p. ej. gameplay o música): no se inventan títulos ni subtítulos. La versión
+    // actual elige por acción, sonido y movimiento; la nueva deja que la IA elija por lo que ve y oye.
     const speechSeconds = transcript.segments.reduce((sum, s) => sum + (s.endSeconds - s.startSeconds), 0);
-    if (speechSeconds < Math.max(15, analyzedSeconds * 0.1)) {
+    noSpeech = speechSeconds < Math.max(15, analyzedSeconds * 0.1);
+    const extras = extrasPromise ? await extrasPromise : null;
+    if (noSpeech && !(extras && (extras.frames.length || extras.sounds.length))) {
       return {
         status: "no_speech",
         reason: "No se detectó habla (p. ej. gameplay o música); los clips se eligieron por acción, sonido y movimiento",
@@ -1035,23 +1098,31 @@ async function runAI(
         language: null,
         usage: { ...transcript.usage },
         transcribeCostUsd: transcript.usage.estimatedCostUsd ?? 0,
+        ...(extras ? { sounds: extras.sounds, frames: extras.frames.length } : {}),
       };
     }
     step = "el análisis de momentos";
-    const analysis = await deps.ai.analyze(transcript.segments, info.durationSeconds, { targetClipSeconds: ids.targetClipSeconds });
+    const segments = noSpeech ? [] : transcript.segments;
+    const analysis = await ai.analyze(segments, info.durationSeconds, {
+      targetClipSeconds: ids.targetClipSeconds,
+      ...(extras ? { sounds: extras.sounds, frames: extras.frames } : {}),
+    });
     const usage: AIUsage = { ...transcript.usage };
     const transcribeCostUsd = transcript.usage.estimatedCostUsd ?? 0;
     addUsage(usage, analysis.usage);
     return {
       status: "used",
-      segments: transcript.segments,
+      ...(noSpeech ? { reason: "No se detectó habla: la IA eligió por lo que se ve y se oye" } : {}),
+      segments,
       highlights: analysis.highlights,
-      language: transcript.language,
+      language: noSpeech ? null : transcript.language,
       usage,
       transcribeCostUsd,
+      ...(extras ? { sounds: extras.sounds, frames: extras.frames.length } : {}),
     };
   } catch (err) {
     if (signal.aborted) throw err;
+    const extras = extrasPromise ? await extrasPromise : null;
     const e = err as AIProviderError;
     // Solo lo que se recupera solo en minutos: límite por minuto (429), errores de OpenAI (5xx) o la red.
     const temporary =
@@ -1063,19 +1134,63 @@ async function runAI(
     );
     // Solo se muestran mensajes propios (los de OpenAIProvider no incluyen contenido del usuario).
     const detail = err instanceof AIProviderError ? e.message : "error inesperado";
+    const soundsPart = extras ? { sounds: extras.sounds, frames: 0 } : {};
     if (transcribed) {
       return {
         status: "unavailable",
         reason: `falló ${step}: ${detail}`,
-        segments: transcribed.segments,
-        language: transcribed.language,
+        segments: noSpeech ? [] : transcribed.segments,
+        language: noSpeech ? null : transcribed.language,
         usage: { ...transcribed.usage },
         transcribeCostUsd: transcribed.usage.estimatedCostUsd ?? 0,
         retryLater,
+        ...soundsPart,
       };
     }
-    return { ...empty, status: "unavailable", reason: `falló ${step}: ${detail}`, retryLater };
+    return { ...empty, status: "unavailable", reason: `falló ${step}: ${detail}`, retryLater, ...soundsPart };
   }
+}
+
+/** Fotogramas de la versión nueva: uno cada 5 s en videos cortos, hasta uno cada 10 s desde 1 h. */
+export function frameIntervalSeconds(durationSeconds: number, range = { minIntervalSeconds: 5, maxIntervalSeconds: 10 }): number {
+  return Math.min(range.maxIntervalSeconds, Math.max(range.minIntervalSeconds, durationSeconds / 360));
+}
+
+/** Sonidos (detector local) y fotogramas en baja resolución para la versión nueva. Nunca falla. */
+async function v2Extras(
+  deps: PipelineDeps,
+  input: string,
+  dir: string,
+  info: ProbeResult,
+  box: import("./ffmpeg.js").ContentBox | null,
+  maxSeconds: number,
+  signal: AbortSignal,
+  jobId: string,
+): Promise<{ sounds: SoundEvent[]; frames: VideoFrame[] }> {
+  const detector = deps.detectSounds === false ? null : (deps.detectSounds ?? detectSounds);
+  const framesDir = path.join(dir, "frames");
+  const soundsPromise = detector
+    ? detector(deps.tools, input, { maxSeconds, signal }).catch((err: unknown) => {
+        if (!signal.aborted) deps.log.warn({ jobId, error: (err as Error).message }, "no se pudieron detectar los sonidos");
+        return [] as SoundEvent[];
+      })
+    : Promise.resolve([] as SoundEvent[]);
+  const framesPromise = mkdir(framesDir, { recursive: true })
+    .then(() => extractFrames(deps.tools, input, framesDir, info, { intervalSeconds: frameIntervalSeconds(info.durationSeconds, deps.frames), box, signal }))
+    .catch((err: unknown) => {
+      if (!signal.aborted) deps.log.warn({ jobId, error: (err as Error).message }, "no se pudieron sacar los fotogramas");
+      return [] as VideoFrame[];
+    });
+  const [sounds, frames] = await Promise.all([soundsPromise, framesPromise]);
+  deps.log.info({ jobId, sounds: countSounds(sounds), frames: frames.length }, "sonidos y fotogramas listos");
+  return { sounds, frames };
+}
+
+/** Cuántos sonidos de cada tipo se detectaron (para el resultado y los registros). */
+function countSounds(events: SoundEvent[]): Partial<Record<SoundKind, number>> {
+  const counts: Partial<Record<SoundKind, number>> = {};
+  for (const e of events) counts[e.kind] = (counts[e.kind] ?? 0) + 1;
+  return counts;
 }
 
 interface VisionOutcome {

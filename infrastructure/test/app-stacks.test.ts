@@ -313,6 +313,10 @@ describe("cola y worker", () => {
     const env = container.Environment as { Name: string; Value: string }[];
     expect(env.find((e) => e.Name === "AI_VISION_ENABLED")?.Value).toBe("false"); // apagado: caro en videos largos
     expect(env.find((e) => e.Name === "FACE_TRACKING_ENABLED")?.Value).toBe("true");
+    // Versión nueva del análisis: lista para la prueba lado a lado, pero los usuarios siguen con la actual.
+    expect(env.find((e) => e.Name === "AI_PIPELINE")?.Value).toBe("classic");
+    expect(env.find((e) => e.Name === "OPENAI_V2_MODEL")?.Value).toBe("gpt-6.1-sol");
+    expect(env.find((e) => e.Name === "SOUND_DETECTION_ENABLED")?.Value).toBe("true");
     // La API no tiene acceso a la clave.
     expect(JSON.stringify(t.api.toJSON())).not.toContain("openai-api-key");
   });

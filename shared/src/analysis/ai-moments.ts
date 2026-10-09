@@ -1,7 +1,8 @@
 import type { ScoreWeights } from "../product-config.js";
-import type { ContentHighlight, TranscriptSegment } from "./ai-provider.js";
+import type { ContentHighlight, SoundEvent, TranscriptSegment } from "./ai-provider.js";
 import { clampToRange, clipDurationRange, fitToSentences } from "./transcript.js";
 import { normalizeSeries, selectMoments, SIGNAL_MIN_RANGE, type Moment, type SignalName, type SignalSeries } from "./scoring.js";
+import { soundBonus } from "./sounds.js";
 
 /** Fuerza mínima (0–1) que la IA le dio a un momento para que sea clip. */
 export const AI_MIN_STRENGTH = 0.5;
@@ -25,6 +26,8 @@ export interface SelectAiMomentsInput {
   minGapSeconds?: number;
   /** Frases de la transcripción: para cortar en frases completas y saber qué tramos no tienen habla. */
   segments?: TranscriptSegment[];
+  /** Sonidos detectados (versión nueva): los momentos con risas o gritos suben de puntaje. */
+  sounds?: SoundEvent[];
 }
 
 /**
@@ -74,7 +77,9 @@ export function selectAiMoments(input: SelectAiMomentsInput): Moment[] {
         breakdown[name] = round(mean);
         reaction += (input.weights[name] / reactionWeight) * mean;
       }
-      const score = reactionNames.length ? (1 - REACTION_WEIGHT) * h.strength + REACTION_WEIGHT * reaction : h.strength;
+      const base = reactionNames.length ? (1 - REACTION_WEIGHT) * h.strength + REACTION_WEIGHT * reaction : h.strength;
+      const bonus = input.sounds?.length ? soundBonus(input.sounds, start, end) : 0;
+      const score = Math.min(1, base + bonus);
       return [
         {
           startSeconds: round(start),

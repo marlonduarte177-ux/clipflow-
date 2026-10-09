@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { analyzeFaces, FACE_SAMPLES_PER_SECOND } from "./faces/analyze.js";
 import {
@@ -744,6 +744,100 @@ export async function extractAudioChunks(
     offset += duration;
   }
   return chunks;
+}
+
+/**
+ * Fotogramas sueltos en baja resolución (JPEG de hasta 512 px por lado, sin franjas negras) para que
+ * la IA "vea" el video: uno cada `intervalSeconds`, a mitad de cada intervalo. Cada uno se saca
+ * saltando directo a su segundo (sin decodificar el video entero), de a 4 a la vez. Si uno falla
+ * (p. ej. el final de un video cortado) se omite.
+ */
+export async function extractFrames(
+  tools: FfmpegTools,
+  input: string,
+  workDir: string,
+  info: ProbeResult,
+  options: { intervalSeconds: number; box: ContentBox | null; maxSize?: number; signal?: AbortSignal; onProgress?: (fraction: number) => void },
+): Promise<{ path: string; timeSeconds: number }[]> {
+  const size = options.maxSize ?? 512;
+  const count = Math.max(1, Math.floor(info.durationSeconds / options.intervalSeconds));
+  const times = Array.from({ length: count }, (_, i) => Math.min(info.durationSeconds - 0.05, (i + 0.5) * options.intervalSeconds));
+  const crop = options.box ? `crop=${options.box.width}:${options.box.height}:${options.box.x}:${options.box.y},` : "";
+  // Nunca se agranda (una copia liviana de 160p queda en 160p).
+  const filter = `${crop}scale='min(${size},iw)':'min(${size},ih)':force_original_aspect_ratio=decrease`;
+  const frames: ({ path: string; timeSeconds: number } | null)[] = new Array(count).fill(null);
+  let next = 0;
+  let done = 0;
+  const worker = async () => {
+    while (next < count) {
+      const i = next++;
+      const file = path.join(workDir, `frame-${String(i).padStart(5, "0")}.jpg`);
+      try {
+        await run(
+          tools.ffmpegPath,
+          [...FFMPEG_BASE, "-ss", times[i]!.toFixed(3), "-i", input, "-an", "-frames:v", "1", "-vf", filter, "-q:v", "6", file],
+          { signal: options.signal },
+        );
+        await stat(file);
+        frames[i] = { path: file, timeSeconds: Math.round(times[i]! * 100) / 100 };
+      } catch (err) {
+        if (options.signal?.aborted) throw err;
+      }
+      options.onProgress?.(++done / count);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, count) }, worker));
+  return frames.filter((f): f is { path: string; timeSeconds: number } => f !== null);
+}
+
+/**
+ * Audio del video como muestras (mono, 16 kHz, float −1…1), de a pedazos y sin escribirlo a disco:
+ * para el detector de sonidos. Igual que para la transcripción, el audio queda alineado con el
+ * segundo 0 del video aunque empiece más tarde.
+ */
+export async function* decodeAudioSamples(
+  tools: FfmpegTools,
+  input: string,
+  options: { maxSeconds: number; sampleRate?: number; signal?: AbortSignal },
+): AsyncGenerator<Float32Array> {
+  if (options.signal?.aborted) throw new DOMException("Cancelado", "AbortError");
+  const child = spawn(
+    tools.ffmpegPath,
+    [
+      ...FFMPEG_BASE, "-i", input, "-t", options.maxSeconds.toFixed(3), "-map", "0:a:0", "-vn",
+      "-af", "aresample=async=1:first_pts=0", "-ac", "1", "-ar", String(options.sampleRate ?? 16_000),
+      "-f", "f32le", "pipe:1",
+    ],
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
+  let stderr = "";
+  child.stderr.on("data", (chunk: Buffer) => {
+    stderr = (stderr + chunk.toString()).slice(-4000);
+  });
+  const closed = new Promise<number | null>((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", resolve);
+  });
+  const onAbort = () => child.kill("SIGKILL");
+  options.signal?.addEventListener("abort", onAbort, { once: true });
+  let rest = Buffer.alloc(0);
+  try {
+    for await (const chunk of child.stdout as AsyncIterable<Buffer>) {
+      const data = rest.length ? Buffer.concat([rest, chunk]) : chunk;
+      const usable = data.length - (data.length % 4);
+      rest = Buffer.from(data.subarray(usable));
+      if (usable === 0) continue;
+      const copy = new Uint8Array(usable);
+      copy.set(data.subarray(0, usable));
+      yield new Float32Array(copy.buffer);
+    }
+    const code = await closed;
+    if (options.signal?.aborted) throw new DOMException("Cancelado", "AbortError");
+    if (code !== 0) throw new FfmpegError(`${path.basename(tools.ffmpegPath)} terminó con código ${code}`, stderr);
+  } finally {
+    options.signal?.removeEventListener("abort", onAbort);
+    if (child.exitCode === null) child.kill("SIGKILL");
+  }
 }
 
 /**

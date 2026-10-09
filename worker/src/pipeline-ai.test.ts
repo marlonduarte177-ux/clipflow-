@@ -4,7 +4,15 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
-import { fullTranscriptKey, transcriptCacheKey, type AIAnalysisProvider, type AudioChunk, type FrameSheet, type TranscriptSegment } from "@clipflow/shared";
+import {
+  fullTranscriptKey,
+  transcriptCacheKey,
+  type AIAnalysisProvider,
+  type AnalyzeOptions,
+  type AudioChunk,
+  type FrameSheet,
+  type TranscriptSegment,
+} from "@clipflow/shared";
 import { claimJob, createJob, schema, type DbHandle } from "@clipflow/shared/db";
 import { createTestDb } from "@clipflow/shared/db/testing";
 import { AIProviderError } from "./ai/openai.js";
@@ -398,5 +406,118 @@ describe("procesamiento con IA", () => {
     const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, makeDeps(db, root, path.join(root, "work")));
     expect(result).toMatchObject({ ai: "disabled", aiReason: "IA no configurada en tests" });
     expect(existsSync(path.join(root, "work", job.id))).toBe(false);
+  });
+});
+
+/** IA de prueba de la versión nueva: registra lo que "oye" y "ve", y propone títulos. */
+class FakeV2AI implements AIAnalysisProvider {
+  readonly name = "fake-v2";
+  readonly transcriptionModel = "whisper-1";
+  readonly analysisModel = "gpt-6.1-sol";
+  transcribeCalls = 0;
+  titleCalls = 0;
+  received: { segments: TranscriptSegment[]; options?: AnalyzeOptions; framesOnDisk: boolean[] } | null = null;
+  constructor(private readonly segments: TranscriptSegment[] = SEGMENTS) {}
+  async transcribe() {
+    this.transcribeCalls++;
+    return { segments: this.segments, language: this.segments.length ? "spanish" : null, usage: { audioSeconds: 40, estimatedCostUsd: 0.004 } };
+  }
+  async analyze(segments: TranscriptSegment[], _duration: number, options?: AnalyzeOptions) {
+    this.received = { segments, options, framesOnDisk: (options?.frames ?? []).map((f) => existsSync(f.path)) };
+    return {
+      highlights: [
+        { startSeconds: 2, endSeconds: 12, strength: 0.8, reason: "gancho", title: "El gancho" },
+        { startSeconds: 22, endSeconds: 32, strength: 0.8, reason: "remate", title: "Con risas" },
+      ],
+      usage: { inputTokens: 9000, outputTokens: 1200, estimatedCostUsd: 0.03 },
+    };
+  }
+  async generateClipSuggestions(_s: TranscriptSegment[], moments: unknown[]) {
+    this.titleCalls++;
+    return { titles: moments.map(() => "otro título"), usage: {} };
+  }
+}
+
+describe("versión nueva del análisis (oye y ve)", () => {
+  const laugh = async () => [{ kind: "laughter" as const, startSeconds: 26, endSeconds: 28.4, confidence: 0.7 }];
+
+  it("detecta sonidos, manda fotogramas cada 5 s, sube el puntaje con risas y usa los títulos del modelo", async () => {
+    const db = h!.db;
+    const { job } = await seedVideoJob(db, root, { sample, params: { pipeline: "v2" } });
+    const v2 = new FakeV2AI();
+    const classic = new FakeAI();
+    const deps = { ...makeDeps(db, root, path.join(root, "work")), ai: classic, aiV2: v2, detectSounds: laugh };
+    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+
+    expect(classic.analyzeCalls).toBe(0);
+    expect(result).toMatchObject({
+      ai: "used",
+      selection: "ai",
+      pipeline: "v2",
+      models: { transcription: "whisper-1", analysis: "gpt-6.1-sol" },
+      sounds: { laughter: 1 },
+      analysisFrames: 8,
+    });
+    // 40 s de video: un fotograma cada 5 s, a mitad de cada intervalo, todavía en disco al analizar.
+    expect(v2.received!.options!.frames!.map((f) => f.timeSeconds)).toEqual([2.5, 7.5, 12.5, 17.5, 22.5, 27.5, 32.5, 37.5]);
+    expect(v2.received!.framesOnDisk.every(Boolean)).toBe(true);
+    expect(v2.received!.options!.sounds).toEqual(await laugh());
+    expect(v2.received!.options!.targetClipSeconds).toBe(15);
+
+    const clipRows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
+    const hook = clipRows.find((c) => c.title === "El gancho")!;
+    const funny = clipRows.find((c) => c.title === "Con risas")!;
+    // Misma fuerza para la IA, pero el de las risas puntúa más.
+    expect(funny.score!).toBeGreaterThan(hook.score!);
+    expect(funny.endSeconds - funny.startSeconds).toBeGreaterThanOrEqual(10);
+    expect(funny.endSeconds - funny.startSeconds).toBeLessThanOrEqual(20);
+    expect(v2.titleCalls).toBe(0); // los títulos vinieron con los momentos
+    expect(result.costs!.textUsd).toBeCloseTo(0.03);
+  });
+
+  it("los videos normales siguen con la versión actual mientras AI_PIPELINE sea classic", async () => {
+    const db = h!.db;
+    const { job } = await seedVideoJob(db, root, { sample });
+    const v2 = new FakeV2AI();
+    const classic = new FakeAI();
+    const deps = { ...makeDeps(db, root, path.join(root, "work")), ai: classic, aiV2: v2, defaultPipeline: "classic" as const, detectSounds: laugh };
+    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    expect(result.pipeline).toBe("classic");
+    expect(classic.analyzeCalls).toBe(1);
+    expect(classic.analyzeOptions).toEqual({ targetClipSeconds: 15 });
+    expect(v2.received).toBeNull();
+    expect(result.sounds).toBeUndefined();
+  });
+
+  it("sin habla, la versión nueva elige por lo que ve y oye (sin subtítulos inventados)", async () => {
+    const db = h!.db;
+    const { job } = await seedVideoJob(db, root, { sample, params: { pipeline: "v2" } });
+    const v2 = new FakeV2AI([]);
+    const deps = { ...makeDeps(db, root, path.join(root, "work")), ai: new FakeAI(), aiV2: v2, detectSounds: laugh };
+    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    expect(result).toMatchObject({ ai: "used", selection: "ai", aiReason: "No se detectó habla: la IA eligió por lo que se ve y se oye" });
+    expect(v2.received!.segments).toEqual([]);
+    const subs = await db.select().from(schema.subtitles).where(eq(schema.subtitles.videoId, job.videoId));
+    expect(subs).toEqual([]);
+    const clipRows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
+    expect(clipRows.map((c) => c.title).sort()).toEqual(["Con risas", "El gancho"]);
+  });
+
+  it("la prueba lado a lado transcribe de nuevo (costo real) aunque haya una transcripción guardada", async () => {
+    const db = h!.db;
+    const { job, video } = await seedVideoJob(db, root, { sample, params: { pipeline: "v2" } });
+    const v2 = new FakeV2AI();
+    const deps = { ...makeDeps(db, root, path.join(root, "work")), ai: new FakeAI(), aiV2: v2, detectSounds: laugh };
+    await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    expect(v2.transcribeCalls).toBe(1);
+    const again = async (params: Record<string, unknown>, key: string) => {
+      const { job: next } = await createJob(db, { userId: video.userId, videoId: video.id, type: "analyze_video", idempotencyKey: key, params });
+      return processAnalyzeJob((await claimJob(db, next.id, "test-worker"))!, deps);
+    };
+    await again({ clipDurationSeconds: 15, pipeline: "v2" }, "again-1");
+    expect(v2.transcribeCalls).toBe(1); // reutilizada
+    const measured = await again({ clipDurationSeconds: 15, pipeline: "v2", skipTranscriptCache: true }, "again-2");
+    expect(v2.transcribeCalls).toBe(2);
+    expect(measured.costs!.transcriptionUsd).toBeCloseTo(0.004);
   });
 });
