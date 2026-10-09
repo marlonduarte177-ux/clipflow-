@@ -23,6 +23,8 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 const API_PORT = 4000;
 
 export interface ApiStackProps extends StackProps {
+  /** Proteger los datos contra borrado (también fuera de "production": hoy staging es el entorno real). */
+  protectData?: boolean;
   stage: Stage;
   vpc: ec2.IVpc;
   bucket: s3.IBucket;
@@ -101,7 +103,7 @@ export class ApiStack extends Stack {
       secretName: `${prefix}/paddle-webhook-secret`,
       description: "Clave secreta de los avisos de Paddle (Developer tools → Notifications). Reemplaza el valor por la tuya.",
       generateSecretString: { passwordLength: 32, requireEachIncludedType: true, excludeCharacters: "\"'\\ /@" },
-      removalPolicy: props.stage === "production" ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
+      removalPolicy: props.stage === "production" || props.protectData ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     });
     const billing = props.billing ?? {};
 

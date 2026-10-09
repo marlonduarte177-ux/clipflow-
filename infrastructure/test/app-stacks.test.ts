@@ -356,3 +356,30 @@ describe("alertas", () => {
     t.monitoringQuiet.resourceCountIs("AWS::CloudWatch::Alarm", 6);
   });
 });
+
+describe("protección de datos (staging es hoy el entorno real)", () => {
+  it("staging protege los datos en la configuración", async () => {
+    const { STAGE_CONFIG } = await import("../lib/stage-config.js");
+    expect(STAGE_CONFIG.staging.protectData).toBe(true);
+  });
+
+  it("con protectData: BD y usuarios con protección de borrado, bucket conservado, sin multi-AZ (no duplica el costo)", () => {
+    const app = new App();
+    const env = { account: "123456789012", region: "us-east-1" };
+    app.node.setContext("availability-zones:account=123456789012:region=us-east-1", ["us-east-1a", "us-east-1b"]);
+    const stage = "staging" as const;
+    const authStack = new AuthStack(app, "auth-p", { env, stage, protectData: true });
+    const network = new NetworkStack(app, "network-p", { env, stage });
+    const storageStack = new StorageStack(app, "storage-p", { env, stage, protectData: true, webOrigins: WEB });
+    const databaseStack = new DatabaseStack(app, "database-p", { env, stage, protectData: true, vpc: network.vpc });
+    const auth = Template.fromStack(authStack);
+    const storage = Template.fromStack(storageStack);
+    const database = Template.fromStack(databaseStack);
+
+    auth.hasResourceProperties("AWS::Cognito::UserPool", { DeletionProtection: "ACTIVE" });
+    auth.hasResource("AWS::Cognito::UserPool", { DeletionPolicy: "Retain" });
+    storage.hasResource("AWS::S3::Bucket", { DeletionPolicy: "Retain" });
+    expect(Object.keys(storage.findResources("Custom::S3AutoDeleteObjects"))).toHaveLength(0);
+    database.hasResourceProperties("AWS::RDS::DBInstance", { DeletionProtection: true, MultiAZ: false });
+  });
+});

@@ -62,11 +62,11 @@ crea un entorno `production` separado, para no duplicar el costo fijo de AWS. Cu
 puede crear uno aparte y dejar `staging` solo para pruebas.
 - Hasta entonces, cada cambio que se despliega en `staging` llega directo a los clientes: probarlo antes
   con cuidado.
-- Antes de lanzar, conviene activar en este entorno las protecciones que hoy solo tiene `production`
-  (protección contra borrado de la base de datos y de Cognito, y conservar el bucket).
+- **Protecciones activadas en staging** (`protectData` en `infrastructure/lib/stage-config.ts`): la base de
+  datos y los usuarios (Cognito) tienen protección contra borrado, y el bucket de videos y los secretos se
+  conservan aunque se borre un stack. No se activa multi-AZ (duplicaría el costo de la base de datos).
 
 ## Pendiente
 
 - Revisar con Paddle si aceptan la política de 7 días / 15 minutos.
-- Activar las protecciones de producción en el entorno actual (ver arriba).
 - **Planes y pagos** con Paddle: implementado; falta configurarlo y activarlo (ver `docs/pagos-paddle.md`).

@@ -5,6 +5,8 @@ import type { Construct } from "constructs";
 import { resourcePrefix, type Stage } from "./stage.js";
 
 export interface DatabaseStackProps extends StackProps {
+  /** Proteger los datos contra borrado (también fuera de "production": hoy staging es el entorno real). */
+  protectData?: boolean;
   stage: Stage;
   vpc: ec2.IVpc;
 }
@@ -22,6 +24,7 @@ export class DatabaseStack extends Stack {
   constructor(scope: Construct, id: string, props: DatabaseStackProps) {
     super(scope, id, props);
     const isProd = props.stage === "production";
+    const protect = isProd || props.protectData === true;
     const prefix = resourcePrefix(props.stage);
 
     this.securityGroup = new ec2.SecurityGroup(this, "DbSecurityGroup", {
@@ -46,7 +49,7 @@ export class DatabaseStack extends Stack {
       storageEncrypted: true,
       multiAz: isProd,
       backupRetention: Duration.days(7),
-      deletionProtection: isProd,
+      deletionProtection: protect,
       removalPolicy: RemovalPolicy.SNAPSHOT,
       autoMinorVersionUpgrade: true,
       enablePerformanceInsights: false,

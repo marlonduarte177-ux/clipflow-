@@ -4,6 +4,8 @@ import type { Construct } from "constructs";
 import { resourcePrefix, type Stage } from "./stage.js";
 
 export interface StorageStackProps extends StackProps {
+  /** Proteger los datos contra borrado (también fuera de "production": hoy staging es el entorno real). */
+  protectData?: boolean;
   stage: Stage;
   webOrigins: string[];
 }
@@ -18,7 +20,7 @@ export class StorageStack extends Stack {
 
   constructor(scope: Construct, id: string, props: StorageStackProps) {
     super(scope, id, props);
-    const isProd = props.stage === "production";
+    const protect = props.stage === "production" || props.protectData === true;
 
     this.bucket = new s3.Bucket(this, "Media", {
       bucketName: `${resourcePrefix(props.stage)}-media-${this.account}`,
@@ -42,8 +44,9 @@ export class StorageStack extends Stack {
         // Archivos temporales del worker.
         { id: "expire-tmp", prefix: "tmp/", expiration: Duration.days(1) },
       ],
-      removalPolicy: isProd ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
-      autoDeleteObjects: !isProd,
+      // Protegido: el bucket y los videos se conservan aunque se borre el stack.
+      removalPolicy: protect ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
+      autoDeleteObjects: !protect,
     });
 
     new CfnOutput(this, "BucketName", { value: this.bucket.bucketName });

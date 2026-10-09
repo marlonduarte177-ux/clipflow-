@@ -19,6 +19,8 @@ import { resourcePrefix, type Stage } from "./stage.js";
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 export interface WorkerStackProps extends StackProps {
+  /** Proteger los datos contra borrado (también fuera de "production": hoy staging es el entorno real). */
+  protectData?: boolean;
   stage: Stage;
   vpc: ec2.IVpc;
   bucket: s3.IBucket;
@@ -71,7 +73,7 @@ export class WorkerStack extends Stack {
       secretName: `${prefix}/openai-api-key`,
       description: "Clave de OpenAI para ClipFlow. Reemplaza el valor por tu clave (sk-...).",
       generateSecretString: { passwordLength: 32, excludePunctuation: true },
-      removalPolicy: props.stage === "production" ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
+      removalPolicy: props.stage === "production" || props.protectData ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     });
 
     // Proxy residencial para importar de plataformas que bloquean a AWS (Instagram, Facebook…). Se crea con un
@@ -81,7 +83,7 @@ export class WorkerStack extends Stack {
       secretName: `${prefix}/download-proxy`,
       description: "Proxy residencial para descargar videos por enlace. Valor: http://USUARIO:CONTRASEÑA@host:puerto",
       generateSecretString: { passwordLength: 32, excludePunctuation: true },
-      removalPolicy: props.stage === "production" ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
+      removalPolicy: props.stage === "production" || props.protectData ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     });
 
     const cluster = new ecs.Cluster(this, "WorkerCluster", { clusterName: `${prefix}-workers`, vpc: props.vpc });
