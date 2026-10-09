@@ -35,6 +35,8 @@ export interface OpenAIProviderOptions {
   baseUrl?: string;
   fetch?: typeof fetch;
   maxAttempts?: number;
+  /** Intentos ante un corte de red (por defecto 6). */
+  maxNetworkAttempts?: number;
   /** Intentos ante el límite de velocidad (429) de OpenAI. */
   maxRateLimitAttempts?: number;
   /** Espera entre reintentos (se puede acortar en tests). */
@@ -51,6 +53,8 @@ export class AIProviderError extends Error {
     readonly code?: string,
     /** Qué límite de OpenAI se alcanzó (para los registros): p. ej. "tokens per min (TPM): Limit 200000, Requested 9000". */
     readonly limit?: RateLimitInfo,
+    /** Corte de red: la causa técnica (p. ej. "ECONNRESET", "UND_ERR_SOCKET", "TimeoutError"), para los registros. */
+    readonly network?: string,
   ) {
     super(message);
     this.name = "AIProviderError";
@@ -76,6 +80,16 @@ export function parseRateLimit(message: string | undefined): RateLimitInfo | und
     limit: Number(m[3]),
     ...(m[4] ? { requested: Number(m[4]) } : {}),
   };
+}
+
+/** Causa técnica de un corte de red (solo códigos y nombres: nunca contenido). */
+export function networkCause(err: unknown): string | undefined {
+  const pick = (e: unknown): string | undefined => {
+    const v = e as { code?: unknown; name?: unknown };
+    for (const x of [v?.code, v?.name]) if (typeof x === "string" && /^[A-Za-z_][\w-]{1,40}$/.test(x) && x !== "Error" && x !== "TypeError") return x;
+    return undefined;
+  };
+  return pick((err as { cause?: unknown })?.cause) ?? pick(err);
 }
 
 /** Un solo pedido más grande que el límite por minuto: esperar no lo arregla. */
@@ -430,6 +444,7 @@ export class OpenAIProvider implements AIAnalysisProvider {
   private readonly baseUrl: string;
   private readonly maxAttempts: number;
   private readonly maxRateLimitAttempts: number;
+  private readonly maxNetworkAttempts: number;
   private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(private readonly options: OpenAIProviderOptions) {
@@ -438,6 +453,7 @@ export class OpenAIProvider implements AIAnalysisProvider {
     this.maxAttempts = options.maxAttempts ?? 4;
     // El límite por minuto se recupera solo: vale la pena esperar más (hasta ~6 min en total).
     this.maxRateLimitAttempts = options.maxRateLimitAttempts ?? 8;
+    this.maxNetworkAttempts = options.maxNetworkAttempts ?? options.maxAttempts ?? 6;
     this.sleep = options.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   }
 
@@ -450,15 +466,15 @@ export class OpenAIProvider implements AIAnalysisProvider {
     let lastError: AIProviderError | undefined;
     for (let attempt = 1; ; attempt++) {
       let res: Response;
+      // El archivo a enviar se prepara FUERA del intento de conexión: si falta, no es un corte de red.
+      const request = await init();
       try {
-        res = await this.fetchImpl(`${this.baseUrl}${pathname}`, {
-          ...(await init()),
-          signal: AbortSignal.timeout(10 * 60 * 1000),
-        });
-      } catch {
-        lastError = new AIProviderError("No se pudo conectar con OpenAI", true);
-        if (attempt >= this.maxAttempts) throw lastError;
-        await this.sleep(1000 * 2 ** attempt);
+        res = await this.fetchImpl(`${this.baseUrl}${pathname}`, { ...request, signal: AbortSignal.timeout(10 * 60 * 1000) });
+      } catch (err) {
+        lastError = new AIProviderError("No se pudo conectar con OpenAI", true, undefined, undefined, undefined, networkCause(err));
+        // Los cortes de red suelen durar segundos o minutos: más intentos y esperas más largas (5 s … 80 s).
+        if (attempt >= this.maxNetworkAttempts) throw lastError;
+        await this.sleep(5000 * 2 ** (attempt - 1));
         continue;
       }
       if (res.ok) return res.json();

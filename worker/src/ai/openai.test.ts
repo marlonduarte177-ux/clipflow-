@@ -189,11 +189,21 @@ describe("OpenAIProvider.transcribe", () => {
     expect(parseResetDuration("nada")).toBeUndefined();
   });
 
-  it("se rinde tras varios fallos de red", async () => {
-    const { impl, calls } = fakeFetch([new Error("ECONNRESET"), new Error("x"), new Error("x"), new Error("x")]);
-    const error = await provider(impl).transcribe([{ path: chunkA, offsetSeconds: 0, durationSeconds: 10 }]).catch((e) => e);
-    expect(error).toMatchObject({ retryable: true });
-    expect(calls).toHaveLength(4);
+  it("ante cortes de red espera más (5 s … 80 s) y se rinde tras 6 intentos, diciendo la causa técnica", async () => {
+    const cut = () => Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("socket"), { code: "ECONNRESET" }) });
+    const { impl, calls } = fakeFetch(Array.from({ length: 6 }, cut));
+    const sleeps: number[] = [];
+    const error = await provider(impl, sleeps).transcribe([{ path: chunkA, offsetSeconds: 0, durationSeconds: 10 }]).catch((e) => e);
+    expect(error).toMatchObject({ retryable: true, message: "No se pudo conectar con OpenAI", network: "ECONNRESET" });
+    expect(calls).toHaveLength(6);
+    expect(sleeps).toEqual([5000, 10_000, 20_000, 40_000, 80_000]);
+  });
+
+  it("si falta el archivo de audio no lo confunde con un corte de red", async () => {
+    const { impl, calls } = fakeFetch([]);
+    const error = await provider(impl).transcribe([{ path: path.join(dir, "no-existe.mp3"), offsetSeconds: 0, durationSeconds: 10 }]).catch((e) => e);
+    expect(error).not.toBeInstanceOf(AIProviderError);
+    expect(calls).toHaveLength(0);
   });
 });
 

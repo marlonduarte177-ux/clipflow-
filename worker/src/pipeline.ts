@@ -123,6 +123,8 @@ export interface PipelineDeps {
   frames?: { minIntervalSeconds: number; maxIntervalSeconds: number };
   /** Detector de sonidos (se reemplaza en tests; false = apagado). */
   detectSounds?: typeof detectSounds | false;
+  /** Largo de cada parte de audio que se transcribe (por defecto 600 s; se acorta en tests). */
+  audioChunkSeconds?: number;
   /** Máximo de minutos de audio que se envían a la IA por video (control de costos). */
   aiMaxAudioMinutes: number;
   /** Clips que se generan a la vez (por defecto 2). */
@@ -1068,10 +1070,16 @@ async function runAI(
       deps.log.info({ jobId: ids.jobId, segments: cached.segments.length }, "transcripción reutilizada (sin costo)");
       await onProgress(0.7);
     } else {
-      const chunks = await extractAudioChunks(deps.tools, input, dir, { maxSeconds: coveredSeconds, signal });
+      const chunks = await extractAudioChunks(deps.tools, input, dir, {
+        maxSeconds: coveredSeconds,
+        signal,
+        ...(deps.audioChunkSeconds ? { chunkSeconds: deps.audioChunkSeconds } : {}),
+      });
       await onProgress(0.2);
       step = "la transcripción";
-      transcript = await ai.transcribe(chunks);
+      // Por partes, guardando cada una apenas sale: si una falla y el trabajo se reintenta, las que ya
+      // salieron (y ya se pagaron) no se vuelven a enviar.
+      transcript = await transcribeByParts(deps, ai, chunks, cacheKey ? cacheKey.replace(/\.json$/, ".parts.json") : null, dir, onProgress);
       analyzedSeconds = chunks.reduce((sum, c) => sum + c.durationSeconds, 0);
       if (cacheKey) {
         await saveTranscript(deps, cacheKey, path.join(dir, "transcript-cache.json"), {
@@ -1129,7 +1137,7 @@ async function runAI(
       err instanceof AIProviderError && e.retryable && (e.status === 429 || (e.status ?? 0) >= 500 || /^No se pudo conectar con OpenAI$/.test(e.message));
     const retryLater = temporary && ids.canRetry === true;
     deps.log.warn(
-      { step, error: e.message, status: e.status, code: e.code, limit: e.limit, retryLater },
+      { step, error: e.message, status: e.status, code: e.code, limit: e.limit, network: e.network, retryLater },
       retryLater ? "IA saturada; el trabajo se reintentará más tarde" : "IA no disponible; se continúa solo con FFmpeg",
     );
     // Solo se muestran mensajes propios (los de OpenAIProvider no incluyen contenido del usuario).
@@ -1149,6 +1157,90 @@ async function runAI(
     }
     return { ...empty, status: "unavailable", reason: `falló ${step}: ${detail}`, retryLater, ...soundsPart };
   }
+}
+
+const PartsCache = z.object({
+  version: z.literal(1),
+  parts: z.record(
+    z.string(),
+    z.object({
+      segments: CachedTranscript.shape.segments,
+      language: z.string().nullable(),
+      costUsd: z.number(),
+    }),
+  ),
+});
+
+/**
+ * Transcribe de a 3 partes a la vez y guarda cada parte apenas sale (en S3, junto a la transcripción).
+ * Las partes ya guardadas (de un intento anterior de este mismo video) no se vuelven a pagar. El costo
+ * informado es el de todas las partes, se hayan pagado ahora o antes. Si alguna parte falla, se esperan
+ * las demás (para guardarlas) y después se informa el error.
+ */
+async function transcribeByParts(
+  deps: PipelineDeps,
+  ai: AIAnalysisProvider,
+  chunks: import("@clipflow/shared").AudioChunk[],
+  key: string | null,
+  dir: string,
+  onProgress: (fraction: number) => Promise<void>,
+): Promise<Transcribed> {
+  const file = path.join(dir, "transcript-parts.json");
+  const id = (c: { offsetSeconds: number; durationSeconds: number }) => `${c.offsetSeconds.toFixed(2)}+${c.durationSeconds.toFixed(2)}`;
+  let parts: z.infer<typeof PartsCache>["parts"] = {};
+  if (key) {
+    try {
+      await deps.storage.download(key, file);
+      const parsed = PartsCache.safeParse(JSON.parse(await readFile(file, "utf8")));
+      if (parsed.success) parts = parsed.data.parts;
+    } catch {
+      // Primera vez: no hay partes guardadas.
+    }
+  }
+  const reused = chunks.filter((c) => parts[id(c)]).length;
+  let saving = Promise.resolve();
+  const save = () => {
+    if (!key) return;
+    const snapshot = JSON.stringify({ version: 1, parts });
+    saving = saving.then(async () => {
+      try {
+        await writeFile(file, snapshot);
+        await deps.storage.upload(file, key, "application/json");
+      } catch (err) {
+        deps.log.warn({ error: (err as Error).message }, "no se pudo guardar una parte de la transcripción");
+      }
+    });
+  };
+  const pending = chunks.filter((c) => !parts[id(c)]);
+  let next = 0;
+  let done = reused;
+  let failure: unknown;
+  const worker = async () => {
+    while (next < pending.length && !failure) {
+      const chunk = pending[next++]!;
+      try {
+        const result = await ai.transcribe([chunk]);
+        parts[id(chunk)] = { segments: result.segments, language: result.language, costUsd: result.usage.estimatedCostUsd ?? 0 };
+        save();
+        await onProgress(0.2 + (0.5 * ++done) / chunks.length);
+      } catch (err) {
+        failure ??= err;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(3, pending.length) }, worker));
+  await saving;
+  if (reused) deps.log.info({ reused, total: chunks.length }, "partes de la transcripción reutilizadas (sin costo)");
+  if (failure) throw failure;
+  const ordered = chunks.map((c) => parts[id(c)]!);
+  return {
+    segments: ordered.flatMap((p) => p.segments),
+    language: ordered.find((p) => p.language)?.language ?? null,
+    usage: {
+      audioSeconds: chunks.reduce((sum, c) => sum + c.durationSeconds, 0),
+      estimatedCostUsd: ordered.reduce((sum, p) => sum + p.costUsd, 0),
+    },
+  };
 }
 
 /** Fotogramas de la versión nueva: uno cada 5 s en videos cortos, hasta uno cada 10 s desde 1 h. */
