@@ -28,6 +28,12 @@ export interface WorkerStackProps extends StackProps {
   databaseSecurityGroup: ec2.ISecurityGroup;
   /** Pagos: con `enabled`, cada video descuenta sus minutos del plan. */
   billing?: { enabled?: boolean; freeEmails?: string };
+  /**
+   * Versión del análisis para los videos de los usuarios (variable AI_PIPELINE de GitHub): "classic"
+   * (actual, por defecto) o "v2" (modelo de gama alta + sonidos + fotogramas). La prueba lado a lado
+   * del dueño usa las dos siempre.
+   */
+  aiPipeline?: "classic" | "v2";
 }
 
 /**
@@ -132,6 +138,18 @@ export class WorkerStack extends Stack {
         AI_VISION_ENABLED: "false",
         AI_VISION_INTERVAL_SECONDS: "3",
         AI_VISION_MAX_FRAMES: "600",
+        // Versión nueva del análisis: mismo Whisper; los momentos los elige GPT-6.1 Sol, que además ve un
+        // fotograma cada 5–10 s (baja resolución) y lee las risas, gritos, aplausos y vítores que detecta
+        // el procesador (YAMNet, local y sin costo). Precios en USD por millón de tokens (octubre de 2026).
+        AI_PIPELINE: props.aiPipeline ?? "classic",
+        OPENAI_V2_MODEL: "gpt-6.1-sol",
+        OPENAI_V2_REASONING_EFFORT: "medium",
+        OPENAI_V2_INPUT_COST_PER_1M_TOKENS_USD: "2",
+        OPENAI_V2_CACHED_INPUT_COST_PER_1M_TOKENS_USD: "0.1",
+        OPENAI_V2_OUTPUT_COST_PER_1M_TOKENS_USD: "10",
+        AI_V2_FRAME_MIN_SECONDS: "5",
+        AI_V2_FRAME_MAX_SECONDS: "10",
+        SOUND_DETECTION_ENABLED: "true",
         // Encuadre que sigue a quien habla (detector local YuNet, sin costo por imagen).
         FACE_TRACKING_ENABLED: "true",
         // Importar por enlace (TikTok, Instagram, Facebook): yt-dlp instalado en la imagen.

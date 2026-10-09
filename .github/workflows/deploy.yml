@@ -63,6 +63,8 @@ jobs:
           PADDLE_PRICE_PRO: ${{ vars.PADDLE_PRICE_PRO }}
           PADDLE_PRICE_MAX: ${{ vars.PADDLE_PRICE_MAX }}
           PADDLE_PORTAL_URL: ${{ vars.PADDLE_PORTAL_URL }}
+          # Versión del análisis con IA para los usuarios: vacío o "classic" = la actual; "v2" = la nueva.
+          AI_PIPELINE: ${{ vars.AI_PIPELINE }}
         run: >-
           npx cdk deploy --all -c stage=${{ inputs.stage }}
           -c alertEmail="$ALERT_EMAIL" -c monthlyBudgetUsd="$MONTHLY_BUDGET_USD"
@@ -71,6 +73,7 @@ jobs:
           -c paddlePriceTrialFee="$PADDLE_PRICE_TRIAL_FEE"
           -c paddlePriceBasic="$PADDLE_PRICE_BASIC" -c paddlePricePro="$PADDLE_PRICE_PRO"
           -c paddlePriceMax="$PADDLE_PRICE_MAX" -c paddlePortalUrl="$PADDLE_PORTAL_URL"
+          -c aiPipeline="$AI_PIPELINE"
           --require-approval never --outputs-file cdk-outputs.json
       - name: Resumen
         working-directory: infrastructure

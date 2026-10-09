@@ -97,11 +97,23 @@ export interface JobDto {
 /** "highlight": palabra que suena en color (estilo TikTok); "classic": frase en caja; "none": sin subtítulos en el video. */
 export type SubtitleStyle = "highlight" | "classic" | "none";
 
+/**
+ * Versión del análisis con IA: "classic" = la actual (GPT lee la transcripción); "v2" = modelo de gama
+ * alta que además oye los sonidos (risas, gritos…) y ve fotogramas del video.
+ */
+export type AnalysisPipeline = "classic" | "v2";
+
 export interface JobParams {
   clipDurationSeconds?: number;
   subtitleStyle?: SubtitleStyle;
   /** Importación "solo descargar": se baja el video y no se crean clips. */
   downloadOnly?: boolean;
+  /** Versión del análisis de este trabajo (solo la pone la prueba lado a lado). Sin valor: la del servidor. */
+  pipeline?: AnalysisPipeline;
+  /** Prueba lado a lado a la que pertenece este trabajo. */
+  comparisonId?: string;
+  /** No reutilizar transcripciones guardadas (la prueba lado a lado mide el costo real de cada versión). */
+  skipTranscriptCache?: boolean;
 }
 
 export interface JobResult {
@@ -114,6 +126,13 @@ export interface JobResult {
    */
   ai: "used" | "no_speech" | "disabled" | "unavailable" | "no_audio";
   aiReason?: string;
+  /** Versión del análisis que se usó y sus modelos. */
+  pipeline?: AnalysisPipeline;
+  models?: { transcription?: string; analysis?: string };
+  /** Versión nueva: sonidos detectados por tipo (risas, gritos, aplausos, vítores). */
+  sounds?: Partial<Record<"laughter" | "scream" | "applause" | "cheer", number>>;
+  /** Versión nueva: fotogramas que vio la IA. */
+  analysisFrames?: number;
   language?: string | null;
   /** Cómo se eligieron los momentos: "ai" = los eligió la IA (videos con voz); "signals" = por volumen, acción y movimiento. */
   selection?: "ai" | "signals";

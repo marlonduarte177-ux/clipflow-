@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import type { MeResponse, ProductConfig } from "@clipflow/shared";
 import { getCreditBalance, type Database } from "@clipflow/shared/db";
 import { accountRoutes } from "./account.js";
+import { adminRoutes } from "./admin.js";
 import { BILLING_OFF, billingRoutes, type BillingSettings } from "./billing.js";
 import type { ApiConfig } from "./config.js";
 import { requireAuth, type EmailLookup, type TokenVerifier } from "./auth.js";
@@ -97,6 +98,8 @@ export async function buildApp({ config, verifyToken, lookupEmail, db, storage, 
   });
   await app.register(accountRoutes({ db, auth, storage }));
   await app.register(billingRoutes({ db, auth, settings: billing }));
+  // Prueba lado a lado de la versión actual y la nueva del análisis (solo el dueño: correos exentos).
+  await app.register(adminRoutes({ db, auth, storage, queue, launcher, product, adminEmails: billing.BILLING_FREE_EMAILS }));
 
   await app.register(projectRoutes({ db, auth, storage }));
   await app.register(

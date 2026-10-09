@@ -73,8 +73,8 @@ export default function PrivacyPage() {
                   <strong>Amazon Web Services (AWS):</strong> aloja la app, la base de datos y tus archivos, en servidores de Estados Unidos.
                 </li>
                 <li>
-                  <strong>OpenAI:</strong> recibe el audio de tus videos para transcribirlo y el texto de la transcripción para elegir los
-                  mejores momentos y proponer títulos. Según
+                  <strong>OpenAI:</strong> recibe el audio de tus videos para transcribirlo, y el texto de la transcripción y algunas
+                  imágenes del video en baja resolución para elegir los mejores momentos y proponer títulos. Según
                   sus condiciones para empresas, no usa estos datos para entrenar sus modelos.
                 </li>
                 <li>

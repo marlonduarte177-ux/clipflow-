@@ -42,6 +42,34 @@ export interface ContentHighlight {
   title?: string;
 }
 
+/** Sonidos que detecta el procesador en el audio (sin costo: modelo local). */
+export type SoundKind = "laughter" | "scream" | "applause" | "cheer";
+
+/** Un sonido detectado, con sus tiempos en el video. */
+export interface SoundEvent {
+  kind: SoundKind;
+  startSeconds: number;
+  endSeconds: number;
+  /** 0–1: qué tan seguro está el detector. */
+  confidence: number;
+}
+
+/** Un fotograma suelto en baja resolución (JPEG) para que la IA "vea" el video. */
+export interface VideoFrame {
+  path: string;
+  timeSeconds: number;
+}
+
+/** Opciones del análisis de momentos. */
+export interface AnalyzeOptions {
+  /** Duración que eligió el usuario, como guía del largo de cada momento. */
+  targetClipSeconds?: number;
+  /** Risas, gritos, aplausos y vítores detectados (se marcan en la transcripción). */
+  sounds?: SoundEvent[];
+  /** Fotogramas en baja resolución, en orden. */
+  frames?: VideoFrame[];
+}
+
 /** Una hoja con varios fotogramas en cuadrícula (izquierda→derecha, arriba→abajo). */
 export interface FrameSheet {
   path: string;
@@ -68,14 +96,18 @@ export interface AIAnalysisProvider {
    * y se reutiliza al reintentar o volver a procesar: no se paga dos veces.
    */
   readonly transcriptionModel?: string;
+  /** Modelo que elige los momentos (para registrar qué se usó). */
+  readonly analysisModel?: string;
   /** Transcribe el audio con tiempos por frase. */
   transcribe(chunks: AudioChunk[]): Promise<{ segments: TranscriptSegment[]; language: string | null; usage: AIUsage }>;
-  /** Lee la transcripción y marca los mejores momentos por su contenido. */
-  /** `targetClipSeconds`: duración que eligió el usuario, como guía del largo de cada momento. */
+  /**
+   * Lee la transcripción y marca los mejores momentos por su contenido. Con `sounds` y `frames`
+   * (versión nueva) también "oye" las reacciones y "ve" el video.
+   */
   analyze(
     segments: TranscriptSegment[],
     durationSeconds: number,
-    options?: { targetClipSeconds?: number },
+    options?: AnalyzeOptions,
   ): Promise<{ highlights: ContentHighlight[]; usage: AIUsage }>;
   /** Analiza fotogramas (opcional: solo proveedores con visión). */
   analyzeFrames?(

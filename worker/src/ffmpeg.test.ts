@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chooseVerticalCrop, detectContentBox, extractAudioChunks, probe, renderVerticalClip } from "./ffmpeg.js";
+import { chooseVerticalCrop, detectContentBox, extractAudioChunks, extractFrames, probe, renderVerticalClip } from "./ffmpeg.js";
 import { detectFaces } from "./faces/yunet.js";
 
 const tools = { ffmpegPath: "ffmpeg", ffprobePath: "ffprobe" };
@@ -113,6 +113,26 @@ describe("hojas de fotogramas para la IA", () => {
     expect(sheets[1]!.frameTimes).toEqual([28.5, 31.5, 34.5, 37.5]);
     const size = execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=width,height", "-of", "csv=p=0", sheets[0]!.path]);
     expect(size.toString().trim()).toBe("1536,864");
+  });
+});
+
+describe("fotogramas sueltos para la IA (versión nueva)", () => {
+  const size = (file: string) =>
+    execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=width,height", "-of", "csv=p=0", file]).toString().trim();
+
+  it("uno cada 5 s, a mitad de cada intervalo, de hasta 512 px y sin agrandar una copia chica", async () => {
+    const big = path.join(dir, "frames-big.mp4");
+    const small = path.join(dir, "frames-small.mp4");
+    for (const [file, s] of [[big, "1280x720"], [small, "284x160"]] as const) {
+      execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-f", "lavfi", "-i", `testsrc2=size=${s}:rate=25:duration=12`, "-c:v", "libx264", "-preset", "ultrafast", file]);
+    }
+    const out = path.join(dir, "frames-out");
+    execFileSync("mkdir", ["-p", out]);
+    const frames = await extractFrames(tools, big, out, await probe(tools, big), { intervalSeconds: 5, box: null });
+    expect(frames.map((f) => f.timeSeconds)).toEqual([2.5, 7.5]);
+    expect(size(frames[0]!.path)).toBe("512,288");
+    const tiny = await extractFrames(tools, small, out, await probe(tools, small), { intervalSeconds: 5, box: null });
+    expect(size(tiny[1]!.path)).toBe("284,160");
   });
 });
 

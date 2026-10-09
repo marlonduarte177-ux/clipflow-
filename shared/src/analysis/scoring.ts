@@ -45,7 +45,7 @@ export const SIGNAL_MIN_RANGE: Record<SignalName, number> = {
   visual: 0.1,
   speech: 0,
   ocr: 0,
-  reaction: 0,
+  reaction: 0.3, // sonidos (risas, gritos…): solo cuentan los detectados con seguridad
   action: 1, // al menos un pico de diferencia entre segundos
   vision: 0,
   chat: 0,

@@ -52,7 +52,27 @@ const EnvSchema = z.object({
   /** Precios para estimar costos (USD). Verificar en https://openai.com/api/pricing */
   OPENAI_TRANSCRIBE_COST_PER_MINUTE_USD: z.coerce.number().nonnegative().default(0.006),
   OPENAI_INPUT_COST_PER_1M_TOKENS_USD: z.coerce.number().nonnegative().default(0.15),
+  OPENAI_CACHED_INPUT_COST_PER_1M_TOKENS_USD: z.coerce.number().nonnegative().default(0.075),
   OPENAI_OUTPUT_COST_PER_1M_TOKENS_USD: z.coerce.number().nonnegative().default(0.6),
+
+  // --- Versión nueva del análisis ("v2"): modelo de gama alta + sonidos + fotogramas ---
+  /** Versión que usan los videos de los usuarios: "classic" (actual) o "v2". La prueba lado a lado usa las dos. */
+  AI_PIPELINE: z.enum(["classic", "v2"]).default("classic"),
+  /** GPT-6.1 Sol: casi tan bueno como el más caro, por 1/5 del precio (octubre de 2026). */
+  OPENAI_V2_MODEL: z.string().default("gpt-6.1-sol"),
+  /** Cuánto piensa el modelo: "low", "medium" (por defecto del modelo) o "high". */
+  OPENAI_V2_REASONING_EFFORT: z.enum(["low", "medium", "high"]).default("medium"),
+  OPENAI_V2_INPUT_COST_PER_1M_TOKENS_USD: z.coerce.number().nonnegative().default(2),
+  OPENAI_V2_CACHED_INPUT_COST_PER_1M_TOKENS_USD: z.coerce.number().nonnegative().default(0.1),
+  OPENAI_V2_OUTPUT_COST_PER_1M_TOKENS_USD: z.coerce.number().nonnegative().default(10),
+  /** Un fotograma cada 5 s (videos cortos) hasta cada 10 s (desde 1 h). */
+  AI_V2_FRAME_MIN_SECONDS: z.coerce.number().min(1).default(5),
+  AI_V2_FRAME_MAX_SECONDS: z.coerce.number().min(1).default(10),
+  /** Detector de risas, gritos, aplausos y vítores (local, sin costo). "false" lo apaga. */
+  SOUND_DETECTION_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
 
 
   // --- Pagos: con "true", cada video descuenta sus minutos del plan (ver docs/pagos-paddle.md) ---
