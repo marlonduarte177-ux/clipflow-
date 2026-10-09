@@ -6,6 +6,12 @@ import type { Stage } from "./stage.js";
 export interface StageConfig {
   /** Direcciones de la web que pueden llamar a la API y subir a S3 (CORS). */
   webOrigins: string[];
+  /**
+   * Proteger los datos contra borrado: base de datos y usuarios con protección de borrado, y el bucket
+   * de videos y los secretos se conservan aunque se borre el stack. Siempre en production; también en
+   * staging mientras sea el entorno real de los clientes (decidido el 03/10/2026).
+   */
+  protectData?: boolean;
 }
 
 export const STAGE_CONFIG: Record<Stage, StageConfig> = {
@@ -20,6 +26,7 @@ export const STAGE_CONFIG: Record<Stage, StageConfig> = {
       "https://main.dqw8wqexijjzj.amplifyapp.com",
       "http://localhost:3000",
     ],
+    protectData: true,
   },
   production: {
     // Se completa cuando exista el dominio (Fase 10).

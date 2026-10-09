@@ -37,13 +37,14 @@ const billing = {
   paddlePortalUrl: ctx("paddlePortalUrl"),
 };
 
-const auth = new AuthStack(app, `${prefix}-auth`, { env, stage });
+const auth = new AuthStack(app, `${prefix}-auth`, { env, stage, protectData: config.protectData });
 const network = new NetworkStack(app, `${prefix}-network`, { env, stage });
-const storage = new StorageStack(app, `${prefix}-storage`, { env, stage, webOrigins: config.webOrigins });
-const database = new DatabaseStack(app, `${prefix}-database`, { env, stage, vpc: network.vpc });
+const storage = new StorageStack(app, `${prefix}-storage`, { env, stage, protectData: config.protectData, webOrigins: config.webOrigins });
+const database = new DatabaseStack(app, `${prefix}-database`, { env, stage, protectData: config.protectData, vpc: network.vpc });
 const worker = new WorkerStack(app, `${prefix}-worker`, {
   env,
   stage,
+  protectData: config.protectData,
   vpc: network.vpc,
   bucket: storage.bucket,
   database: database.instance,
@@ -53,6 +54,7 @@ const worker = new WorkerStack(app, `${prefix}-worker`, {
 const api = new ApiStack(app, `${prefix}-api`, {
   env,
   stage,
+  protectData: config.protectData,
   vpc: network.vpc,
   bucket: storage.bucket,
   database: database.instance,

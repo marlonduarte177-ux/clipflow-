@@ -4,6 +4,8 @@ import type { Construct } from "constructs";
 import { resourcePrefix, type Stage } from "./stage.js";
 
 export interface AuthStackProps extends StackProps {
+  /** Proteger los datos contra borrado (también fuera de "production": hoy staging es el entorno real). */
+  protectData?: boolean;
   stage: Stage;
 }
 
@@ -18,7 +20,7 @@ export class AuthStack extends Stack {
 
   constructor(scope: Construct, id: string, props: AuthStackProps) {
     super(scope, id, props);
-    const isProd = props.stage === "production";
+    const protect = props.stage === "production" || props.protectData === true;
     const prefix = resourcePrefix(props.stage);
 
     this.userPool = new cognito.UserPool(this, "UserPool", {
@@ -50,8 +52,8 @@ export class AuthStack extends Stack {
       // Emails con el remitente por defecto de Cognito (límite bajo por día).
       // En producción se cambiará a Amazon SES con dominio propio.
       email: cognito.UserPoolEmail.withCognito(),
-      deletionProtection: isProd,
-      removalPolicy: isProd ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
+      deletionProtection: protect,
+      removalPolicy: protect ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     });
 
     // Cliente público (navegador): sin secreto, login con SRP (la contraseña no viaja en claro).
