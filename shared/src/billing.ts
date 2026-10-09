@@ -3,7 +3,7 @@
  * Los precios reales los cobra Paddle; aquí solo se muestran.
  */
 export const PLANS = {
-  /** Prueba: 1.99 USD una vez, 60 min por 7 días; después pasa sola a Básico (salvo que cancele). */
+  /** Prueba: pago único de 1.99 USD, 60 min por 7 días. No se renueva: después elige un plan mensual. */
   trial: { code: "trial", minutes: 60, priceUsd: 1.99, days: 7 },
   basic: { code: "basic", minutes: 200, priceUsd: 9.99 },
   pro: { code: "pro", minutes: 400, priceUsd: 19.99 },
@@ -37,13 +37,8 @@ export interface BillingResponse {
   checkout: {
     environment: "sandbox" | "production";
     clientToken: string;
-    /** Qué cobrar para cada opción. La prueba lleva el cargo de 1.99 USD y Básico con 7 días de prueba. */
-    options: {
-      plan: PlanCode;
-      items: { priceId: string; quantity: number }[];
-      /** Descuento de Paddle (dsc_…): en la prueba, resta los 1.99 USD al primer cobro de Básico. */
-      discountId?: string;
-    }[];
+    /** Qué cobrar para cada opción. La prueba es un pago único de 1.99 USD (no se renueva). */
+    options: { plan: PlanCode; items: { priceId: string; quantity: number }[] }[];
     customData: { userId: string };
     email: string | null;
   } | null;

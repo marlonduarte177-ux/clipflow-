@@ -50,11 +50,9 @@ export interface BillingProps {
   paddleEnvironment?: "sandbox" | "production";
   paddleClientToken?: string;
   paddlePriceTrialFee?: string;
-  paddlePriceBasicTrial?: string;
   paddlePriceBasic?: string;
   paddlePricePro?: string;
   paddlePriceMax?: string;
-  paddleDiscountTrial?: string;
   paddlePortalUrl?: string;
 }
 
@@ -136,11 +134,9 @@ export class ApiStack extends Stack {
         PADDLE_ENVIRONMENT: billing.paddleEnvironment ?? "sandbox",
         PADDLE_CLIENT_TOKEN: billing.paddleClientToken ?? "",
         PADDLE_PRICE_TRIAL_FEE: billing.paddlePriceTrialFee ?? "",
-        PADDLE_PRICE_BASIC_TRIAL: billing.paddlePriceBasicTrial ?? "",
         PADDLE_PRICE_BASIC: billing.paddlePriceBasic ?? "",
         PADDLE_PRICE_PRO: billing.paddlePricePro ?? "",
         PADDLE_PRICE_MAX: billing.paddlePriceMax ?? "",
-        PADDLE_DISCOUNT_TRIAL: billing.paddleDiscountTrial ?? "",
         PADDLE_PORTAL_URL: billing.paddlePortalUrl ?? "",
       },
       // Usuario y contraseña de la BD: los inyecta ECS desde Secrets Manager.

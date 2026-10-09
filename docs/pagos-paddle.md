@@ -6,7 +6,7 @@ Implementado el 08/10/2026. Reglas del negocio: ver [planes-y-creditos.md](plane
 
 | Plan | Precio | Minutos |
 |---|---|---|
-| **Prueba** | **1.99 USD** una vez | **60** durante 7 días; después pasa sola a Básico (salvo que cancele). El primer mes de Básico cuesta 8 USD: se descuentan los 1.99 |
+| **Prueba** | **1.99 USD** una vez | **60** durante 7 días. Pago único: no se renueva; durante o después de la prueba elige un plan mensual |
 | **Básico** | **9.99 USD/mes** | **200** cada mes |
 | **Pro** | **19.99 USD/mes** | **400** cada mes |
 | **Max** | **39.99 USD/mes** | **1000** cada mes |
@@ -57,18 +57,11 @@ ClipFlow no necesita la API key de Paddle.
    | Producto | Precio | Tipo | Variable de GitHub |
    |---|---|---|---|
    | ClipFlow Básico | 9.99 USD | Recurring, cada 1 mes | `PADDLE_PRICE_BASIC` |
-   | ClipFlow Básico (mismo producto, otro precio) | 9.99 USD | Recurring, cada 1 mes, **Trial 7 days** | `PADDLE_PRICE_BASIC_TRIAL` |
    | ClipFlow Pro | 19.99 USD | Recurring, cada 1 mes | `PADDLE_PRICE_PRO` |
    | ClipFlow Max | 39.99 USD | Recurring, cada 1 mes | `PADDLE_PRICE_MAX` |
    | Prueba ClipFlow 7 días | 1.99 USD | **One-time** | `PADDLE_PRICE_TRIAL_FEE` |
-4. Revisa que los 5 precios estén en **USD** y activos (Status: Active). Luego crea el **descuento** que resta
-   los 1.99 de la prueba al primer mes de Básico (así ese mes cuesta 8 USD): **Catalog → Discounts → New
-   discount** con:
-   - Type: **Flat** (monto fijo), Amount: **1.99 USD**.
-   - **Recurring:** sí, solo **1** periodo de cobro.
-   - **Restrict to:** solo el precio «Básico con prueba» (`PADDLE_PRICE_BASIC_TRIAL`).
-   - Sin código (ClipFlow lo aplica solo). Copia su id (`dsc_…`) → variable `PADDLE_DISCOUNT_TRIAL`.
-   Es opcional: sin él, el primer mes de Básico cuesta 9.99 y la web lo dice así.
+4. Revisa que los 4 precios estén en **USD** y activos (Status: Active). La Prueba es un **pago único**:
+   Paddle no deja juntar un cargo único con un plan que empieza en prueba (error «validation»).
 5. **Developer tools → Authentication → Client-side tokens → New token**. Copia el token (`test_…`).
 6. **Checkout → Checkout settings → Default payment link:** `https://clipflowia.com/dashboard/planes`.
    (En la cuenta real, Paddle además aprueba tu dominio en **Checkout → Website approval**.)
@@ -82,15 +75,15 @@ ClipFlow no necesita la API key de Paddle.
 9. **Portal de clientes** (cambiar tarjeta, facturas, cancelar): en Paddle, **Checkout → Customer portal**,
    copia el enlace.
 10. **GitHub → Settings → Environments → staging:**
-    - **Variables:** `PADDLE_ENVIRONMENT` = `sandbox`, `PADDLE_CLIENT_TOKEN`, los 5 precios del paso 3
-      (`PADDLE_PRICE_TRIAL_FEE`, `PADDLE_PRICE_BASIC_TRIAL`, `PADDLE_PRICE_BASIC`, `PADDLE_PRICE_PRO`,
-      `PADDLE_PRICE_MAX`), `PADDLE_DISCOUNT_TRIAL` (paso 4), `PADDLE_PORTAL_URL`, y `BILLING_ENABLED` = `true`.
+    - **Variables:** `PADDLE_ENVIRONMENT` = `sandbox`, `PADDLE_CLIENT_TOKEN`, los 4 precios del paso 3
+      (`PADDLE_PRICE_TRIAL_FEE`, `PADDLE_PRICE_BASIC`, `PADDLE_PRICE_PRO`, `PADDLE_PRICE_MAX`),
+      `PADDLE_PORTAL_URL`, y `BILLING_ENABLED` = `true`.
     - **Secrets:** `BILLING_FREE_EMAILS` = tu correo de ClipFlow (varios, separados por coma).
 11. **Despliega otra vez** (Actions → Deploy → staging).
 12. **Prueba** con otra cuenta de ClipFlow: Cuenta → Suscripción → «Empezar prueba por 1.99 USD», tarjeta
     de prueba `4242 4242 4242 4242`, cualquier fecha futura y CVC `100`. En unos segundos la página dice
-    «Tu plan está activo» con 60 min. Revisa en Paddle → Transactions que se cobró **1.99 USD**, y en
-    Subscriptions → esa suscripción → «Next payment» que el primer cobro de Básico sea **8.00 USD**.
+    «Tu plan está activo» con 60 min. Revisa en Paddle → Transactions que se cobró **1.99 USD** (sin
+    suscripción: la prueba no se renueva).
 
 ## Pasar a cobros reales
 
