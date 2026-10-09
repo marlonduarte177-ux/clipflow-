@@ -50,7 +50,7 @@ export const BILLING_OFF: BillingSettings = { BILLING_ENABLED: false, PADDLE_ENV
 
 /** Una clave real de avisos de Paddle empieza por "pdl_ntfset_". El relleno de AWS no. */
 export function looksLikePaddleWebhookSecret(value: string | undefined): value is string {
-  return typeof value === "string" && /^pdl_ntfset_[A-Za-z0-9_]{10,}$/.test(value.trim());
+  return typeof value === "string" && /^pdl_ntfset_\S{10,}$/.test(value.trim());
 }
 
 /**
