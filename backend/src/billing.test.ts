@@ -187,6 +187,16 @@ describe("pagos con Paddle", () => {
     expect(await billing("dueno")).toMatchObject({ exempt: true });
   });
 
+  it("avisos simultáneos de la misma suscripción no chocan; un precio de prueba con renovación se ve como prueba", async () => {
+    ctx = await createTestApp(undefined, settings);
+    const { userId } = await me("carla");
+    const sub = { id: "sub_c", status: "active", custom_data: { userId }, items: [{ price: { id: "pri_fee" } }] };
+    const results = await Promise.all([webhook("subscription.created", sub), webhook("subscription.activated", sub)]);
+    expect(results.map((r) => r.statusCode)).toEqual([200, 200]);
+    await webhook("transaction.completed", { id: "txn_c", subscription_id: "sub_c", custom_data: { userId }, items: [{ price: { id: "pri_fee" } }] });
+    expect(await billing("carla")).toMatchObject({ creditMinutes: 60, subscription: { planCode: "trial", status: "active" } });
+  });
+
   it("un pago de un usuario que no existe se reintenta más tarde (no se pierde)", async () => {
     ctx = await createTestApp(undefined, settings);
     const res = await webhook("transaction.completed", { id: "txn_x", subscription_id: "sub_x", custom_data: null, items: [{ price: { id: "pri_pro" } }] });

@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { FastifyBaseLogger, FastifyInstance, FastifyReply, preHandlerHookHandler } from "fastify";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   isBillingExempt,
@@ -201,7 +201,9 @@ export async function applyPaddleEvent(db: Database, settings: BillingSettings, 
     if (!userId) throw new RetryLater("suscripción sin usuario");
     const recurring = priceIds(sub.items).find((id) => monthlyPlanOf(settings, id)) ?? null;
     const status = STATUS[sub.status] ?? "expired";
-    const planCode: PlanCode = status === "trialing" ? "trial" : (recurring && monthlyPlanOf(settings, recurring)) || "basic";
+    // Si en Paddle el precio de la prueba quedó como suscripción (debe ser pago único), se muestra como prueba.
+    const trialOnly = !recurring && Boolean(settings.PADDLE_PRICE_TRIAL_FEE && priceIds(sub.items).includes(settings.PADDLE_PRICE_TRIAL_FEE));
+    const planCode: PlanCode = status === "trialing" || trialOnly ? "trial" : (recurring && monthlyPlanOf(settings, recurring)) || "basic";
     const values = {
       userId,
       planCode,
@@ -220,8 +222,16 @@ export async function applyPaddleEvent(db: Database, settings: BillingSettings, 
       .from(subscriptions)
       .where(and(eq(subscriptions.provider, "paddle"), eq(subscriptions.providerSubscriptionId, sub.id)));
     if (existing?.providerEventAt && existing.providerEventAt > occurredAt) return; // aviso viejo
-    if (existing) await db.update(subscriptions).set(values).where(eq(subscriptions.id, existing.id));
-    else await db.insert(subscriptions).values(values);
+    // Paddle manda varios avisos casi a la vez (created, activated…): se inserta o actualiza sin chocar.
+    await db
+      .insert(subscriptions)
+      .values(values)
+      .onConflictDoUpdate({
+        target: [subscriptions.provider, subscriptions.providerSubscriptionId],
+        targetWhere: sql`${subscriptions.provider} is not null`,
+        set: values,
+        setWhere: sql`${subscriptions.providerEventAt} is null or ${subscriptions.providerEventAt} <= ${occurredAt}`,
+      });
     // Terminó (canceló o no pagó): se acaban los minutos.
     if (status === "canceled" || status === "expired") {
       await setPlanMinutes(db, { userId, minutes: 0, eventId: `paddle:${sub.id}:${status}`, note: "plan terminado" });
