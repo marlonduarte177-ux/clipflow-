@@ -199,7 +199,9 @@ describe("procesamiento con IA", () => {
 
     const usage = await db.select().from(schema.usage).where(eq(schema.usage.jobId, job.id));
     const metric = (m: string) => usage.find((u) => u.metric === m);
-    expect(metric("ai_audio_seconds")).toMatchObject({ quantity: 40, estimatedCostUsd: 0.004 });
+    // Segundos reales del audio enviado (de las partes), no lo que dice el proveedor.
+    expect(metric("ai_audio_seconds")!.quantity).toBeCloseTo(40, 0);
+    expect(metric("ai_audio_seconds")!.estimatedCostUsd).toBeCloseTo(0.004);
     expect(metric("ai_input_tokens")!.quantity).toBe(600);
     expect(metric("ai_output_tokens")!.quantity).toBe(70);
   });
@@ -519,5 +521,40 @@ describe("versión nueva del análisis (oye y ve)", () => {
     const measured = await again({ clipDurationSeconds: 15, pipeline: "v2", skipTranscriptCache: true }, "again-2");
     expect(v2.transcribeCalls).toBe(2);
     expect(measured.costs!.transcriptionUsd).toBeCloseTo(0.004);
+  });
+});
+
+describe("transcripción por partes", () => {
+  it("si una parte se corta, al reintentar solo se vuelve a enviar esa parte (las demás ya se pagaron)", async () => {
+    const db = h!.db;
+    const { job } = await seedVideoJob(db, root, { sample });
+    const ai = Object.assign(new FakeAI(), { transcriptionModel: "whisper-1" });
+    const sent: number[] = [];
+    let failOnce = true;
+    ai.transcribe = async (chunks: AudioChunk[]) => {
+      const c = chunks[0]!;
+      sent.push(Math.round(c.offsetSeconds));
+      if (c.offsetSeconds > 10 && c.offsetSeconds < 20 && failOnce) {
+        failOnce = false;
+        throw new AIProviderError("No se pudo conectar con OpenAI", true, undefined, undefined, undefined, "ECONNRESET");
+      }
+      const segments = SEGMENTS.filter((s) => s.startSeconds >= c.offsetSeconds && s.startSeconds < c.offsetSeconds + c.durationSeconds);
+      return { segments, language: "spanish", usage: { audioSeconds: c.durationSeconds, estimatedCostUsd: c.durationSeconds / 10_000 } };
+    };
+    // Partes de 15 s: 0–15, 15–30 y 30–40.
+    const deps = { ...makeDeps(db, root, path.join(root, "work")), ai, audioChunkSeconds: 15 };
+    const error = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps).catch((e) => e);
+    expect(error).toMatchObject({ code: "ai_busy", retryable: true });
+    expect([...sent].sort((a, b) => a - b)).toEqual([0, 15, 30]);
+
+    await db.update(schema.processingJobs).set({ status: "queued", lockedBy: null }).where(eq(schema.processingJobs.id, job.id));
+    sent.length = 0;
+    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    expect(sent).toEqual([15]); // solo la que había fallado
+    expect(result.ai).toBe("used");
+    // Costo: las tres partes (todas se pagaron una sola vez).
+    expect(result.costs!.transcriptionUsd).toBeCloseTo(0.004, 3);
+    const full = readFileSync(path.join(root, fullTranscriptKey(job.userId, job.id)), "utf8");
+    expect(full.match(/Frase número/g)).toHaveLength(8); // sin repetir frases
   });
 });
