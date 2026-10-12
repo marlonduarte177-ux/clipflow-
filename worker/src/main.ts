@@ -3,6 +3,7 @@ import { SQSClient } from "@aws-sdk/client-sqs";
 import pino from "pino";
 import { loadProductConfig } from "@clipflow/shared";
 import { createDb, databaseUrlFromEnv } from "@clipflow/shared/db";
+import { DeepgramTranscriber, looksLikeDeepgramKey, withDeepgram } from "./ai/deepgram.js";
 import { OpenAIProvider } from "./ai/openai.js";
 import { describeProxyValue, loadWorkerConfig, looksLikeOpenAIKey, parseProxyUrl } from "./config.js";
 import { runConsumer } from "./consumer.js";
@@ -30,7 +31,7 @@ const ai =
         },
       })
     : null;
-// Versión nueva: el mismo Whisper; los momentos los elige un modelo de gama alta que además oye los
+// Versión nueva: la misma transcripción; los momentos los elige un modelo de gama alta que además oye los
 // sonidos marcados y ve fotogramas en baja resolución. Misma clave.
 const aiV2 =
   ai && openaiKey
@@ -48,6 +49,15 @@ const aiV2 =
         },
       })
     : null;
+// Transcripción con Deepgram Nova-3 (si está elegida y su clave ya está en Secrets Manager); si no, Whisper.
+const deepgramKey = config.DEEPGRAM_API_KEY?.trim();
+const deepgram =
+  config.TRANSCRIBE_PROVIDER === "deepgram" && looksLikeDeepgramKey(deepgramKey)
+    ? new DeepgramTranscriber({ apiKey: deepgramKey, model: config.DEEPGRAM_MODEL, costPerMinuteUsd: config.DEEPGRAM_COST_PER_MINUTE_USD })
+    : null;
+const transcription = deepgram ? `deepgram ${config.DEEPGRAM_MODEL}` : config.TRANSCRIBE_PROVIDER === "deepgram" ? "whisper (falta la clave de Deepgram)" : "whisper";
+const aiClassic = ai && deepgram ? withDeepgram(ai, deepgram) : ai;
+const aiNew = aiV2 && deepgram ? withDeepgram(aiV2, deepgram) : aiV2;
 const aiDisabledReason = config.AI_PROVIDER === "none" ? "IA desactivada por configuración" : "Falta la clave de OpenAI en Secrets Manager";
 
 const downloadProxyUrl = parseProxyUrl(config.DOWNLOAD_PROXY_URL);
@@ -63,7 +73,8 @@ process.on("SIGINT", () => stop("SIGINT"));
 log.info(
   {
     workerId,
-    ai: ai ? "openai (whisper + gpt)" : `desactivada (${aiDisabledReason})`,
+    ai: ai ? "openai (gpt)" : `desactivada (${aiDisabledReason})`,
+    transcription,
     pipeline: config.AI_PIPELINE,
     v2Model: aiV2 ? config.OPENAI_V2_MODEL : null,
     sounds: config.SOUND_DETECTION_ENABLED,
@@ -90,9 +101,9 @@ try {
       workDir: config.WORKER_TMP_DIR,
       workerId,
       costPerHourUsd: config.WORKER_COST_PER_HOUR_USD,
-      ai,
+      ai: aiClassic,
       aiDisabledReason,
-      aiV2,
+      aiV2: aiNew,
       defaultPipeline: config.AI_PIPELINE,
       frames: { minIntervalSeconds: config.AI_V2_FRAME_MIN_SECONDS, maxIntervalSeconds: config.AI_V2_FRAME_MAX_SECONDS },
       ...(config.SOUND_DETECTION_ENABLED ? {} : { detectSounds: false as const }),

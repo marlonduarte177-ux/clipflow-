@@ -29,9 +29,9 @@ export interface WorkerStackProps extends StackProps {
   /** Pagos: con `enabled`, cada video descuenta sus minutos del plan. */
   billing?: { enabled?: boolean; freeEmails?: string };
   /**
-   * Versión del análisis para los videos de los usuarios (variable AI_PIPELINE de GitHub): "classic"
-   * (actual, por defecto) o "v2" (modelo de gama alta + sonidos + fotogramas). La prueba lado a lado
-   * del dueño usa las dos siempre.
+   * Versión del análisis para los videos de los usuarios (variable AI_PIPELINE de GitHub): "v2" (por
+   * defecto: GPT-6.1 Sol + sonidos + fotogramas) o "classic" (gpt-4o-mini, solo transcripción). La prueba
+   * lado a lado del dueño usa las dos siempre.
    */
   aiPipeline?: "classic" | "v2";
 }
@@ -78,6 +78,15 @@ export class WorkerStack extends Stack {
     const openAiKey = new secretsmanager.Secret(this, "OpenAiApiKey", {
       secretName: `${prefix}/openai-api-key`,
       description: "Clave de OpenAI para ClipFlow. Reemplaza el valor por tu clave (sk-...).",
+      generateSecretString: { passwordLength: 32, excludePunctuation: true },
+      removalPolicy: props.stage === "production" || props.protectData ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
+    });
+
+    // Clave de Deepgram (transcripción Nova-3). Se crea con un valor de relleno: mientras no se pegue la
+    // clave real, el procesador transcribe con Whisper. Solo el worker puede leerla.
+    const deepgramKey = new secretsmanager.Secret(this, "DeepgramApiKey", {
+      secretName: `${prefix}/deepgram-api-key`,
+      description: "Clave de Deepgram para ClipFlow. Reemplaza el valor por tu clave (40 caracteres).",
       generateSecretString: { passwordLength: 32, excludePunctuation: true },
       removalPolicy: props.stage === "production" || props.protectData ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     });
@@ -131,6 +140,10 @@ export class WorkerStack extends Stack {
         WORKER_COST_PER_HOUR_USD: "0.1975",
         AI_PROVIDER: "openai",
         OPENAI_TRANSCRIBE_MODEL: "whisper-1",
+        // Transcribe Deepgram Nova-3 (0,0043 USD/min; Whisper 0,006). Sin su clave, Whisper.
+        TRANSCRIBE_PROVIDER: "deepgram",
+        DEEPGRAM_MODEL: "nova-3",
+        DEEPGRAM_COST_PER_MINUTE_USD: "0.0043",
         OPENAI_ANALYSIS_MODEL: "gpt-4o-mini",
         OPENAI_MAX_AUDIO_MINUTES: "180",
         // Análisis de imágenes con IA: apagado (probado en staging: caro en videos largos y satura el
@@ -141,7 +154,7 @@ export class WorkerStack extends Stack {
         // Versión nueva del análisis: mismo Whisper; los momentos los elige GPT-6.1 Sol, que además ve un
         // fotograma cada 5–10 s (baja resolución) y lee las risas, gritos, aplausos y vítores que detecta
         // el procesador (YAMNet, local y sin costo). Precios en USD por millón de tokens (octubre de 2026).
-        AI_PIPELINE: props.aiPipeline ?? "classic",
+        AI_PIPELINE: props.aiPipeline ?? "v2",
         OPENAI_V2_MODEL: "gpt-6.1-sol",
         OPENAI_V2_REASONING_EFFORT: "medium",
         OPENAI_V2_INPUT_COST_PER_1M_TOKENS_USD: "2",
@@ -161,6 +174,7 @@ export class WorkerStack extends Stack {
         // ECS lee el secreto al arrancar cada worker (como el worker escala a 0,
         // una clave nueva se usa desde el siguiente video).
         OPENAI_API_KEY: ecs.Secret.fromSecretsManager(openAiKey),
+        DEEPGRAM_API_KEY: ecs.Secret.fromSecretsManager(deepgramKey),
         DOWNLOAD_PROXY_URL: ecs.Secret.fromSecretsManager(downloadProxy),
         DB_USER: ecs.Secret.fromSecretsManager(dbSecret, "username"),
         DB_PASSWORD: ecs.Secret.fromSecretsManager(dbSecret, "password"),
@@ -277,6 +291,7 @@ export class WorkerStack extends Stack {
 
     new CfnOutput(this, "QueueUrl", { value: this.queue.queueUrl });
     new CfnOutput(this, "OpenAiSecretName", { value: openAiKey.secretName });
+    new CfnOutput(this, "DeepgramSecretName", { value: deepgramKey.secretName });
     new CfnOutput(this, "DownloadProxySecretName", { value: downloadProxy.secretName });
   }
 }

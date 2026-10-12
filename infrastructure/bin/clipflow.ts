@@ -50,8 +50,8 @@ const worker = new WorkerStack(app, `${prefix}-worker`, {
   database: database.instance,
   databaseSecurityGroup: database.securityGroup,
   billing: { enabled: billing.enabled, freeEmails: billing.freeEmails },
-  // Versión del análisis para los usuarios (variable AI_PIPELINE de GitHub; vacía = la actual).
-  aiPipeline: ctx("aiPipeline") === "v2" ? "v2" : "classic",
+  // Versión del análisis para los usuarios (variable AI_PIPELINE de GitHub; vacía = la nueva, GPT-6.1 Sol).
+  aiPipeline: ctx("aiPipeline") === "classic" ? "classic" : "v2",
 });
 const api = new ApiStack(app, `${prefix}-api`, {
   env,
