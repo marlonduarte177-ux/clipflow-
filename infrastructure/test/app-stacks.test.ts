@@ -313,8 +313,11 @@ describe("cola y worker", () => {
     const env = container.Environment as { Name: string; Value: string }[];
     expect(env.find((e) => e.Name === "AI_VISION_ENABLED")?.Value).toBe("false"); // apagado: caro en videos largos
     expect(env.find((e) => e.Name === "FACE_TRACKING_ENABLED")?.Value).toBe("true");
-    // Versión nueva del análisis: lista para la prueba lado a lado, pero los usuarios siguen con la actual.
-    expect(env.find((e) => e.Name === "AI_PIPELINE")?.Value).toBe("classic");
+    // Versión nueva del análisis (GPT-6.1 Sol) por defecto y transcripción con Deepgram.
+    expect(env.find((e) => e.Name === "AI_PIPELINE")?.Value).toBe("v2");
+    expect(env.find((e) => e.Name === "TRANSCRIBE_PROVIDER")?.Value).toBe("deepgram");
+    expect((container.Secrets as { Name: string }[]).map((e) => e.Name)).toContain("DEEPGRAM_API_KEY");
+    expect(JSON.stringify(t.api.toJSON())).not.toContain("deepgram-api-key");
     expect(env.find((e) => e.Name === "OPENAI_V2_MODEL")?.Value).toBe("gpt-6.1-sol");
     expect(env.find((e) => e.Name === "SOUND_DETECTION_ENABLED")?.Value).toBe("true");
     // La API no tiene acceso a la clave.

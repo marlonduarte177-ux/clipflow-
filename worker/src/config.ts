@@ -32,6 +32,13 @@ const EnvSchema = z.object({
   /** En AWS la inyecta ECS desde Secrets Manager. Nunca se registra en logs. */
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_TRANSCRIBE_MODEL: z.string().default("whisper-1"),
+  /** Quién transcribe: "deepgram" (Nova-3) u "openai" (Whisper). Sin clave de Deepgram, Whisper. */
+  TRANSCRIBE_PROVIDER: z.enum(["openai", "deepgram"]).default("openai"),
+  /** En AWS la inyecta ECS desde Secrets Manager. Nunca se registra en logs. */
+  DEEPGRAM_API_KEY: z.string().optional(),
+  DEEPGRAM_MODEL: z.string().default("nova-3"),
+  /** Nova-3, audio grabado: 0,0043 USD por minuto (octubre de 2026). */
+  DEEPGRAM_COST_PER_MINUTE_USD: z.coerce.number().nonnegative().default(0.0043),
   OPENAI_ANALYSIS_MODEL: z.string().default("gpt-4o-mini"),
   OPENAI_MAX_AUDIO_MINUTES: z.coerce.number().positive().default(180),
   /** Encuadre que sigue caras (detector local, sin costo por imagen). "false" lo apaga. */

@@ -1,5 +1,9 @@
 # Análisis v2: oye, ve y usa un modelo de gama alta
 
+> **12/10/2026:** la versión nueva (`v2`) es la de **todos los videos** (`AI_PIPELINE` vacío = `v2`) y la
+> transcripción la hace **Deepgram Nova-3** (0,0043 USD/min en vez de 0,006 de Whisper). Mientras la clave
+> de Deepgram no esté en AWS, se sigue transcribiendo con Whisper. Ver «Deepgram» al final.
+
 Implementado el 09/10/2026. Mientras no se active, **los videos de los usuarios siguen con la versión
 actual**. La versión nueva solo la usa la **prueba lado a lado** del dueño hasta que se active.
 
@@ -89,3 +93,14 @@ Los números reales de cada video salen en la página de la prueba (y en la tabl
 En la versión nueva OpenAI recibe, además del audio y la transcripción, fotogramas del video en baja
 resolución. La política de privacidad ya lo dice. El detector de sonidos corre dentro de nuestro
 servidor: el audio no sale para eso.
+
+## Deepgram (transcripción)
+
+- Modelo `nova-3`, audio grabado, con detección de idioma y puntuación. Da el tiempo de cada palabra
+  (subtítulos con la palabra que suena) y las frases se arman con los puntos y las pausas.
+- Costo: 0,0043 USD por minuto de audio (0,26 por hora; Whisper 0,36).
+- **Pegar la clave** (no va en GitHub ni en el chat): console.deepgram.com → API Keys → crear una clave;
+  AWS → Secrets Manager → `clipflow-staging/deepgram-api-key` → *Retrieve secret value* → *Edit* → pegar
+  solo la clave. Los procesadores la leen al arrancar (el siguiente video ya la usa).
+- Sin clave (o con el valor de relleno), el procesador transcribe con Whisper y lo dice en su registro de arranque.
+- Para volver a Whisper: `TRANSCRIBE_PROVIDER = openai` en `infrastructure/lib/worker-stack.ts`.

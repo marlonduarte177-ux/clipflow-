@@ -74,8 +74,11 @@ export default function PrivacyPageEn() {
                   <strong>Amazon Web Services (AWS):</strong> hosts the app, the database and your files, on servers in the United States.
                 </li>
                 <li>
-                  <strong>OpenAI:</strong> receives the audio of your videos to transcribe it, and the transcript text and some low-resolution
-                  frames of the video to pick the best moments and suggest titles. Under its business terms,
+                  <strong>Deepgram:</strong> receives the audio of your videos to transcribe it.
+                </li>
+                <li>
+                  <strong>OpenAI:</strong> receives the transcript text and some low-resolution frames of the video to pick the best moments
+                  and suggest titles (and the audio, if Deepgram is unavailable). Under its business terms,
                   it does not use this data to train its models.
                 </li>
                 <li>

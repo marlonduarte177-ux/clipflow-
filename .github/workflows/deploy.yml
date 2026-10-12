@@ -63,7 +63,7 @@ jobs:
           PADDLE_PRICE_PRO: ${{ vars.PADDLE_PRICE_PRO }}
           PADDLE_PRICE_MAX: ${{ vars.PADDLE_PRICE_MAX }}
           PADDLE_PORTAL_URL: ${{ vars.PADDLE_PORTAL_URL }}
-          # Versión del análisis con IA para los usuarios: vacío o "classic" = la actual; "v2" = la nueva.
+          # Versión del análisis con IA para los usuarios: vacío o "v2" = la nueva (GPT-6.1 Sol); "classic" = la anterior.
           AI_PIPELINE: ${{ vars.AI_PIPELINE }}
         run: >-
           npx cdk deploy --all -c stage=${{ inputs.stage }}
