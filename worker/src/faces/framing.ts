@@ -369,17 +369,29 @@ export function positionAt(pieces: PathPiece[], t: number): number {
   return p.from + ((p.to - p.from) * (t - p.start)) / (p.end - p.start);
 }
 
+/**
+ * Suma los términos en forma de árbol equilibrado: `(a+b)+(c+d)` en vez de `a+b+c+d`. El FFmpeg
+ * del procesador (Debian 12) rechaza, sin decir por qué, expresiones con más de 100 niveles, y una
+ * cadena de sumas tiene un nivel por tramo: un clip con 100 tramos fallaba.
+ */
+function balancedSum(terms: string[]): string {
+  if (terms.length <= 1) return terms[0] ?? "0";
+  const mid = Math.ceil(terms.length / 2);
+  const half = (part: string[]) => (part.length > 1 ? `(${balancedSum(part)})` : balancedSum(part));
+  return `${half(terms.slice(0, mid))}+${half(terms.slice(mid))}`;
+}
+
 /** Expresión de FFmpeg (variable t) que reproduce los tramos, para `crop=x='…'`. */
 export function pathExpression(pieces: PathPiece[]): string {
   const n = (v: number) => (Math.round(v * 1000) / 1000).toString();
-  return pieces
-    .map((p) => {
+  return balancedSum(
+    pieces.map((p) => {
       const range = Number.isFinite(p.end) ? `gte(t,${n(p.start)})*lt(t,${n(p.end)})` : `gte(t,${n(p.start)})`;
       const from = Math.round(p.from);
       const to = Math.round(p.to);
       const value =
         from === to || !Number.isFinite(p.end) ? `${from}` : `(${from}+${to - from}*(t-${n(p.start)})/${n(p.end - p.start)})`;
       return `${range}*${value}`;
-    })
-    .join("+");
+    }),
+  );
 }
