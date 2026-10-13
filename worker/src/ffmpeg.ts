@@ -667,8 +667,9 @@ export async function renderVerticalClip(
       "libx264",
       "-preset",
       "veryfast",
+      // 20: más nítido que el 23 de antes (detalle fino, texto y caras), archivos ~40 % más grandes.
       "-crf",
-      "23",
+      "20",
       "-pix_fmt",
       "yuv420p",
       "-c:a",

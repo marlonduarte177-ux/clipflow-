@@ -96,7 +96,7 @@ export default function PrivacyPage() {
           title: "Cuánto tiempo los guardamos",
           body: (
             <ul>
-              <li>Tus videos, clips y transcripciones: hasta que los borres o elimines tu cuenta.</li>
+              <li>Tus videos, clips y transcripciones: hasta que los borres o elimines tu cuenta. Un video que importas por enlace para crear clips se borra al terminarlos (quedan los clips); el que guardas con «Guardar», no.</li>
               <li>Las copias de seguridad de la base de datos se borran solas a los 7 días; los registros técnicos, a los 30 días.</li>
               <li>
                 Los registros de pagos y de minutos se conservan el tiempo que exige la ley, separados de tu correo cuando eliminas la cuenta.

@@ -187,10 +187,10 @@ export class WorkerStack extends Stack {
       new iam.PolicyStatement({ actions: ["s3:GetObject"], resources: [props.bucket.arnForObjects("originals/*")] }),
     );
     // Videos importados por enlace: el worker los descarga y guarda el original (en partes si es
-    // grande). No puede borrar originales.
+    // grande), y lo borra cuando ya hizo los clips (se puede volver a bajar del enlace).
     taskDefinition.taskRole.addToPrincipalPolicy(
       new iam.PolicyStatement({
-        actions: ["s3:PutObject", "s3:AbortMultipartUpload"],
+        actions: ["s3:PutObject", "s3:AbortMultipartUpload", "s3:DeleteObject"],
         resources: [props.bucket.arnForObjects("originals/*")],
       }),
     );

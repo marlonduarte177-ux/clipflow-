@@ -461,6 +461,10 @@ export function videoRoutes(deps: VideoRouteDeps) {
       // Un video importado por enlace no se entrega tal cual mientras «Descargar solo el video» esté
       // desactivado (sí sus clips). Un archivo que subió el propio usuario, sí.
       if (row.sourceUrl && !FEATURES.downloadOnly) return sendError(reply, 403, "download_disabled", DOWNLOAD_DISABLED_MESSAGE);
+      // Video bajado de un enlace para hacer clips: el original se borró al terminarlos.
+      if ((row.probe as { clipflowOriginalDeleted?: boolean } | null)?.clipflowOriginalDeleted) {
+        return sendError(reply, 410, "original_deleted", "El video original se borró después de crear los clips. Tus clips siguen disponibles.");
+      }
       // Stream largo: solo se guardó una copia liviana (160p) para elegir los momentos; no se ofrece.
       if ((row.probe as { clipflowAnalysisCopy?: boolean } | null)?.clipflowAnalysisCopy) {
         return sendError(

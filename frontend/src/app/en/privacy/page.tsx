@@ -97,7 +97,7 @@ export default function PrivacyPageEn() {
           title: "How long we keep it",
           body: (
             <ul>
-              <li>Your videos, clips and transcripts: until you delete them or delete your account.</li>
+              <li>Your videos, clips and transcripts: until you delete them or delete your account. A video you import from a link to make clips is deleted once the clips are done (the clips stay); one you keep with “Save” is not.</li>
               <li>Database backups are deleted automatically after 7 days; technical logs, after 30 days.</li>
               <li>
                 Payment and minute records are kept for as long as the law requires, separated from your email once you delete your account.

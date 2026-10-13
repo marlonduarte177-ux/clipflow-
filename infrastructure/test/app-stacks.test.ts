@@ -328,7 +328,7 @@ describe("cola y worker", () => {
     expect(JSON.stringify(t.worker.toJSON())).not.toContain("assemblyai");
   });
 
-  it("lee originales, escribe resultados y solo puede AGREGAR originales (videos por enlace), nunca borrarlos", () => {
+  it("lee originales, escribe resultados y solo puede agregar y borrar originales (videos por enlace), nada más", () => {
     const statements = s3Statements(t.worker);
     const reads = statements.filter((s) => [s.Action].flat().includes("s3:GetObject"));
     const writes = statements.filter((s) => [s.Action].flat().includes("s3:PutObject"));
@@ -336,8 +336,12 @@ describe("cola y worker", () => {
     expect(JSON.stringify(writes.map((s) => s.Resource))).toContain("/clips/*");
     const originals = writes.filter((s) => JSON.stringify(s.Resource).includes("/originals/*"));
     expect(originals).toHaveLength(1);
-    expect([originals[0]!.Action].flat().sort()).toEqual(["s3:AbortMultipartUpload", "s3:PutObject"]);
-    expect(statements.every((s) => ![s.Action].flat().includes("s3:DeleteObject"))).toBe(true);
+    expect([originals[0]!.Action].flat().sort()).toEqual(["s3:AbortMultipartUpload", "s3:DeleteObject", "s3:PutObject"]);
+    // Borrar: solo originales (los clips, miniaturas y subtítulos de los usuarios, nunca).
+    const deletes = statements.filter((s) => [s.Action].flat().includes("s3:DeleteObject"));
+    expect(deletes).toHaveLength(1);
+    expect(JSON.stringify(deletes[0]!.Resource)).toContain("/originals/*");
+    expect(JSON.stringify(deletes[0]!.Resource)).not.toMatch(/clips|thumbnails|subtitles/);
   });
 });
 

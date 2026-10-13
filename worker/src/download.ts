@@ -57,9 +57,11 @@ export interface DownloadOptions {
   proxyProblem?: string | null;
   /**
    * "analysis": copia liviana (160p) de un stream largo, solo para elegir los momentos. Los clips se
-   * generan después con tramos en 720p (`downloadSection`).
+   * generan después con tramos en 1080p (`downloadSection`).
+   * "original": la mejor calidad que tenga la plataforma, sin tope («Guardar»).
+   * Sin indicar: hasta 1080p, la máxima que se nota en un clip vertical de 1080x1920.
    */
-  quality?: "analysis";
+  quality?: "analysis" | "original";
 }
 
 export interface Downloaded {
@@ -194,8 +196,8 @@ function proxyFailure(s: string): { reason: string; retryable: boolean } {
 
 /**
  * Descarga con yt-dlp. Primero sin proxy (gratis: TikTok funciona así). Si la plataforma nos
- * bloquea y hay proxy configurado, se reintenta una vez por el proxy, hasta 720p (se paga por GB y
- * para clips verticales sobra).
+ * bloquea y hay proxy configurado, se reintenta una vez por el proxy, con la misma calidad (el proxy
+ * se paga por GB).
  */
 export async function downloadWithYtDlp(url: string, dir: string, options: DownloadOptions): Promise<Omit<Downloaded, "sizeBytes">> {
   const proxy = options.proxyUrl ? withStickySession(options.proxyUrl) : null;
@@ -282,15 +284,15 @@ export async function fetchMediaInfo(url: string, options: DownloadOptions): Pro
   }
 }
 
-/** Fuente de los tramos de un stream: las URLs del video en 720p (HLS) y el proxy, si hizo falta. */
+/** Fuente de los tramos de un stream: las URLs del video en 1080p (HLS) y el proxy, si hizo falta. */
 export interface StreamSource {
   urls: string[];
   proxy: string | null;
 }
 
-/** Las direcciones directas del video en 720p (una con audio y video, o una de cada). */
+/** Las direcciones directas del video en 1080p (una con audio y video, o una de cada). */
 export async function resolveStreamUrls(url: string, options: DownloadOptions): Promise<StreamSource> {
-  const { stdout, proxy } = await ytDlpQuery(url, options, ["-f", "bv*+ba/b", "-S", "res:720,vcodec:h264,acodec:aac", "--get-url"]);
+  const { stdout, proxy } = await ytDlpQuery(url, options, ["-f", "bv*+ba/b", "-S", CLIP_QUALITY, "--get-url"]);
   const urls = stdout
     .split("\n")
     .map((l) => l.trim())
@@ -390,6 +392,13 @@ export function redactCredentials(text: string): string {
   return text.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1***@");
 }
 
+/**
+ * Calidad para crear clips, en todas las plataformas (también Kick y Twitch, y por el proxy): hasta
+ * 1080p y la mayor fluidez (60 fps si la hay). Un clip vertical es de 1080x1920: el recorte de un
+ * video de 1080p ya se ve a resolución completa; más arriba no se notaría y tardaría mucho más.
+ */
+const CLIP_QUALITY = "res:1080,fps,vcodec:h264,acodec:aac";
+
 async function runYtDlp(url: string, dir: string, options: DownloadOptions, proxy: string | null): Promise<Omit<Downloaded, "sizeBytes">> {
   const args = [
     "--no-playlist",
@@ -405,17 +414,15 @@ async function runYtDlp(url: string, dir: string, options: DownloadOptions, prox
     // encuentra y sigue SIN FFmpeg (el aviso lo oculta --no-warnings). Sin FFmpeg no puede unir video
     // y audio separados (Instagram, Facebook) y el archivo final nunca existía (error ENOENT).
     ...ffmpegLocationArgs(options.ffmpegPath),
-    // Hasta 1080p, prefiriendo H.264/AAC (más rápido de procesar); todo en un .mp4.
+    // Todo en un .mp4, prefiriendo H.264/AAC (más rápido de procesar) entre los de igual calidad.
     "-f",
     "bv*+ba/b",
     "-S",
-    // Hasta 720p por el proxy (se paga por GB) y en Kick y Twitch: sus videos guardados duran horas y
-    // en 1080p60 pesan ~2,8 GB por hora (en 720p, la mitad; para clips verticales alcanza).
     options.quality === "analysis"
       ? "res:160,+size,acodec:aac"
-      : proxy || isStreamPlatformUrl(url)
-        ? "res:720,vcodec:h264,acodec:aac"
-        : "res:1080,vcodec:h264,acodec:aac",
+      : options.quality === "original"
+        ? "res,fps,vcodec:h264,acodec:aac"
+        : CLIP_QUALITY,
     ...(proxy ? ["--proxy", proxy] : []),
     "--merge-output-format",
     "mp4",

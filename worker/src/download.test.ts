@@ -186,7 +186,7 @@ describe("proxy residencial para plataformas que bloquean a AWS", () => {
     return { script, work, calls };
   }
 
-  it("primero sin proxy (gratis) y, si la plataforma bloquea, una vez por el proxy: país y sesión fijos, hasta 720p", async () => {
+  it("primero sin proxy (gratis) y, si la plataforma bloquea, una vez por el proxy: país y sesión fijos, misma calidad (hasta 1080p)", async () => {
     const yt = fakeYtDlp("proxy-fallback");
     const result = await downloadFromUrl("https://www.instagram.com/reel/abc/", yt.work, {
       ...options(),
@@ -196,22 +196,33 @@ describe("proxy residencial para plataformas que bloquean a AWS", () => {
     expect(result.title).toBe("Video de prueba");
     const calls = yt.calls();
     expect(calls).toHaveLength(2);
-    expect(calls[0]).toMatch(/^call proxy= sort=res:1080,vcodec:h264,acodec:aac( |$)/);
+    expect(calls[0]).toMatch(/^call proxy= sort=res:1080,fps,vcodec:h264,acodec:aac( |$)/);
     expect(calls[1]).toMatch(/proxy=http:\/\/user:secreto_country-US_session-[A-Za-z0-9]{8}_lifetime-60@rp\.evomi\.com:1000/);
-    expect(calls[1]).toContain("sort=res:720,");
+    expect(calls[1]).toContain("sort=res:1080,fps,");
   });
 
-  it("Twitch: también baja hasta 720p", async () => {
+  it("«Guardar»: la calidad original, sin tope", async () => {
+    const yt = fakeYtDlp("original");
+    await downloadFromUrl("https://www.facebook.com/watch/?v=1", yt.work, {
+      ...options(),
+      ytDlpPath: yt.script,
+      proxyUrl: "http://user:secreto@rp.evomi.com:1000",
+      quality: "original",
+    });
+    for (const call of yt.calls()) expect(call).toMatch(/ sort=res,fps,vcodec:h264,acodec:aac( |$)/);
+  });
+
+  it("Twitch: también baja hasta 1080p (60 fps si lo hay)", async () => {
     const yt = fakeYtDlp("twitch");
     await downloadFromUrl("https://www.twitch.tv/videos/2885611944", yt.work, {
       ...options(),
       ytDlpPath: yt.script,
       proxyUrl: "http://user:secreto@rp.evomi.com:1000",
     });
-    expect(yt.calls()[0]).toContain("sort=res:720,");
+    expect(yt.calls()[0]).toContain("sort=res:1080,fps,");
   });
 
-  it("Kick: usa los complementos propios (códigos de video nuevos) y baja hasta 720p", async () => {
+  it("Kick: usa los complementos propios (códigos de video nuevos) y baja hasta 1080p", async () => {
     const yt = fakeYtDlp("kick");
     await downloadFromUrl("https://kick.com/punicher/videos/01a0b24f-2b40-7d20-b9d1-f1238dd1b2e7", yt.work, {
       ...options(),
@@ -219,7 +230,7 @@ describe("proxy residencial para plataformas que bloquean a AWS", () => {
       proxyUrl: "http://user:secreto@rp.evomi.com:1000",
     });
     const [direct] = yt.calls();
-    expect(direct).toContain("sort=res:720,");
+    expect(direct).toContain("sort=res:1080,fps,");
     expect(direct).toContain(` plugins=${YTDLP_PLUGINS_DIR}`);
     expect(existsSync(path.join(YTDLP_PLUGINS_DIR, "clipflow/yt_dlp_plugins/extractor/kick_video_page.py"))).toBe(true);
   });

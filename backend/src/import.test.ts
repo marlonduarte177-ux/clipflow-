@@ -160,4 +160,16 @@ describe.runIf(FEATURES.downloadOnly)("streams largos analizados con copia livia
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toMatchObject({ code: "analysis_copy", message: expect.stringContaining("Descargar solo el video") });
   });
+
+  it("si el original ya se borró después de crear los clips, lo dice (en vez de un enlace roto)", async () => {
+    const projectId = await newProject("alice");
+    const { video } = (await importVideo("alice", { projectId, url: "https://www.tiktok.com/@ana/video/9", rightsConfirmed: true })).json();
+    await ctx!.database.db
+      .update(schema.videos)
+      .set({ status: "ready", sizeBytes: 1234, probe: { clipflowOriginalDeleted: true } })
+      .where(eq(schema.videos.id, video.id));
+    const res = await app().inject({ method: "GET", url: `/videos/${video.id}/download`, headers: bearer("alice") });
+    expect(res.statusCode).toBe(410);
+    expect(res.json().error).toMatchObject({ code: "original_deleted", message: expect.stringContaining("Tus clips siguen disponibles") });
+  });
 });

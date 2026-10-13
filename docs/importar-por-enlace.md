@@ -27,8 +27,8 @@ y **videos guardados** (`kick.com/canal/videos/…`), para crear clips o para "D
   - **Probado:** con un video de punicher de 2 h se leyeron el título y la duración, se bajaron 20 s en
     720p H.264 + AAC, y la descarga completa arrancó a ~35 MB/s.
   - Si yt-dlp lo resuelve en una versión futura, se puede borrar el complemento.
-- **Kick se baja hasta 720p:** los videos guardados duran horas, y en 1080p60 pesan ~2,8 GB por hora; en
-  720p, la mitad. Para clips verticales alcanza.
+- **Kick se baja hasta 1080p (60 fps si lo hay)** desde el 13/10/2026 (antes 720p). Los streams largos
+  igual se analizan con la copia liviana y solo se bajan los tramos de los clips (ver abajo).
   - En los videos de Kick (HLS), yt-dlp no aplica el tope de tamaño antes de bajar. Sí se aplican el
     límite de 3 h y la revisión de tamaño después.
 - **Canal en vivo:** se rechaza con "es una transmisión en vivo".
@@ -41,7 +41,7 @@ y **videos guardados** (`kick.com/canal/videos/…`), para crear clips o para "D
 
 **Twitch (03/10/2026):** se importan **clips** (`twitch.tv/canal/clip/…`, `clips.twitch.tv/…`) y
 **videos guardados** (`twitch.tv/videos/123…`), para crear clips o para "Descargar solo el video".
-- Mismos límites que Kick: hasta **720p** y **3 h**; un canal en vivo se rechaza.
+- Mismos límites que Kick: hasta **1080p** y **3 h**; un canal en vivo se rechaza.
 - Videos solo para suscriptores: "Este video es solo para suscriptores del canal, así que no se puede
   importar." Videos borrados o caducados: "No encontramos un video…".
 - Algunos clips de Twitch vienen en HEVC: al crear clips se recomprimen igual; en "Descargar solo el
@@ -50,11 +50,11 @@ y **videos guardados** (`kick.com/canal/videos/…`), para crear clips o para "D
 ## Streams largos de Kick y Twitch: primero una copia liviana (03/10/2026)
 
 Un video guardado de **10 min o más** (al crear clips; no en "Descargar solo el video") no se baja entero
-en 720p. En su lugar:
+en 1080p. En su lugar:
 1. **Se leen los datos del enlace** (título, duración, si está en vivo) sin bajar nada.
 2. **Se baja una copia liviana** (la calidad más baja, ~160p, con el audio en AAC). Con ella se transcribe,
    se miden las señales y se eligen los momentos. Bajarla es mucho más rápido y ocupa poco.
-3. **Por cada clip elegido,** se baja **solo ese tramo** en 720p directo desde la plataforma
+3. **Por cada clip elegido,** se baja **solo ese tramo** en 1080p directo desde la plataforma
    (FFmpeg con `-ss` antes de la entrada y recompresión, así el corte es exacto: medido ±0,05 s).
 4. El clip se genera desde ese tramo, con su propio encuadre, y el tramo se borra.
 
@@ -161,7 +161,8 @@ varios países.
 2. **El worker descarga** (nueva etapa `downloading`; la barra muestra "Descargando el video"):
    - **TikTok, Instagram y Facebook:** con **yt-dlp** (versión fijada `2026.8.19` en `worker/Dockerfile`),
      con `curl-cffi` para "parecerse" a un navegador real.
-     - Hasta 1080p, prefiriendo H.264/AAC; todo en un `.mp4`.
+     - Para clips: hasta 1080p y 60 fps si los hay, prefiriendo H.264/AAC; todo en un `.mp4`.
+     - «Guardar»: la calidad original, sin tope.
      - Rechaza transmisiones en vivo y videos de más de 3 h.
      - TikTok exige la imitación de navegador. Sin `curl-cffi`, en la primera prueba real
        (01/10/2026) TikTok respondió "Unexpected response". Con `curl-cffi` se probó un enlace
@@ -236,8 +237,8 @@ Desde el 02/10/2026 el procesador puede descargar a través de un proxy residenc
   - **TikTok** funciona sin proxy, así que normalmente no gasta nada.
   - **Instagram y Facebook** usan el proxy solo cuando bloquean a AWS.
   - **Sin uso no hay costo:** Evomi cobra por GB usado, no por mes.
-- **Por el proxy se descarga hasta 720p:** se paga por GB y para clips verticales alcanza.
-  - Un video de 10 min pesa ~50–100 MB, unos 0,03–0,05 USD.
+- **Por el proxy se descarga con la misma calidad (hasta 1080p):** se paga por GB.
+  - Un video de 10 min en 1080p pesa ~100–200 MB, unos 0,05–0,10 USD.
 - **Opciones de Evomi:** el procesador las agrega solo a la contraseña.
   - **País fijo, EE. UU.** (`_country-US`). Con "Mundial", cada descarga salía de un país al azar
     y algunos videos volvían "no disponible en tu país" (visto el 02/10/2026).
@@ -326,3 +327,17 @@ El original ocupa S3 igual que un video subido y se borra al eliminar el video.
   - la importación envía las opciones elegidas;
   - la pantalla "Descargando el video";
   - el estado en Mis videos.
+
+## Calidad y borrado del original (13/10/2026)
+
+- **Para clips:** hasta **1080p** en todas las plataformas (Kick y Twitch también; antes 720p), con 60 fps
+  si los hay. Un clip vertical es de 1080x1920: el recorte de un video de 1080p ya se ve a resolución
+  completa, y más arriba no se notaría (tardaría mucho más). Los clips se comprimen con CRF 20 (antes 23).
+- **«Guardar»:** la calidad **original** de la plataforma, sin tope.
+- **Después de crear los clips, el video bajado del enlace se borra de S3** (también la copia liviana
+  de un stream largo). Quedan los clips, miniaturas, subtítulos y la transcripción.
+  - Se marca en el video (`probe.clipflowOriginalDeleted`) antes de borrar el archivo.
+  - Si se reintenta o se vuelve a procesar, se baja de nuevo del enlace (la transcripción guardada se
+    reutiliza: no se paga de nuevo).
+  - Un video guardado con «Guardar» **no** se borra aunque después se creen clips.
+  - Los videos que el usuario sube desde su celular o computadora no se borran.

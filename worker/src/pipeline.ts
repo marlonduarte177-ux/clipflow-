@@ -267,8 +267,8 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
 
   /**
    * Importa el enlace. Un video guardado LARGO de Kick o Twitch (para crear clips) no se baja entero
-   * en 720p: se baja una copia liviana (160p, ~100 MB por hora) para elegir los momentos, y después
-   * solo los tramos de los clips en 720p. Devuelve si quedó como copia liviana.
+   * en 1080p: se baja una copia liviana (160p, ~100 MB por hora) para elegir los momentos, y después
+   * solo los tramos de los clips en 1080p. Devuelve si quedó como copia liviana.
    */
   const importFromLink = async (video: typeof videos.$inferSelect, workDir: string): Promise<{ file: string; analysisCopy: boolean }> => {
     if (!video.sourceUrl) throw new JobError("import_failed", "Falta el enlace del video.", false);
@@ -283,7 +283,8 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       }
       downloaded = await (deps.download ?? downloadFromUrl)(video.sourceUrl, workDir, {
         ...linkOptions(),
-        ...(analysisCopy ? { quality: "analysis" as const } : {}),
+        // «Guardar»: la calidad original. Para clips: hasta 1080p (o la copia liviana de un stream largo).
+        ...(analysisCopy ? { quality: "analysis" as const } : (job.params as JobParams).downloadOnly ? { quality: "original" as const } : {}),
         onProgress: (f) => void progress("downloading", f).catch(() => undefined),
       });
     } catch (err) {
@@ -336,13 +337,18 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
 
     // 0. Video importado por enlace: se descarga aquí (nunca en la API) y se guarda en S3.
     let input: string;
-    // Stream largo analizado con copia liviana: los clips se cortan del enlace en 720p. Se recuerda
+    // Stream largo analizado con copia liviana: los clips se cortan del enlace en 1080p. Se recuerda
     // en el video (`probe.clipflowAnalysisCopy`) para reprocesar igual sin volver a bajar la copia.
     let analysisCopy = Boolean((video.probe as { clipflowAnalysisCopy?: boolean } | null)?.clipflowAnalysisCopy);
-    // También al REINTENTAR un enlace que no se pudo descargar (quedó rechazado y sin archivo):
-    // se vuelve a descargar en lugar de buscar un original que nunca existió.
-    const retryImport = video.status === "rejected" && Boolean(video.sourceUrl) && video.sizeBytes === 0;
-    if (video.status === "importing" || retryImport) {
+    // También al REINTENTAR un enlace que no se pudo descargar (quedó rechazado y sin archivo) o cuyo
+    // original ya se borró después de hacer los clips: se vuelve a descargar del enlace.
+    const originalDeleted = Boolean((video.probe as { clipflowOriginalDeleted?: boolean } | null)?.clipflowOriginalDeleted);
+    const retryImport =
+      Boolean(video.sourceUrl) &&
+      ((video.status === "rejected" && video.sizeBytes === 0) || (originalDeleted && (video.status === "ready" || video.status === "uploaded")));
+    // Si este trabajo baja el video del enlace, al terminar los clips lo borra (ver más abajo).
+    const imported = video.status === "importing" || retryImport;
+    if (imported) {
       if (retryImport) {
         await deps.db.update(videos).set({ status: "importing", rejectionReason: null }).where(eq(videos.id, video.id));
       }
@@ -590,7 +596,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
         force,
       ).catch(() => undefined);
 
-    // Stream largo: las direcciones del video en 720p se piden una vez; cada clip baja solo su tramo.
+    // Stream largo: las direcciones del video en 1080p se piden una vez; cada clip baja solo su tramo.
     let streamSource: StreamSource | null = null;
     if (analysisCopy && finalMoments.length) {
       if (!video.sourceUrl) throw new JobError("source_missing", "Falta el enlace del video para cortar los clips.", false);
@@ -602,7 +608,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
         throw new JobError("source_failed", `No pudimos abrir el video original para cortar los clips: ${err.message}`, err.retryable);
       }
     }
-    /** De dónde sale cada clip: el video completo, o (stream largo) su tramo en 720p recién bajado. */
+    /** De dónde sale cada clip: el video completo, o (stream largo) su tramo en 1080p recién bajado. */
     const clipSource = async (index: number, moment: (typeof finalMoments)[number]) => {
       if (!streamSource) return { file: input, info, box: contentBox, offset: 0 };
       const file = path.join(dir, `section-${index}.mp4`);
@@ -835,6 +841,24 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
           : []),
       ]);
     });
+    // Video bajado de un enlace para hacer clips: ya no hace falta guardarlo (los clips, miniaturas,
+    // subtítulos y la transcripción quedan). Si se reintenta, se vuelve a bajar del enlace. Un video
+    // guardado con «Guardar» no se toca: lo bajó otro trabajo.
+    // Primero la marca y después el archivo: si se corta en el medio, el reintento igual lo vuelve a bajar.
+    if (imported && outputs.length > 0) {
+      try {
+        const [current] = await deps.db.select({ probe: videos.probe }).from(videos).where(eq(videos.id, video.id));
+        await deps.db
+          .update(videos)
+          .set({ probe: { ...((current?.probe as object | null) ?? {}), clipflowOriginalDeleted: true } })
+          .where(eq(videos.id, video.id));
+        await deps.storage.remove(video.s3Key);
+        deps.log.info({ jobId: job.id }, "video original borrado después de crear los clips");
+      } catch (err) {
+        // No es grave: los clips ya están. Queda guardado como antes.
+        deps.log.warn({ jobId: job.id, error: (err as Error).message }, "no se pudo borrar el video original");
+      }
+    }
     const usd = (n: number) => Math.round(n * 1_000_000) / 1_000_000;
     return {
       clipCount: outputs.length,
