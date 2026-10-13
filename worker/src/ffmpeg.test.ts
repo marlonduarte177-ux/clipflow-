@@ -74,7 +74,7 @@ describe("encuadre inteligente", () => {
     const info = await probe(tools, file);
     const box = await detectContentBox(tools, file, info);
     const crop = await chooseVerticalCrop(tools, file, info, box, { startSeconds: 0, durationSeconds: 3 });
-    expect(crop).toEqual({ x: 0, y: 0, width: 720, height: 1280, fit: true });
+    expect(crop).toEqual({ x: 0, y: 0, width: 720, height: 1280, fit: true, source: { width: 720, height: 1280 } });
   });
 
   it("un video vertical de celular guardado con marca de giro se reconoce como vertical", async () => {
@@ -88,7 +88,7 @@ describe("encuadre inteligente", () => {
     const info = await probe(tools, turned);
     expect({ width: info.width, height: info.height }).toEqual({ width: 360, height: 640 });
     const crop = await chooseVerticalCrop(tools, turned, info, null, { startSeconds: 0, durationSeconds: 2 });
-    expect(crop).toEqual({ x: 0, y: 0, width: 360, height: 640, fit: true });
+    expect(crop).toEqual({ x: 0, y: 0, width: 360, height: 640, fit: true, source: { width: 360, height: 640 } });
   });
 
   it("un video sin franjas no se recorta de más", async () => {
@@ -188,6 +188,40 @@ describe("encuadre que sigue caras", () => {
     const top = execFileSync("ffmpeg", ["-loglevel", "error", "-ss", "1", "-i", out, "-frames:v", "1", "-vf", "crop=1080:300:0:0,scale=36:10,format=gray", "-f", "rawvideo", "-"]);
     const mean = top.reduce((a, b) => a + b, 0) / top.length;
     expect(mean).toBeGreaterThan(20);
+  });
+});
+
+describe("videos que cambian de resolución a mitad de camino", () => {
+  it("genera el clip aunque los fotogramas se achiquen o cambien de forma", async () => {
+    // 3 s en 1280x720, 3 s en 640x360 y 2 s vertical (pasa en videos editados o grabaciones de pantalla).
+    const parts = [
+      ["1280x720", 3],
+      ["640x360", 3],
+      ["360x640", 2],
+    ] as const;
+    const files = parts.map(([size, seconds], i) => {
+      const part = path.join(dir, `resize-${i}.ts`);
+      execFileSync("ffmpeg", [
+        "-hide_banner", "-loglevel", "error", "-y",
+        "-f", "lavfi", "-i", `testsrc2=size=${size}:rate=25:duration=${seconds}`,
+        "-f", "lavfi", "-i", `sine=duration=${seconds}`,
+        "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", part,
+      ]);
+      return part;
+    });
+    const file = path.join(dir, "resize.mp4");
+    execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", `concat:${files.join("|")}`, "-c", "copy", file]);
+    const info = await probe(tools, file);
+    expect([info.width, info.height]).toEqual([1280, 720]);
+
+    const segment = { startSeconds: 0, durationSeconds: 8 };
+    const crop = await chooseVerticalCrop(tools, file, info, null, segment, undefined, { faces: true });
+    expect(crop.source).toEqual({ width: 1280, height: 720 });
+    const out = path.join(dir, "resize-vertical.mp4");
+    await renderVerticalClip(tools, file, out, segment, { crop });
+    const result = await probe(tools, out);
+    expect([result.width, result.height]).toEqual([1080, 1920]);
+    expect(result.durationSeconds).toBeGreaterThan(7.5);
   });
 });
 
