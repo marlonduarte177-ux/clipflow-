@@ -198,11 +198,47 @@ describe("videos importados por enlace", () => {
 
     const [row] = await db.select().from(schema.videos).where(eq(schema.videos.id, video.id));
     expect(row).toMatchObject({ status: "ready", originalFilename: "Mi entrevista: parte 1.mp4", mimeType: "video/mp4" });
-    expect(row!.sizeBytes).toBe(statSync(sample).size);
-    // El original quedó en S3 (aquí, almacenamiento local) para poder reprocesar sin volver a descargar.
-    expect(statSync(path.join(root, video.s3Key)).size).toBe(statSync(sample).size);
     const usage = await db.select().from(schema.usage).where(eq(schema.usage.videoId, video.id));
     expect(usage.find((u) => u.metric === "storage_bytes")).toMatchObject({ details: { event: "import_completed" } });
+    // Con los clips hechos, el original bajado del enlace se borra (los clips quedan).
+    expect(existsSync(path.join(root, video.s3Key))).toBe(false);
+    expect(row!.probe).toMatchObject({ clipflowOriginalDeleted: true });
+    const clipRows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
+    for (const c of clipRows) expect(existsSync(path.join(root, c.s3Key!))).toBe(true);
+
+    // Volver a procesarlo (p. ej. Reintentar): se baja otra vez del enlace y se vuelve a borrar.
+    const { job: again } = await createJob(db, { userId: job.userId, videoId: video.id, type: "analyze_video", idempotencyKey: `again:${video.id}`, params: { clipDurationSeconds: 15 } });
+    const second = await processAnalyzeJob((await claimJob(db, again.id, "test-worker"))!, deps);
+    expect(calls).toEqual(["https://www.tiktok.com/@ana/video/1", "https://www.tiktok.com/@ana/video/1"]);
+    expect(second.clipCount).toBeGreaterThan(0);
+    expect(existsSync(path.join(root, video.s3Key))).toBe(false);
+    const [after] = await db.select().from(schema.videos).where(eq(schema.videos.id, video.id));
+    expect(after).toMatchObject({ status: "ready", probe: { clipflowOriginalDeleted: true } });
+  });
+
+  it("«Guardar» y después «Crear clips»: el video guardado NO se borra", async () => {
+    const db = h!.db;
+    const { job, video } = await seedVideoJob(db, root, { sample, importUrl: "https://www.tiktok.com/@ana/video/3", params: { downloadOnly: true } });
+    const qualities: (string | undefined)[] = [];
+    const deps = {
+      ...makeDeps(db, root, path.join(root, "work")),
+      download: async (_url: string, dir: string, options: { quality?: string }) => {
+        qualities.push(options.quality);
+        const file = path.join(dir, "source.mp4");
+        execFileSync("cp", [sample, file]);
+        return { file, sizeBytes: statSync(file).size, title: "Mi baile" };
+      },
+    };
+    await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
+    // «Guardar» pide la calidad original.
+    expect(qualities).toEqual(["original"]);
+    const { job: clipsJob } = await createJob(db, { userId: job.userId, videoId: video.id, type: "analyze_video", idempotencyKey: `clips:${video.id}`, params: { clipDurationSeconds: 15 } });
+    const result = await processAnalyzeJob((await claimJob(db, clipsJob.id, "test-worker"))!, deps);
+    expect(result.clipCount).toBeGreaterThan(0);
+    expect(qualities).toEqual(["original"]); // no se volvió a bajar
+    expect(existsSync(path.join(root, video.s3Key))).toBe(true);
+    const [row] = await db.select().from(schema.videos).where(eq(schema.videos.id, video.id));
+    expect(row!.probe).not.toHaveProperty("clipflowOriginalDeleted");
   });
 
   it("solo descargar: guarda el original listo para bajarlo, sin analizar ni crear clips", async () => {
@@ -368,9 +404,9 @@ describe("streams largos de Kick/Twitch: copia liviana para analizar y solo los 
     return { deps, calls };
   }
 
-  it("analiza la copia liviana, corta cada clip en 720p desde el enlace y no ofrece la copia para descargar", async () => {
+  it("analiza la copia liviana, corta cada clip en 1080p desde el enlace y no ofrece la copia para descargar", async () => {
     const db = h!.db;
-    // El "720p" de la plataforma: el mismo video en otra resolución.
+    // El "1080p" de la plataforma: el mismo video en otra resolución.
     const hd = path.join(root, "hd.mp4");
     execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-i", sample, "-vf", "scale=1280:720", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", hd]);
     const { job, video } = await seedVideoJob(db, root, { sample, importUrl: "https://www.twitch.tv/videos/123" });
@@ -387,10 +423,13 @@ describe("streams largos de Kick/Twitch: copia liviana para analizar y solo los 
     const [row] = await db.select().from(schema.videos).where(eq(schema.videos.id, video.id));
     expect(row!.probe).toMatchObject({ clipflowAnalysisCopy: true });
 
-    // Volver a procesar: usa la copia guardada (no baja nada entero) y vuelve a cortar los tramos.
+    // Con los clips hechos, la copia liviana se borra.
+    expect(existsSync(path.join(root, video.s3Key))).toBe(false);
+
+    // Volver a procesar: baja otra vez la copia liviana (nunca el stream entero) y corta los tramos.
     const { job: again } = await createJob(db, { userId: job.userId, videoId: video.id, type: "analyze_video", idempotencyKey: `again:${video.id}`, params: { clipDurationSeconds: 15 } });
     await processAnalyzeJob((await claimJob(db, again.id, "test-worker"))!, deps);
-    expect(calls.downloads).toEqual(["analysis"]);
+    expect(calls.downloads).toEqual(["analysis", "analysis"]);
     expect(calls.resolve).toBe(2);
   });
 
@@ -442,6 +481,6 @@ describe("streams largos de Kick/Twitch: copia liviana para analizar y solo los 
     const { deps, calls } = streamDeps(db, sample);
     await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
     expect(calls.info).toBe(0);
-    expect(calls.downloads).toEqual([undefined]);
+    expect(calls.downloads).toEqual(["original"]);
   });
 });

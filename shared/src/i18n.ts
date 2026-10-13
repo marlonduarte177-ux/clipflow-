@@ -48,6 +48,7 @@ const EXACT: Record<string, string> = {
     "For this video we only kept a light copy to pick the moments. To get the full video, import it with “Download video only”.",
   "El cuerpo no es JSON válido.": "The request body is not valid JSON.",
   "El video todavía no está listo para descargar.": "The video is not ready to download yet.",
+  "El video original se borró después de crear los clips. Tus clips siguen disponibles.": "The original video was deleted after the clips were made. Your clips are still available.",
   "Envía los datos como JSON.": "Send the data as JSON.",
   "Esta cuenta está desactivada.": "This account is disabled.",
   "Este trabajo ya terminó.": "This job has already finished.",

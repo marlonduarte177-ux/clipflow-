@@ -1,15 +1,17 @@
 import { createReadStream, createWriteStream } from "node:fs";
-import { copyFile, mkdir, stat } from "node:fs/promises";
+import { copyFile, mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 
 /** Lo que el worker necesita de S3. */
 export interface WorkerStorage {
   download(key: string, file: string, onBytes?: (bytes: number) => void, signal?: AbortSignal): Promise<void>;
   upload(file: string, key: string, contentType: string): Promise<void>;
+  /** Borra un archivo (solo videos originales bajados de un enlace, ya usados para los clips). */
+  remove(key: string): Promise<void>;
 }
 
 export function createS3WorkerStorage(options: { bucket: string; region: string; client?: S3Client }): WorkerStorage {
@@ -51,6 +53,9 @@ export function createS3WorkerStorage(options: { bucket: string; region: string;
         }),
       );
     },
+    async remove(key) {
+      await s3.send(new DeleteObjectCommand({ Bucket, Key: key }));
+    },
   };
 }
 
@@ -68,6 +73,9 @@ export function createLocalStorage(root: string): WorkerStorage {
       const target = path.join(root, key);
       await mkdir(path.dirname(target), { recursive: true });
       await copyFile(file, target);
+    },
+    async remove(key) {
+      await rm(path.join(root, key), { force: true });
     },
   };
 }

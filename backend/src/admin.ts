@@ -68,7 +68,8 @@ export function adminRoutes(deps: {
         .from(videos)
         .where(and(eq(videos.id, params.data.videoId), eq(videos.userId, userId)));
       if (!source) return sendError(reply, 404, "not_found", "Video no encontrado.");
-      if ((source.status !== "uploaded" && source.status !== "ready") || source.sizeBytes <= 0) {
+      const originalDeleted = Boolean((source.probe as { clipflowOriginalDeleted?: boolean } | null)?.clipflowOriginalDeleted);
+      if ((source.status !== "uploaded" && source.status !== "ready") || source.sizeBytes <= 0 || originalDeleted) {
         return sendError(reply, 409, "not_processable", "Este video no se puede procesar.");
       }
       const duration = product.clipDurationsSeconds.includes(body.data.clipDurationSeconds ?? -1)
