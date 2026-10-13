@@ -60,6 +60,7 @@ import {
   verticalFilter,
   type FfmpegTools,
   type ProbeResult,
+  type VerticalCrop,
 } from "./ffmpeg.js";
 import type { WorkerStorage } from "./storage.js";
 import { AIProviderError } from "./ai/openai.js";
@@ -655,17 +656,20 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
         speaking,
         onWarning: (message, err) => deps.log.warn({ jobId: job.id, clip: index, error: (err as Error).message }, message),
       });
-      try {
+      const render = async (framing: VerticalCrop | null) => {
         await renderVerticalClip(deps.tools, source.file, clipFile, segment, {
           signal: controller.signal,
-          crop,
+          crop: framing,
           subtitles: burn,
           onProgress: (sec) => {
             clipProgress[index] = Math.min(0.95, sec / duration);
             void reportClips();
           },
         });
-        await renderThumbnail(deps.tools, source.file, thumbFile, segment.startSeconds + duration / 2, controller.signal, cropAt(crop, duration / 2));
+        await renderThumbnail(deps.tools, source.file, thumbFile, segment.startSeconds + duration / 2, controller.signal, framing && cropAt(framing, duration / 2));
+      };
+      try {
+        await render(crop);
       } catch (err) {
         // Solo medidas (sin contenido): para entender por qué FFmpeg rechaza un recorte.
         if (err instanceof FfmpegError && !controller.signal.aborted) {
@@ -685,7 +689,23 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
             "no se pudo generar el clip",
           );
         }
-        throw err;
+        if (!(err instanceof FfmpegError) || controller.signal.aborted) throw err;
+        // Respaldo: el mismo encuadre fijo (sin seguir caras) y, si tampoco, el video centrado. Así un
+        // recorte que FFmpeg no acepta no deja sin clips un video ya transcrito y analizado.
+        const fallbacks: VerticalCrop[] = [];
+        if (crop.path) fallbacks.push(cropAt(crop, duration / 2));
+        let rendered = false;
+        for (const framing of [...fallbacks, null]) {
+          try {
+            await render(framing);
+            rendered = true;
+            deps.log.warn({ jobId: job.id, clip: index, framing: framing ? "fijo" : "centrado" }, "clip generado con el encuadre de respaldo");
+            break;
+          } catch (retryErr) {
+            if (!(retryErr instanceof FfmpegError) || controller.signal.aborted) throw retryErr;
+          }
+        }
+        if (!rendered) throw err;
       }
       if (source.file !== input) await rm(source.file, { force: true }); // el tramo ya no hace falta
       check();

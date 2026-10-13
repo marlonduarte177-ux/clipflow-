@@ -173,4 +173,56 @@ describe("trayectoria para FFmpeg", () => {
     const expr = pathExpression(pieces);
     for (let t = 0; t < 12; t += 0.04) expect(evaluate(expr, t)).toBeCloseTo(Math.round(positionAt(pieces, t)), -0.5);
   });
+
+  it("clips con muchos tramos: la expresión no pasa el límite de 100 niveles del FFmpeg del procesador", () => {
+    // Niveles del árbol como los cuenta FFmpeg (libavutil/eval.c): cada operación o función suma uno.
+    const depthOf = (expr: string) => {
+      let i = 0;
+      const primary = (): number => {
+        if (expr[i] === "-") i++;
+        if (expr[i] === "(") {
+          i++;
+          const d = sum();
+          i++; // ")"
+          return d;
+        }
+        const name = /^[a-z]+/.exec(expr.slice(i));
+        if (name && expr[i + name[0].length] === "(") {
+          i += name[0].length + 1;
+          let d = sum();
+          while (expr[i] === ",") {
+            i++;
+            d = Math.max(d, sum());
+          }
+          i++; // ")"
+          return d + 1;
+        }
+        i += /^[\w.]+/.exec(expr.slice(i))![0].length;
+        return 0;
+      };
+      const chain = (ops: string, next: () => number) => () => {
+        let d = next();
+        while (ops.includes(expr[i] ?? "_")) {
+          i++;
+          d = Math.max(d, next()) + 1;
+        }
+        return d;
+      };
+      const term = chain("*/", primary);
+      const sum = chain("+-", term);
+      const d = sum();
+      expect(i).toBe(expr.length);
+      return d;
+    };
+    // Un clip de 60 s con la cámara moviéndose todo el tiempo: ~150 tramos.
+    const times = Array.from({ length: 240 }, (_, k) => k * DT);
+    const xs = times.map((t, k) => (k % 2 ? 200 : 600) + 10 * t);
+    const pieces = toPieces(times, xs, DT, 1);
+    expect(pieces.length).toBeGreaterThan(100);
+    const expr = pathExpression(pieces);
+    expect(depthOf(expr)).toBeLessThan(30);
+    for (let t = 0; t < 60; t += 0.1) expect(evaluate(expr, t)).toBeCloseTo(Math.round(positionAt(pieces, t)), -0.5);
+    // Antes: una suma en cadena (un nivel por tramo).
+    expect(depthOf(pieces.map(() => "gte(t,1)*lt(t,2)*3").join("+"))).toBeGreaterThan(100);
+  });
 });

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -72,6 +72,23 @@ describe("procesamiento de un video real con FFmpeg", () => {
     // Progreso real guardado.
     const [j] = await db.select().from(schema.processingJobs).where(eq(schema.processingJobs.id, job.id));
     expect(j!.progress).toBeGreaterThanOrEqual(95);
+  });
+
+  it("si FFmpeg rechaza el encuadre, el clip se genera igual con el encuadre de respaldo", async () => {
+    const db = h!.db;
+    const { job } = await seedVideoJob(db, root, { sample });
+    const claimed = (await claimJob(db, job.id, "test-worker"))!;
+    // FFmpeg que rechaza todo recorte calculado sobre el video (como el de 5.1 con una trayectoria larga).
+    const ffmpeg = path.join(root, "ffmpeg-rechaza-recorte.sh");
+    writeFileSync(ffmpeg, '#!/bin/sh\ncase "$*" in *":-1:-1,crop="*"split=2"*) echo "Failed to configure input pad" >&2; exit 1;; esac\nexec ffmpeg "$@"\n');
+    chmodSync(ffmpeg, 0o755);
+    const deps = makeDeps(db, root, path.join(root, "work"));
+
+    const result = await processAnalyzeJob(claimed, { ...deps, tools: { ...deps.tools, ffmpegPath: ffmpeg } });
+    expect(result.clipCount).toBeGreaterThan(0);
+    const clipRows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
+    expect(clipRows.length).toBe(result.clipCount);
+    for (const c of clipRows) expect(probeSize(path.join(root, c.s3Key!))).toBe("1080,1920");
   });
 
   it("repetir el trabajo reemplaza los clips en vez de duplicarlos", async () => {
