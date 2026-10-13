@@ -104,3 +104,21 @@ servidor: el audio no sale para eso.
   solo la clave. Los procesadores la leen al arrancar (el siguiente video ya la usa).
 - Sin clave (o con el valor de relleno), el procesador transcribe con Whisper y lo dice en su registro de arranque.
 - Para volver a Whisper: `TRANSCRIBE_PROVIDER = openai` en `infrastructure/lib/worker-stack.ts`.
+
+## Más clips y subtítulos obligatorios (13/10/2026)
+
+- **Más clips:** a la IA se le piden **entre 12 y 15 momentos por cada parte de 20 min** (tantos como entren
+  sin pisarse con el largo pedido; antes "como máximo 8, los mejores", y devolvía 3 a 5). Se aceptan
+  desde fuerza 0,3 (antes 0,5); los mejores van primero.
+- **Mínimo 10 clips** si caben en el video sin pisarse: si la IA propone menos, se completan con los
+  tramos de más reacción (volumen, acción, movimiento, risas…), cortados en frases completas y siempre con
+  puntaje por debajo de los de la IA. Sin IA (señales), igual. Máximo: 20 por video (antes 15).
+  - Un video corto no se rellena: 2 min con clips de 60 s dan como mucho 2.
+- **Subtítulos:**
+  - Antes, si el video tenía poca habla (menos del 10 %: gameplay con comentarios sueltos, canciones) se
+    descartaban TODAS las palabras y ningún clip llevaba subtítulos. Ahora la IA sigue eligiendo por lo
+    que ve y oye, pero cada clip donde alguien habla lleva sus subtítulos.
+  - Si la transcripción falla, **no se entregan clips sin subtítulos**: el trabajo se reintenta (las partes
+    ya transcritas no se vuelven a pagar) y, si se acaban los intentos, falla con el motivo y devuelve los
+    minutos.
+  - Un clip donde nadie habla (solo música o acción) no lleva subtítulos: no hay qué escribir.

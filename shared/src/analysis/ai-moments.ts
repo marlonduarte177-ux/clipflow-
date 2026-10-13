@@ -4,8 +4,13 @@ import { clampToRange, clipDurationRange, fitToSentences } from "./transcript.js
 import { normalizeSeries, selectMoments, SIGNAL_MIN_RANGE, type Moment, type SignalName, type SignalSeries } from "./scoring.js";
 import { soundBonus } from "./sounds.js";
 
-/** Fuerza mínima (0–1) que la IA le dio a un momento para que sea clip. */
-export const AI_MIN_STRENGTH = 0.5;
+/** Fuerza mínima (0–1) que la IA le dio a un momento para que sea clip (los mejores van primero). */
+export const AI_MIN_STRENGTH = 0.3;
+/**
+ * Clips que se intentan entregar como mínimo (si caben en el video sin pisarse): si la IA propone
+ * menos, se completan con los tramos de más reacción (volumen, acción, movimiento, risas…).
+ */
+export const MIN_CLIPS_PER_VIDEO = 10;
 /** Cuánto pesa la reacción (volumen, acción, movimiento, chat…) frente a lo que dijo la IA. */
 const REACTION_WEIGHT = 0.2;
 /** Momentos solo por señales (sin la IA) que se suman a los de la IA, y su score relativo mínimo. */
@@ -23,6 +28,8 @@ export interface SelectAiMomentsInput {
   /** Duración elegida por el usuario: cada clip dura eso ±5 s (ver clipDurationRange). */
   clipDurationSeconds: number;
   maxClips: number;
+  /** Mínimo de clips a entregar si caben (ver MIN_CLIPS_PER_VIDEO). */
+  minClips?: number;
   minGapSeconds?: number;
   /** Frases de la transcripción: para cortar en frases completas y saber qué tramos no tienen habla. */
   segments?: TranscriptSegment[];
@@ -128,7 +135,65 @@ export function selectAiMoments(input: SelectAiMomentsInput): Moment[] {
       added++;
     }
   }
+
+  // Menos clips que el mínimo: se completan con los tramos de más reacción que no se pisen (cortados
+  // en frases completas si hay habla), siempre con puntaje por debajo de los de la IA.
+  const minClips = Math.min(input.minClips ?? 0, input.maxClips);
+  if (chosen.length < minClips) {
+    const floor = chosen.length ? Math.min(...chosen.map((c) => c.score)) : 1;
+    const bounds = { min, max, videoDurationSeconds: input.durationSeconds };
+    // Varias pasadas: los huecos que deja una pasada se buscan de nuevo en la siguiente.
+    for (let pass = 0; pass < 3 && chosen.length < minClips; pass++) {
+      for (const m of fillMoments(input, chosen, gap)) {
+        if (chosen.length >= minClips) break;
+        const fitted = hasSpeech ? (fitToSentences(m.startSeconds, m.endSeconds, input.segments!, bounds) ?? null) : null;
+        const candidate = fitted ? { ...m, startSeconds: round(fitted.startSeconds), endSeconds: round(fitted.endSeconds) } : m;
+        if (overlaps(candidate, chosen)) continue;
+        chosen.push({ ...candidate, score: round(Math.min(m.score, floor) * 0.98) });
+      }
+    }
+  }
   return chosen.sort((a, b) => a.startSeconds - b.startSeconds);
+}
+
+/**
+ * Tramos del largo pedido ordenados por reacción (sin puntaje mínimo), para completar el mínimo de
+ * clips. Si ninguna señal varía (video plano), tramos repartidos a lo largo del video.
+ */
+export function fillMoments(
+  input: Pick<SelectAiMomentsInput, "durationSeconds" | "signals" | "weights" | "clipDurationSeconds" | "maxClips">,
+  taken: Moment[],
+  gap: number,
+): Moment[] {
+  const names = (Object.keys(input.signals) as SignalName[]).filter((n) => (input.signals[n]?.length ?? 0) > 0 && input.weights[n] > 0);
+  const signals = Object.fromEntries(names.map((n) => [n, input.signals[n]!])) as SignalSeries;
+  const ranked = names.length
+    ? selectMoments({
+        durationSeconds: input.durationSeconds,
+        signals,
+        weights: input.weights,
+        clipDurationSeconds: input.clipDurationSeconds,
+        minScore: 0,
+        maxClips: input.maxClips + taken.length,
+        minGapSeconds: gap,
+      }).sort((a, b) => b.score - a.score)
+    : [];
+  // Último recurso (video plano, o huecos que quedaron entre los elegidos): tramos seguidos, cada
+  // uno pegado al anterior ya ocupado.
+  const clip = Math.max(1, Math.round(input.clipDurationSeconds));
+  const busy = [...taken].sort((a, b) => a.startSeconds - b.startSeconds);
+  const even: Moment[] = [];
+  let start = 0;
+  while (start + clip <= input.durationSeconds) {
+    const clash = busy.find((m) => start < m.endSeconds + gap && m.startSeconds < start + clip + gap);
+    if (clash) {
+      start = Math.ceil(clash.endSeconds + gap);
+      continue;
+    }
+    even.push({ startSeconds: start, endSeconds: start + clip, score: 0, breakdown: {} });
+    start += clip + gap;
+  }
+  return [...ranked, ...even];
 }
 
 const round = (n: number) => Math.round(n * 10_000) / 10_000;

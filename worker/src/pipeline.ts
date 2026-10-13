@@ -15,6 +15,8 @@ import {
   reactionSignalFromSounds,
   transcriptCacheKey,
   segmentsForRange,
+  fillMoments,
+  MIN_CLIPS_PER_VIDEO,
   selectAiMoments,
   selectMoments,
   speechSignalFromHighlights,
@@ -514,21 +516,32 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
           weights: deps.product.scoreWeights,
           clipDurationSeconds: clipDuration,
           maxClips: deps.product.maxClipsPerVideo,
+          minClips: MIN_CLIPS_PER_VIDEO,
           segments: ai.segments,
           sounds: ai.sounds,
         })
       : [];
     const selection = aiMoments.length ? "ai" : "signals";
-    const moments = aiMoments.length
-      ? aiMoments
-      : selectMoments({
-          durationSeconds: info.durationSeconds,
-          signals,
-          weights: deps.product.scoreWeights,
-          clipDurationSeconds: clipDuration,
-          minScore: deps.product.minClipScore,
-          maxClips: deps.product.maxClipsPerVideo,
-        });
+    const signalInput = {
+      durationSeconds: info.durationSeconds,
+      signals,
+      weights: deps.product.scoreWeights,
+      clipDurationSeconds: clipDuration,
+      maxClips: deps.product.maxClipsPerVideo,
+    };
+    const moments = aiMoments.length ? aiMoments : selectMoments({ ...signalInput, minScore: deps.product.minClipScore });
+    // Sin IA también se completa el mínimo de clips con los siguientes tramos de más reacción.
+    if (selection === "signals" && moments.length && moments.length < Math.min(MIN_CLIPS_PER_VIDEO, deps.product.maxClipsPerVideo)) {
+      const gap = 2;
+      const target = Math.min(MIN_CLIPS_PER_VIDEO, deps.product.maxClipsPerVideo);
+      for (let pass = 0; pass < 3 && moments.length < target; pass++) {
+        for (const m of fillMoments(signalInput, moments, gap)) {
+          if (moments.length >= target) break;
+          if (!moments.some((c) => m.startSeconds < c.endSeconds + gap && c.startSeconds < m.endSeconds + gap)) moments.push(m);
+        }
+      }
+      moments.sort((a, b) => a.startSeconds - b.startSeconds);
+    }
     // Largo obligatorio (duración elegida ±5 s). Los momentos de la IA ya vienen ajustados en frases;
     // los demás se ajustan aquí: en frases completas si hay transcripción, si no, a la medida.
     const bounds = { ...clipDurationRange(clipDuration), videoDurationSeconds: info.durationSeconds };
@@ -571,9 +584,9 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
 
     step = "generar y guardar los clips";
     // Transcripción completa del video (la web la muestra en "Ver todo el video").
-    if (ai.segments.length) {
+    if (ai.captions.length) {
       const fullFile = path.join(dir, "full.vtt");
-      await writeFile(fullFile, toVtt(ai.segments));
+      await writeFile(fullFile, toVtt(ai.captions));
       await deps.storage.upload(fullFile, fullTranscriptKey(job.userId, job.id), "text/vtt");
     }
     const requested = (job.params as JobParams).subtitleStyle;
@@ -641,7 +654,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       const segment = { startSeconds: moment.startSeconds - source.offset, durationSeconds: duration };
       // Subtítulos del clip (tiempos relativos al clip): en archivo y, según el estilo elegido,
       // dibujados en el video.
-      const clipSegments = segmentsForRange(ai.segments, moment.startSeconds, moment.endSeconds);
+      const clipSegments = segmentsForRange(ai.captions, moment.startSeconds, moment.endSeconds);
       let burn: { file: string; fontsDir: string } | undefined;
       if (subtitleStyle !== "none" && clipSegments.length) {
         const ass = buildAss(clipSegments, subtitleStyle, duration);
@@ -781,7 +794,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
                 videoId: job.videoId,
                 clipId: inserted[i]!.id,
                 format,
-                language: ai.language,
+                language: ai.captionsLanguage,
                 s3Key: o.subtitleKeys![format],
               }))
             : [],
@@ -981,7 +994,14 @@ async function saveTranscript(
 interface AIOutcome {
   status: JobResult["ai"];
   reason?: string;
+  /** Lo que usa la IA para elegir (vacío si casi no hay habla: elige por lo que se ve y se oye). */
   segments: TranscriptSegment[];
+  /**
+   * TODO lo que se transcribió, para los subtítulos: aunque el video casi no tenga habla (gameplay con
+   * comentarios sueltos, canciones), cada clip con palabras lleva sus subtítulos.
+   */
+  captions: TranscriptSegment[];
+  captionsLanguage: string | null;
   /** Versión nueva: sonidos detectados y cuántos fotogramas vio la IA. */
   sounds?: SoundEvent[];
   frames?: number;
@@ -1059,7 +1079,7 @@ async function runAI(
     skipTranscriptCache?: boolean;
   },
 ): Promise<AIOutcome> {
-  const empty = { segments: [], language: null, usage: {}, transcribeCostUsd: 0 };
+  const empty = { segments: [], captions: [], captionsLanguage: null, language: null, usage: {}, transcribeCostUsd: 0 };
   if (!provider) return { ...empty, status: "disabled", reason: deps.aiDisabledReason ?? "IA no configurada" };
   if (!info.hasAudio) return { ...empty, status: "no_audio", reason: "El video no tiene audio" };
   const ai = provider;
@@ -1147,6 +1167,8 @@ async function runAI(
         status: "no_speech",
         reason: "No se detectó habla (p. ej. gameplay o música); los clips se eligieron por acción, sonido y movimiento",
         segments: [],
+        captions: transcript.segments,
+        captionsLanguage: transcript.language,
         language: null,
         usage: { ...transcript.usage },
         transcribeCostUsd: transcript.usage.estimatedCostUsd ?? 0,
@@ -1166,6 +1188,8 @@ async function runAI(
       status: "used",
       ...(noSpeech ? { reason: "No se detectó habla: la IA eligió por lo que se ve y se oye" } : {}),
       segments,
+      captions: transcript.segments,
+      captionsLanguage: transcript.language,
       highlights: analysis.highlights,
       language: noSpeech ? null : transcript.language,
       usage,
@@ -1192,6 +1216,8 @@ async function runAI(
         status: "unavailable",
         reason: `falló ${step}: ${detail}`,
         segments: noSpeech ? [] : transcribed.segments,
+        captions: transcribed.segments,
+        captionsLanguage: transcribed.language,
         language: noSpeech ? null : transcribed.language,
         usage: { ...transcribed.usage },
         transcribeCostUsd: transcribed.usage.estimatedCostUsd ?? 0,
@@ -1199,7 +1225,17 @@ async function runAI(
         ...soundsPart,
       };
     }
-    return { ...empty, status: "unavailable", reason: `falló ${step}: ${detail}`, retryLater, ...soundsPart };
+    // Algo temporal (límite por minuto, 5xx, red) con intentos de sobra: se reintenta más tarde como siempre.
+    if (retryLater) return { ...empty, status: "unavailable", reason: `falló ${step}: ${detail}`, retryLater, ...soundsPart };
+    // Sin transcripción no hay subtítulos: no se entregan clips sin ellos. El trabajo se reintenta (las
+    // partes ya transcritas quedaron guardadas) y, si se acaban los intentos, falla y devuelve los minutos.
+    throw new JobError(
+      "transcription_failed",
+      ids.canRetry
+        ? `No pudimos transcribir el audio para los subtítulos (${detail}). Lo intentaremos de nuevo.`
+        : `No pudimos transcribir el audio para los subtítulos (${detail}). Tus minutos fueron devueltos.`,
+      ids.canRetry === true,
+    );
   }
 }
 

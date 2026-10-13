@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { AIProviderError, dedupeHighlights, OpenAIProvider, parseRateLimit, parseResetDuration } from "./openai.js";
+import { AIProviderError, countRule, dedupeHighlights, OpenAIProvider, parseRateLimit, parseResetDuration } from "./openai.js";
 
 const dir = mkdtempSync(path.join(tmpdir(), "openai-test-"));
 const chunkA = path.join(dir, "audio-000.mp3");
@@ -270,7 +270,8 @@ describe("OpenAIProvider.analyze", () => {
     // El costo suma todos los pedidos que salieron bien.
     expect(result.usage).toMatchObject({ inputTokens: 2000, outputTokens: 200 });
     expect(bodies[0]!.max_completion_tokens).toBe(4000);
-    expect(bodies[0]!.messages[0]!.content).toContain("como máximo 8 momentos");
+    // Se piden muchos momentos (antes "como máximo 8, los mejores" y llegaban 3 a 5).
+    expect(bodies[0]!.messages[0]!.content).toContain("entre 12 y 15 momentos");
     // Cada parte solo lleva su tramo (más un poco de solape), no las 2 h.
     expect(bodies.find((b) => b.messages[1]!.content.includes("parte de 0.0"))!.messages[1]!.content).not.toContain("Frase 30");
   });
@@ -387,6 +388,16 @@ describe("OpenAIProvider.analyze (versión nueva: oye y ve)", () => {
     expect(body.reasoning_effort).toBeUndefined();
     expect(typeof body.messages[1].content).toBe("string");
     expect(body.messages[1].content).not.toContain("[risas]");
+  });
+});
+
+describe("cuántos momentos se piden", () => {
+  it("tantos como entren sin pisarse en la parte, entre 12 y 15", () => {
+    expect(countRule(20 * 60, 30)).toContain("entre 12 y 15 momentos");
+    // 5 min con clips de 60 s: entran 4.
+    expect(countRule(5 * 60, 60)).toContain("entre 4 y 4 momentos");
+    // 10 min con clips de 30 s: entran 17 → 12 a 15.
+    expect(countRule(10 * 60, 30)).toContain("entre 12 y 15 momentos");
   });
 });
 
