@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import type { ContentBox, FfmpegTools } from "../ffmpeg.js";
+import { keepFrameSize, type ContentBox, type FfmpegTools } from "../ffmpeg.js";
 import type { Detection, Sample } from "./framing.js";
 import { detectFaces, YUNET_SIZE, type Face } from "./yunet.js";
 
@@ -32,6 +32,8 @@ export async function analyzeFaces(
   area: ContentBox,
   segment: { startSeconds: number; durationSeconds: number },
   signal?: AbortSignal,
+  /** Tamaño del video: cada fotograma se lleva a este tamaño antes de recortar (ver `keepFrameSize`). */
+  source?: { width: number; height: number },
 ): Promise<FaceAnalysis> {
   const s = Math.min(YUNET_SIZE / area.width, YUNET_SIZE / area.height, 1);
   const width = Math.max(4, Math.floor((area.width * s) / 4) * 4);
@@ -47,7 +49,7 @@ export async function analyzeFaces(
     [
       "-hide_banner", "-nostdin", "-loglevel", "error",
       "-ss", segment.startSeconds.toFixed(3), "-i", input, "-t", segment.durationSeconds.toFixed(3), "-an",
-      "-vf", `crop=${area.width}:${area.height}:${area.x}:${area.y},fps=${FACE_SAMPLES_PER_SECOND},scale=${width}:${height}`,
+      "-vf", `${keepFrameSize(source)}crop=${area.width}:${area.height}:${area.x}:${area.y},fps=${FACE_SAMPLES_PER_SECOND},scale=${width}:${height}`,
       "-f", "rawvideo", "-pix_fmt", "bgr24", "pipe:1",
     ],
     { stdio: ["ignore", "pipe", "pipe"] },
