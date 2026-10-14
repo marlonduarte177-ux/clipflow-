@@ -229,19 +229,22 @@ describe("procesamiento con IA", () => {
     expect(diff(band(withSubs, 1, 450), band(without, 1, 450))).toBeLessThan(2);
   });
 
-  it("si la IA falla, el video se procesa igual y el resultado lo dice", async () => {
+  it("si la transcripción falla, no entrega clips sin subtítulos: reintenta y, en el último intento, falla con el motivo", async () => {
     const db = h!.db;
     const { job } = await seedVideoJob(db, root, { sample });
     const deps = { ...makeDeps(db, root, path.join(root, "work")), ai: new FakeAI(true) };
-    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps);
-    expect(result.ai).toBe("unavailable");
-    // El motivo real llega a la web (sin detalles internos).
-    expect(result.aiReason).toBe(
-      "falló la transcripción: Tu cuenta de OpenAI no tiene saldo o llegó a su límite de gasto (revisa Billing y Limits en platform.openai.com)",
-    );
-    expect(result.clipCount).toBeGreaterThan(0);
-    const subs = await db.select().from(schema.subtitles).where(eq(schema.subtitles.videoId, job.videoId));
-    expect(subs).toEqual([]);
+    const reason = "Tu cuenta de OpenAI no tiene saldo o llegó a su límite de gasto (revisa Billing y Limits en platform.openai.com)";
+    const first = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps).catch((e) => e);
+    expect(first).toBeInstanceOf(JobError);
+    expect(first).toMatchObject({ code: "transcription_failed", retryable: true });
+    expect(first.message).toBe(`No pudimos transcribir el audio para los subtítulos (${reason}). Lo intentaremos de nuevo.`);
+    expect(await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id))).toEqual([]);
+
+    // Último intento: falla sin reintentar (los minutos se devuelven al fallar).
+    await db.update(schema.processingJobs).set({ attempts: 2, status: "queued", lockedBy: null }).where(eq(schema.processingJobs.id, job.id));
+    const last = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, deps).catch((e) => e);
+    expect(last).toMatchObject({ code: "transcription_failed", retryable: false });
+    expect(last.message).toContain("Tus minutos fueron devueltos");
   });
 
   it("si falla solo el análisis, la transcripción (ya pagada) se conserva: subtítulos, títulos y su costo", async () => {
@@ -384,7 +387,7 @@ describe("procesamiento con IA", () => {
     expect(transcribeCalls).toBe(3);
   });
 
-  it("sin habla real (gameplay) no inventa títulos ni subtítulos y lo indica", async () => {
+  it("casi sin habla (gameplay): no inventa títulos, pero lo poco que se dice sí lleva subtítulos", async () => {
     const db = h!.db;
     const { job } = await seedVideoJob(db, root, { sample });
     const almostSilent = new FakeAI(false, [{ startSeconds: 3, endSeconds: 5, text: "Crímenes en serie" }]);
@@ -395,8 +398,11 @@ describe("procesamiento con IA", () => {
     expect(almostSilent.analyzeCalls).toBe(0);
     const clipRows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
     expect(clipRows.every((c) => c.title === null)).toBe(true);
+    // Solo el clip donde alguien habla (3–5 s) tiene subtítulos; antes se descartaban todas las palabras.
     const subs = await db.select().from(schema.subtitles).where(eq(schema.subtitles.videoId, job.videoId));
-    expect(subs).toEqual([]);
+    const withWords = clipRows.filter((c) => c.startSeconds < 5 && c.endSeconds > 3);
+    expect(withWords.length).toBeGreaterThan(0);
+    expect(new Set(subs.map((s) => s.clipId))).toEqual(new Set(withWords.map((c) => c.id)));
     // El costo de la transcripción sí se registra.
     const usage = await db.select().from(schema.usage).where(eq(schema.usage.jobId, job.id));
     expect(usage.find((u) => u.metric === "ai_audio_seconds")).toBeDefined();

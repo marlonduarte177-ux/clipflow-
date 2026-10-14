@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_PRODUCT_CONFIG } from "../product-config.js";
-import { selectAiMoments } from "./ai-moments.js";
+import { MIN_CLIPS_PER_VIDEO, selectAiMoments } from "./ai-moments.js";
 
 const weights = DEFAULT_PRODUCT_CONFIG.scoreWeights;
 const flat = (n: number, v = -30) => Array.from({ length: n }, () => v);
@@ -35,6 +35,45 @@ describe("selectAiMoments (la IA decide)", () => {
     expect(moments).toHaveLength(3);
     expect(moments.every((m) => m.score >= 0.5)).toBe(true);
     expect(moments.map((m) => m.startSeconds)).toEqual([420, 480, 540]);
+    // Por debajo de 0,3 de fuerza no cuenta (ni para completar el mínimo: sin señales no hay con qué).
+    const weak = selectAiMoments({ durationSeconds: 700, highlights: [{ startSeconds: 0, endSeconds: 30, strength: 0.2 }], signals: {}, weights, clipDurationSeconds: 30, maxClips: 3 });
+    expect(weak).toEqual([]);
+  });
+
+  it("si la IA propone pocos, completa hasta 10 clips con los tramos de más reacción (debajo de los de la IA)", () => {
+    // 20 min, clips de 60 s: la IA propuso solo 3. El volumen sube en varios tramos.
+    const audio = Array.from({ length: 1200 }, (_, t) => (Math.floor(t / 100) % 2 ? -10 : -35) + (t % 7));
+    const moments = selectAiMoments({
+      durationSeconds: 1200,
+      highlights: [100, 500, 900].map((s) => ({ startSeconds: s, endSeconds: s + 60, strength: 0.9 })),
+      signals: { audio },
+      weights,
+      clipDurationSeconds: 60,
+      maxClips: 20,
+      minClips: MIN_CLIPS_PER_VIDEO,
+      segments: sentences(0, 1200),
+    });
+    expect(moments).toHaveLength(10);
+    // Ninguno se pisa y todos duran lo pedido ±5 s.
+    const sorted = [...moments].sort((a, b) => a.startSeconds - b.startSeconds);
+    for (let i = 1; i < sorted.length; i++) expect(sorted[i]!.startSeconds).toBeGreaterThanOrEqual(sorted[i - 1]!.endSeconds);
+    for (const m of moments) expect(m.endSeconds - m.startSeconds).toBeGreaterThanOrEqual(55);
+    // Los 3 de la IA siguen siendo los de mejor puntaje.
+    const top3 = [...moments].sort((a, b) => b.score - a.score).slice(0, 3).map((m) => m.startSeconds).sort((a, b) => a - b);
+    expect(top3).toEqual([100, 500, 900]);
+  });
+
+  it("un video corto no se rellena con clips que no entran", () => {
+    const moments = selectAiMoments({
+      durationSeconds: 150,
+      highlights: [{ startSeconds: 10, endSeconds: 70, strength: 0.9 }],
+      signals: { audio: Array.from({ length: 150 }, (_, t) => -30 + (t % 11)) },
+      weights,
+      clipDurationSeconds: 60,
+      maxClips: 20,
+      minClips: MIN_CLIPS_PER_VIDEO,
+    });
+    expect(moments.length).toBeLessThanOrEqual(2);
   });
 
   it("sin transcripción, alarga los muy cortos y recorta los muy largos a la medida", () => {

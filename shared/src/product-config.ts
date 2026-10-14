@@ -45,7 +45,7 @@ export const DEFAULT_PRODUCT_CONFIG: ProductConfig = {
   defaultClipDurationSeconds: 30,
   scoreWeights: { audio: 0.2, speech: 0.35, visual: 0.15, action: 0.3, vision: 0.35, ocr: 0.05, reaction: 0.1, chat: 0.4 },
   minClipScore: 0.6,
-  maxClipsPerVideo: 15,
+  maxClipsPerVideo: 20,
   upload: {
     maxBytes: 10 * 1024 ** 3,
     maxDurationSeconds: 3 * 60 * 60,
