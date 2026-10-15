@@ -48,6 +48,7 @@ const EXACT: Record<string, string> = {
     "For this video we only kept a light copy to pick the moments. To get the full video, import it with “Download video only”.",
   "El cuerpo no es JSON válido.": "The request body is not valid JSON.",
   "El tramo debe durar al menos 2 minutos.": "The selected part must be at least 2 minutes long.",
+  "El tramo elegido empieza después del final del video. Elige otro tramo.": "The selected part starts after the end of the video. Choose another part.",
   "Falta el inicio o el final del tramo.": "The start or end of the selected part is missing.",
   "El video todavía no está listo para descargar.": "The video is not ready to download yet.",
   "El video original se borró después de crear los clips. Tus clips siguen disponibles.": "The original video was deleted after the clips were made. Your clips are still available.",
