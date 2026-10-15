@@ -31,7 +31,10 @@ import { deleteVideoRows, purgeVideoFiles } from "./cleanup.js";
 import { sendError, sendValidationError } from "./http.js";
 import { enqueue, toJobDto, wakeWorkers } from "./jobs.js";
 import { replyIfBlocked, type BillingSettings } from "./billing.js";
-import { fetchLinkPreview } from "./link-preview.js";
+import { fetchLinkDetails, fetchLinkPreview, usableProxy } from "./link-preview.js";
+
+/** El proxy residencial (el mismo del procesador) solo si el secreto ya tiene una URL. */
+const defaultLinkDetails = (url: string) => fetchLinkDetails(url, { proxyUrl: usableProxy(process.env.DOWNLOAD_PROXY_URL) });
 import type { WorkerLauncher } from "./launcher.js";
 import type { JobQueue } from "./queue.js";
 import type { VideoStorage } from "./storage.js";
@@ -134,6 +137,8 @@ export interface VideoRouteDeps {
   uploadUrlExpiresSeconds: number;
   /** Datos del enlace antes de importarlo (tests: una versión falsa). */
   linkPreview?: typeof fetchLinkPreview;
+  /** Segundo paso, más lento: la duración leída como el procesador (tests: una versión falsa). */
+  linkDetails?: (url: string) => Promise<Partial<LinkPreview> | null>;
 }
 
 /** Tarjetas de enlaces ya consultadas (10 min): pegar el mismo enlace otra vez es instantáneo. */
@@ -309,11 +314,26 @@ export function videoRoutes(deps: VideoRouteDeps) {
       const checked = checkImportUrl(input.data.url);
       if (!checked.ok) return sendError(reply, 400, "invalid_url", checked.message);
       const now = Date.now();
-      const cached = previewCache.get(checked.url);
+      const key = `${input.data.deep ? "deep:" : ""}${checked.url}`;
+      const cached = previewCache.get(key);
       if (cached && now - cached.at < PREVIEW_TTL_MS) return { preview: cached.preview };
-      const preview = await (deps.linkPreview ?? fetchLinkPreview)(checked.url);
+      let preview: LinkPreview | null;
+      if (input.data.deep) {
+        // Lo rápido (si ya estaba) completado con lo que se lee como el procesador.
+        const quick = previewCache.get(checked.url)?.preview ?? (await (deps.linkPreview ?? fetchLinkPreview)(checked.url));
+        const details = quick ? await (deps.linkDetails ?? defaultLinkDetails)(checked.url) : null;
+        preview = quick && {
+          ...quick,
+          title: quick.title ?? details?.title ?? null,
+          thumbnailUrl: quick.thumbnailUrl ?? details?.thumbnailUrl ?? null,
+          durationSeconds: quick.durationSeconds ?? details?.durationSeconds ?? null,
+        };
+        request.log.info({ host: new URL(checked.url).hostname, duration: preview?.durationSeconds ?? null }, "datos del enlace leídos");
+      } else {
+        preview = await (deps.linkPreview ?? fetchLinkPreview)(checked.url);
+      }
       if (previewCache.size > 500) previewCache.clear();
-      previewCache.set(checked.url, { at: now, preview });
+      previewCache.set(key, { at: now, preview });
       return { preview };
     });
 

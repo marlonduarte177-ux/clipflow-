@@ -30,9 +30,10 @@ export interface AppDeps {
   logger?: boolean;
   /** Datos de enlaces antes de importarlos (tests: una versión falsa, sin internet). */
   linkPreview?: VideoRouteDeps["linkPreview"];
+  linkDetails?: VideoRouteDeps["linkDetails"];
 }
 
-export async function buildApp({ config, verifyToken, lookupEmail, db, storage, queue, launcher, product, billing = BILLING_OFF, logger = true, linkPreview }: AppDeps): Promise<FastifyInstance> {
+export async function buildApp({ config, verifyToken, lookupEmail, db, storage, queue, launcher, product, billing = BILLING_OFF, logger = true, linkPreview, linkDetails }: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
     logger: logger
       ? {
@@ -105,7 +106,7 @@ export async function buildApp({ config, verifyToken, lookupEmail, db, storage, 
 
   await app.register(projectRoutes({ db, auth, storage }));
   await app.register(
-    videoRoutes({ db, auth, storage, queue, launcher, product, billing, uploadUrlExpiresSeconds: config.S3_UPLOAD_URL_EXPIRES_SECONDS, linkPreview }),
+    videoRoutes({ db, auth, storage, queue, launcher, product, billing, uploadUrlExpiresSeconds: config.S3_UPLOAD_URL_EXPIRES_SECONDS, linkPreview, linkDetails }),
   );
   await app.register(jobRoutes({ db, auth, queue, launcher, billing }));
   await app.register(clipRoutes({ db, auth, storage }));

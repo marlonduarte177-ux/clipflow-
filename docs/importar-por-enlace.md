@@ -353,6 +353,16 @@ El original ocupa S3 igual que un video subido y se borra al eliminar el video.
   - **TikTok:** oEmbed (título y miniatura; sin duración, son videos cortos).
   - **Instagram y Facebook:** piden sesión; la tarjeta sale sin datos.
   - Si algo falla o tarda más de 2,5 s, la tarjeta sale con lo que haya. Respuestas guardadas 10 min.
+  - **Segundo paso (16/10/2026), si falta la duración** (Kick bloquea a AWS en la consulta rápida;
+    TikTok y Facebook no la dan): la web pide `POST /videos/preview` con `deep: true` y la fila dice
+    «Leyendo duración…». La API corre `backend/link-meta/link_meta.py` con el Python de yt-dlp de su
+    imagen (misma versión que el procesador):
+    - Kick: la página del video pedida como un navegador real (curl-cffi). ~1 s.
+    - TikTok, Facebook, Instagram (y Twitch si su API fallara): yt-dlp solo con los datos (sin formatos). ~1–2 s.
+    - Si bloquean, se reintenta por el **proxy residencial del procesador** (`DOWNLOAD_PROXY_URL`, el
+      mismo secreto; ahora también lo lee la API). Como mucho 4 consultas a la vez; tope 25 s.
+    - Probado (desde fuera de AWS): Kick 1,1 s, TikTok 1,6 s, Facebook 1,7 s, todos con duración.
+      Instagram pide sesión en algunos reels (sin duración: se procesa completo).
   - YouTube sigue sin importarse (lo bloquea desde servidores): se avisa al pegar el enlace.
 - Un archivo: la duración y un fotograma se leen en el navegador; la subida empieza sola.
 - Debajo: «Al continuar confirmas que este es tu propio contenido o que tienes permiso para usarlo.»

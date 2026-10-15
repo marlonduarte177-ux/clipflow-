@@ -104,7 +104,7 @@ export interface TestContext {
 export async function createTestApp(
   product: ProductConfig = DEFAULT_PRODUCT_CONFIG,
   billing?: BillingSettings,
-  extra: Pick<AppDeps, "linkPreview"> = {},
+  extra: Pick<AppDeps, "linkPreview" | "linkDetails"> = {},
 ): Promise<TestContext> {
   const database = await createTestDb();
   const storage = new FakeStorage();

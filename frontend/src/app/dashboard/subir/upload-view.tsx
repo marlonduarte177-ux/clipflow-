@@ -61,6 +61,8 @@ export function UploadView() {
   const [link, setLink] = useState("");
   const [preview, setPreview] = useState<LinkPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  // Segundo paso: leyendo la duración como el procesador (Kick, TikTok, Facebook…), 1–3 s.
+  const [detailsLoading, setDetailsLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   // Tramo elegido en «Duración del video» (null: el video completo).
   const [range, setRange] = useState<VideoRange | null>(null);
@@ -91,15 +93,31 @@ export function UploadView() {
     const raw = link.trim();
     if (!linkReady) return;
     let cancelled = false;
+    const ask = (deep: boolean) => apiFetch<{ preview: LinkPreview | null }>("/videos/preview", { method: "POST", body: { url: raw, ...(deep ? { deep } : {}) } });
     const timer = setTimeout(() => {
-      apiFetch<{ preview: LinkPreview | null }>("/videos/preview", { method: "POST", body: { url: raw } })
-        .then((r) => !cancelled && setPreview(r.preview))
-        .catch((err: Error) => !cancelled && setError(errorMessage(err)))
-        .finally(() => !cancelled && setPreviewLoading(false));
+      ask(false)
+        .then((r) => {
+          if (cancelled) return;
+          setPreview(r.preview);
+          setPreviewLoading(false);
+          // Sin duración (Kick bloquea a la consulta rápida; TikTok y Facebook no la dan): se lee aparte.
+          if (!r.preview || r.preview.durationSeconds) return;
+          setDetailsLoading(true);
+          return ask(true)
+            .then((d) => !cancelled && d.preview && setPreview(d.preview))
+            .catch(() => undefined)
+            .finally(() => !cancelled && setDetailsLoading(false));
+        })
+        .catch((err: Error) => {
+          if (cancelled) return;
+          setError(errorMessage(err));
+          setPreviewLoading(false);
+        });
     }, 350);
     return () => {
       cancelled = true;
       clearTimeout(timer);
+      setDetailsLoading(false);
     };
   }, [link, linkReady]);
 
@@ -332,7 +350,7 @@ export function UploadView() {
                 </div>
               )}
               <span className="absolute bottom-2.5 right-2.5 rounded-lg bg-black/75 px-2 py-1 text-xs font-semibold tabular-nums text-white backdrop-blur-sm">
-                {totalSeconds ? formatDuration(totalSeconds) : t.upload.durationUnknown}
+                {totalSeconds ? formatDuration(totalSeconds) : isLink && detailsLoading ? "…" : t.upload.durationUnknown}
               </span>
               {file ? (
                 <button
@@ -380,9 +398,16 @@ export function UploadView() {
       >
         <span className="text-[15px] font-semibold">{t.upload.videoDuration}</span>
         <span className="flex items-center gap-1.5 text-sm font-semibold tabular-nums text-muted">
-          <span className={range ? "text-foreground" : ""}>
-            {range ? `${formatRangeTime(range.startSeconds)} - ${formatRangeTime(range.endSeconds)}` : t.upload.full}
-          </span>
+          {isLink && detailsLoading && !totalSeconds ? (
+            <span className="flex items-center gap-2">
+              <span aria-hidden="true" className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-muted/40 border-t-accent" />
+              {t.upload.readingDuration}
+            </span>
+          ) : (
+            <span className={range ? "text-foreground" : ""}>
+              {range ? `${formatRangeTime(range.startSeconds)} - ${formatRangeTime(range.endSeconds)}` : t.upload.full}
+            </span>
+          )}
           {canPickRange ? <NextIcon size={18} /> : null}
         </span>
       </button>

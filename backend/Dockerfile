@@ -15,7 +15,17 @@ RUN npm run build -w @clipflow/shared && npm run build -w @clipflow/backend \
   && npm prune --omit=dev -w @clipflow/shared -w @clipflow/backend
 
 FROM node:22-bookworm-slim
+# yt-dlp y curl-cffi (la misma versión que el procesador): leer la duración de un enlace sin bajar el
+# video, para la tarjeta de «Nuevo video» (backend/link-meta/link_meta.py).
+ARG YTDLP_VERSION=2026.8.19
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates \
+  && python3 -m venv /opt/yt-dlp \
+  && /opt/yt-dlp/bin/pip install --no-cache-dir "yt-dlp[default,curl-cffi]==${YTDLP_VERSION}" \
+  && /opt/yt-dlp/bin/python -c "import yt_dlp, curl_cffi" \
+  && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production \
+    LINK_META_PYTHON=/opt/yt-dlp/bin/python \
     # Certificados de Amazon RDS: permiten conectar a la base con TLS verificado.
     NODE_EXTRA_CA_CERTS=/app/certs/rds-global-bundle.pem
 WORKDIR /app
@@ -27,6 +37,7 @@ COPY --from=build /app/shared/dist shared/dist
 COPY --from=build /app/shared/drizzle shared/drizzle
 COPY --from=build /app/backend/package.json backend/
 COPY --from=build /app/backend/dist backend/dist
+COPY backend/link-meta backend/link-meta
 # Nunca como root.
 USER node
 EXPOSE 4000

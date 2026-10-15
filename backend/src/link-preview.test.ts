@@ -1,7 +1,10 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { DEFAULT_PRODUCT_CONFIG, type LinkPreview } from "@clipflow/shared";
 import { BILLING_OFF } from "./billing.js";
-import { fetchLinkPreview, kickRecord } from "./link-preview.js";
+import { fetchLinkDetails, fetchLinkPreview, kickRecord, proxyWithSession, usableProxy } from "./link-preview.js";
 import { bearer, closeTestApp, createTestApp, type TestContext } from "./test-helpers.js";
 
 /** fetch falso: anota a dónde se pidió y responde lo que diga `reply`. */
@@ -74,6 +77,47 @@ describe("tarjeta del enlace (sin bajar el video)", () => {
   });
 });
 
+describe("segundo paso: la duración leída como el procesador (Python con yt-dlp)", () => {
+  /** Script de Python falso: dice qué recibió (URL y si hay proxy) y responde como el de verdad. */
+  function fakeScript(body: string) {
+    const dir = mkdtempSync(path.join(tmpdir(), "link-meta-"));
+    const file = path.join(dir, "fake.py");
+    writeFileSync(file, `import json, os, sys\n${body}\n`);
+    return file;
+  }
+
+  it("devuelve título, duración y miniatura; el proxy va por variable de entorno (no en los argumentos)", async () => {
+    const script = fakeScript(
+      'print(json.dumps({"title": sys.argv[1], "durationSeconds": 7642.4, "thumbnailUrl": "https://images.kick.com/t.webp" if os.environ.get("CLIPFLOW_PROXY", "").startswith("http://u:p_country-US_session-") else None}))',
+    );
+    const details = await fetchLinkDetails("https://kick.com/a/videos/01a0b24f-2b40-7d20-b9d1-f1238dd1b2e7", {
+      python: "python3",
+      script,
+      proxyUrl: "http://u:p@rp.evomi.com:1000",
+    });
+    expect(details).toEqual({ title: "https://kick.com/a/videos/01a0b24f-2b40-7d20-b9d1-f1238dd1b2e7", durationSeconds: 7642, thumbnailUrl: "https://images.kick.com/t.webp" });
+  });
+
+  it("si falla, tarda o responde cualquier cosa: null o sin datos (nunca un error)", async () => {
+    const broken = fakeScript("raise SystemExit(3)");
+    expect(await fetchLinkDetails("https://www.tiktok.com/@a/video/1", { python: "python3", script: broken })).toEqual({ title: null, durationSeconds: null, thumbnailUrl: null });
+    const slow = fakeScript("import time\ntime.sleep(5)");
+    const started = Date.now();
+    await fetchLinkDetails("https://www.tiktok.com/@a/video/1", { python: "python3", script: slow, timeoutMs: 300 });
+    expect(Date.now() - started).toBeLessThan(3000);
+    expect(await fetchLinkDetails("https://www.tiktok.com/@a/video/1", { python: "/no/existe", script: slow })).toEqual({ title: null, durationSeconds: null, thumbnailUrl: null });
+    // Solo plataformas conocidas.
+    expect(await fetchLinkDetails("https://example.com/v.mp4", { python: "python3", script: slow })).toBeNull();
+  });
+
+  it("el secreto del proxy solo cuenta si es una URL (al crearlo tiene un relleno)", () => {
+    expect(usableProxy("Xk2l9sdfjKLJ2lk3j4lk2j3l4kj23l4k")).toBeNull();
+    expect(usableProxy(undefined)).toBeNull();
+    expect(usableProxy("http://u:p@rp.evomi.com:1000")).toBe("http://u:p@rp.evomi.com:1000/");
+    expect(proxyWithSession("http://u:p@proxy.example.com:8000")).toBe("http://u:p@proxy.example.com:8000/");
+  });
+});
+
 describe("POST /videos/preview", () => {
   let ctx: TestContext | undefined;
   afterEach(async () => {
@@ -95,11 +139,32 @@ describe("POST /videos/preview", () => {
     expect(first.json()).toEqual({ preview: { platform: "Kick", title: "Stream", durationSeconds: 9616, thumbnailUrl: null } });
     await ask("https://kick.com/canal/videos/01a0b24f-2b40-7d20-b9d1-f1238dd1b2e8");
     expect(calls).toBe(1);
+    // Segundo paso: completa la duración que faltaba.
+    expect((await ctx!.app.inject({ method: "POST", url: "/videos/preview", headers: bearer("alice"), payload: { url: "https://kick.com/canal/videos/01a0b24f-2b40-7d20-b9d1-f1238dd1b2e8", deep: true } })).json()).toMatchObject({
+      preview: { durationSeconds: 9616 },
+    });
     // YouTube sigue sin importarse: lo dice antes de intentar.
     const yt = await ask("https://www.youtube.com/watch?v=x");
     expect(yt.statusCode).toBe(400);
     expect(yt.json().error.message).toContain("YouTube");
     // Sin sesión, no.
     expect((await ctx.app.inject({ method: "POST", url: "/videos/preview", payload: { url: "https://kick.com/a/videos/1" } })).statusCode).toBe(401);
+  });
+});
+
+describe("POST /videos/preview con deep (segundo paso)", () => {
+  let ctx: TestContext | undefined;
+  afterEach(async () => {
+    await closeTestApp(ctx);
+    ctx = undefined;
+  });
+
+  it("completa lo que la consulta rápida no trajo (Kick bloqueado, TikTok sin duración)", async () => {
+    ctx = await createTestApp(DEFAULT_PRODUCT_CONFIG, BILLING_OFF, {
+      linkPreview: async () => ({ platform: "TikTok", title: "Mi baile", durationSeconds: null, thumbnailUrl: "https://p16.tiktokcdn.com/a.jpg" }),
+      linkDetails: async () => ({ title: "otro", durationSeconds: 1310, thumbnailUrl: "https://p16.tiktokcdn.com/b.jpg" }),
+    });
+    const res = await ctx.app.inject({ method: "POST", url: "/videos/preview", headers: bearer("alice"), payload: { url: "https://www.tiktok.com/@ana/video/9", deep: true } });
+    expect(res.json()).toEqual({ preview: { platform: "TikTok", title: "Mi baile", durationSeconds: 1310, thumbnailUrl: "https://p16.tiktokcdn.com/a.jpg" } });
   });
 });
