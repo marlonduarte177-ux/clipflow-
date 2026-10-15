@@ -13,7 +13,7 @@ import { projectRoutes } from "./projects.js";
 import type { WorkerLauncher } from "./launcher.js";
 import type { JobQueue } from "./queue.js";
 import type { VideoStorage } from "./storage.js";
-import { videoRoutes } from "./videos.js";
+import { videoRoutes, type VideoRouteDeps } from "./videos.js";
 
 export interface AppDeps {
   config: Pick<ApiConfig, "APP_ENV" | "LOG_LEVEL" | "CORS_ALLOWED_ORIGINS" | "S3_UPLOAD_URL_EXPIRES_SECONDS">;
@@ -28,9 +28,11 @@ export interface AppDeps {
   billing?: BillingSettings;
   /** false en tests para no llenar la salida de logs. */
   logger?: boolean;
+  /** Datos de enlaces antes de importarlos (tests: una versión falsa, sin internet). */
+  linkPreview?: VideoRouteDeps["linkPreview"];
 }
 
-export async function buildApp({ config, verifyToken, lookupEmail, db, storage, queue, launcher, product, billing = BILLING_OFF, logger = true }: AppDeps): Promise<FastifyInstance> {
+export async function buildApp({ config, verifyToken, lookupEmail, db, storage, queue, launcher, product, billing = BILLING_OFF, logger = true, linkPreview }: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
     logger: logger
       ? {
@@ -103,7 +105,7 @@ export async function buildApp({ config, verifyToken, lookupEmail, db, storage, 
 
   await app.register(projectRoutes({ db, auth, storage }));
   await app.register(
-    videoRoutes({ db, auth, storage, queue, launcher, product, billing, uploadUrlExpiresSeconds: config.S3_UPLOAD_URL_EXPIRES_SECONDS }),
+    videoRoutes({ db, auth, storage, queue, launcher, product, billing, uploadUrlExpiresSeconds: config.S3_UPLOAD_URL_EXPIRES_SECONDS, linkPreview }),
   );
   await app.register(jobRoutes({ db, auth, queue, launcher, billing }));
   await app.register(clipRoutes({ db, auth, storage }));

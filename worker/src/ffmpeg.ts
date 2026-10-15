@@ -686,6 +686,43 @@ export async function renderVerticalClip(
   );
 }
 
+/**
+ * Recorta un tramo del video SIN recomprimir (rápido, también con 3 h): el inicio cae en el fotograma
+ * clave más cercano (un par de segundos de diferencia como mucho). Para el tramo elegido en «Duración
+ * del video» de un archivo subido.
+ */
+export async function cutSegment(
+  tools: FfmpegTools,
+  input: string,
+  output: string,
+  startSeconds: number,
+  durationSeconds: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  await run(
+    tools.ffmpegPath,
+    [
+      ...FFMPEG_BASE,
+      "-ss",
+      startSeconds.toFixed(3),
+      "-i",
+      input,
+      "-t",
+      durationSeconds.toFixed(3),
+      "-map",
+      "0:v:0",
+      "-map",
+      "0:a:0?",
+      "-c",
+      "copy",
+      "-avoid_negative_ts",
+      "make_zero",
+      output,
+    ],
+    { signal },
+  );
+}
+
 /** Miniatura vertical (540x960) de un instante del video. */
 export async function renderThumbnail(
   tools: FfmpegTools,

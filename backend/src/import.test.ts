@@ -86,6 +86,34 @@ describe("importar videos por enlace", () => {
   });
 });
 
+describe("tramo elegido en «Duración del video»", () => {
+  it("guarda el tramo en el trabajo (solo se baja y se cobra ese tramo)", async () => {
+    const projectId = await newProject("alice");
+    const res = await importVideo("alice", {
+      projectId,
+      url: "https://www.twitch.tv/videos/2885611944",
+      rightsConfirmed: true,
+      clipDurationSeconds: 60,
+      rangeStartSeconds: 5545,
+      rangeEndSeconds: 7641,
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().job.params).toMatchObject({ clipDurationSeconds: 60, rangeStartSeconds: 5545, rangeEndSeconds: 7641 });
+  });
+
+  it("rechaza un tramo de menos de 2 minutos o con un solo extremo", async () => {
+    const projectId = await newProject("alice");
+    const base = { projectId, url: "https://www.twitch.tv/videos/1", rightsConfirmed: true };
+    const short = await importVideo("alice", { ...base, rangeStartSeconds: 600, rangeEndSeconds: 700 });
+    expect(short.statusCode).toBe(400);
+    expect(short.json().error.message).toBe("El tramo debe durar al menos 2 minutos.");
+    const half = await importVideo("alice", { ...base, rangeStartSeconds: 600 });
+    expect(half.statusCode).toBe(400);
+    const reversed = await importVideo("alice", { ...base, rangeStartSeconds: 900, rangeEndSeconds: 300 });
+    expect(reversed.statusCode).toBe(400);
+  });
+});
+
 describe.runIf(!FEATURES.downloadOnly)("«Descargar solo el video» desactivado", () => {
   it("rechaza las importaciones de solo descarga sin crear nada", async () => {
     const projectId = await newProject("alice");

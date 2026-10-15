@@ -170,6 +170,8 @@ describe("proxy residencial para plataformas que bloquean a AWS", () => {
         '  [ "$prev" = "-S" ] && sort="$a"',
         '  [ "$prev" = "--extractor-args" ] && xargs="$xargs $a"',
         '  [ "$prev" = "--plugin-dirs" ] && xargs="$xargs plugins=$a"',
+        '  [ "$prev" = "--download-sections" ] && xargs="$xargs sections=$a"',
+        '  [ "$prev" = "--match-filters" ] && xargs="$xargs filter=$(echo "$a" | tr -d " ")"',
         '  prev="$a"',
         "done",
         'echo "call proxy=$proxy sort=$sort$xargs" >> "$(dirname "$0")/calls.log"',
@@ -210,6 +212,24 @@ describe("proxy residencial para plataformas que bloquean a AWS", () => {
       quality: "original",
     });
     for (const call of yt.calls()) expect(call).toMatch(/ sort=res,fps,vcodec:h264,acodec:aac( |$)/);
+  });
+
+  it("tramo elegido: baja solo ese tramo (sin el límite de duración del video entero)", async () => {
+    const yt = fakeYtDlp("section");
+    await downloadFromUrl("https://www.twitch.tv/videos/2885611944", yt.work, {
+      ...options(),
+      ytDlpPath: yt.script,
+      proxyUrl: "http://user:secreto@rp.evomi.com:1000",
+      section: { startSeconds: 5545.4, endSeconds: 7640.2 },
+    });
+    expect(yt.calls()[0]).toContain(" sections=*5545-7641");
+    expect(yt.calls()[0]).toContain(" filter=!is_live");
+    expect(yt.calls()[0]).not.toContain("duration");
+    // Sin tramo: el video entero, con el límite de duración.
+    const whole = fakeYtDlp("whole");
+    await downloadFromUrl("https://www.twitch.tv/videos/2885611944", whole.work, { ...options(), ytDlpPath: whole.script, proxyUrl: "http://user:secreto@rp.evomi.com:1000" });
+    expect(whole.calls()[0]).not.toContain("sections=");
+    expect(whole.calls()[0]).toMatch(/ filter=duration<=\?\d+&!is_live/);
   });
 
   it("Twitch: también baja hasta 1080p (60 fps si lo hay)", async () => {

@@ -341,3 +341,33 @@ El original ocupa S3 igual que un video subido y se borra al eliminar el video.
     reutiliza: no se paga de nuevo).
   - Un video guardado con «Guardar» **no** se borra aunque después se creen clips.
   - Los videos que el usuario sube desde su celular o computadora no se borran.
+
+## Crear en 2 pasos y «Duración del video» (15/10/2026)
+
+**Paso 1 – identificar el video sin bajarlo.**
+- Al pegar un enlace, la web pide `POST /videos/preview` y muestra la tarjeta (miniatura, título y
+  duración) en menos de 3 s. La API solo consulta direcciones fijas de cada plataforma, armadas con el
+  código del video (nunca la dirección pegada tal cual):
+  - **Twitch:** su API GraphQL pública (videos guardados y clips).
+  - **Kick:** la página del video, que trae su registro (título, duración en segundos y miniatura).
+  - **TikTok:** oEmbed (título y miniatura; sin duración, son videos cortos).
+  - **Instagram y Facebook:** piden sesión; la tarjeta sale sin datos.
+  - Si algo falla o tarda más de 2,5 s, la tarjeta sale con lo que haya. Respuestas guardadas 10 min.
+  - YouTube sigue sin importarse (lo bloquea desde servidores): se avisa al pegar el enlace.
+- Un archivo: la duración y un fotograma se leen en el navegador; la subida empieza sola.
+- Debajo: «Al continuar confirmas que este es tu propio contenido o que tienes permiso para usarlo.»
+  (reemplaza la ventana de derechos de autor; la API sigue guardando la confirmación).
+
+**Paso 2 – «Duración del video»** (solo videos de 10 min o más): fondo con la miniatura desenfocada,
+el tramo en grande, «Uso de minutos» y una regla con un selector que se arrastra y se estira (mínimo
+2 min; vibra al pasar cada minuto donde el teléfono lo permite). Si el tramo pasa del saldo del plan,
+el contador sale en rojo con «Mejorar plan».
+
+**Procesar solo el tramo** (`rangeStartSeconds` / `rangeEndSeconds` en el trabajo):
+- **Enlaces de plataformas:** yt-dlp con `--download-sections "*inicio-fin"`: se baja solo el tramo (sin
+  el límite de 3 h del video entero). Si el tramo dura 10 min o más, la copia liviana es del tramo y cada
+  clip se corta del enlace en su segundo real (inicio del tramo + segundo dentro del tramo).
+- **Archivos subidos** (y enlaces directos): se sube entero y el procesador recorta el tramo sin
+  recomprimir (empieza en el fotograma clave anterior: unos segundos de diferencia como mucho).
+- **Minutos:** se descuentan solo los del tramo.
+- El chat de Twitch se lee desde el inicio del tramo. La transcripción guardada es del tramo.
