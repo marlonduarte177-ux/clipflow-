@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { DbHandle } from "@clipflow/shared/db";
 import { createTestDb } from "@clipflow/shared/db/testing";
 import { DEFAULT_PRODUCT_CONFIG, type ProductConfig } from "@clipflow/shared";
-import { buildApp } from "./app.js";
+import { buildApp, type AppDeps } from "./app.js";
 import type { BillingSettings } from "./billing.js";
 import type { TokenVerifier } from "./auth.js";
 import type { WorkerLauncher } from "./launcher.js";
@@ -104,6 +104,7 @@ export interface TestContext {
 export async function createTestApp(
   product: ProductConfig = DEFAULT_PRODUCT_CONFIG,
   billing?: BillingSettings,
+  extra: Pick<AppDeps, "linkPreview"> = {},
 ): Promise<TestContext> {
   const database = await createTestDb();
   const storage = new FakeStorage();
@@ -125,6 +126,7 @@ export async function createTestApp(
     verifyToken,
     lookupEmail: async (token) => `${token.split(".")[1]}@example.com`,
     logger: false,
+    ...extra,
   });
   return { app, database, storage, queue, launcher };
 }

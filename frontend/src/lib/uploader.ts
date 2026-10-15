@@ -25,7 +25,7 @@ export interface UploadOptions {
    * Opciones de procesamiento. La subida espera esta promesa antes de confirmar: el usuario
    * puede elegirlas (y apretar "Crear clips") mientras el video se sube.
    */
-  completeWith?: () => Promise<{ clipDurationSeconds?: number; subtitleStyle?: SubtitleStyle }>;
+  completeWith?: () => Promise<{ clipDurationSeconds?: number; subtitleStyle?: SubtitleStyle; rangeStartSeconds?: number; rangeEndSeconds?: number }>;
   signal: AbortSignal;
 }
 
@@ -142,6 +142,45 @@ export function readVideoDuration(file: File, timeoutMs = 8000): Promise<number 
     const timer = setTimeout(() => done(null), timeoutMs);
     video.preload = "metadata";
     video.onloadedmetadata = () => done(Number.isFinite(video.duration) && video.duration > 0 ? video.duration : null);
+    video.onerror = () => done(null);
+    video.src = url;
+  });
+}
+
+/**
+ * Un fotograma del video (a ~1 s o al 10 %) como imagen, para la tarjeta y el fondo de «Duración del
+ * video». Todo en el navegador: el archivo no sale del teléfono para esto. null si no se puede.
+ */
+export function readVideoPoster(file: File, timeoutMs = 8000): Promise<string | null> {
+  return new Promise((resolve) => {
+    const video = document.createElement("video");
+    const url = URL.createObjectURL(file);
+    const done = (value: string | null) => {
+      clearTimeout(timer);
+      URL.revokeObjectURL(url);
+      video.removeAttribute("src");
+      resolve(value);
+    };
+    const timer = setTimeout(() => done(null), timeoutMs);
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    video.onloadedmetadata = () => {
+      video.currentTime = Math.min(1, (Number.isFinite(video.duration) ? video.duration : 10) * 0.1);
+    };
+    video.onseeked = () => {
+      try {
+        const width = Math.min(640, video.videoWidth || 640);
+        const height = Math.round(width * ((video.videoHeight || 360) / (video.videoWidth || 640)));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d")!.drawImage(video, 0, 0, width, height);
+        done(canvas.toDataURL("image/jpeg", 0.75));
+      } catch {
+        done(null);
+      }
+    };
     video.onerror = () => done(null);
     video.src = url;
   });

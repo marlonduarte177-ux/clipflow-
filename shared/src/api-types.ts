@@ -48,6 +48,16 @@ export interface ImportVideoResponse {
   job: JobDto;
 }
 
+/** Datos de un enlace antes de importarlo (sin descargar el video). */
+export interface LinkPreview {
+  platform: "TikTok" | "Instagram" | "Facebook" | "Kick" | "Twitch";
+  title: string | null;
+  /** Imagen de la plataforma (la carga el navegador). */
+  thumbnailUrl: string | null;
+  /** null si la plataforma no la informa (p. ej. TikTok o Instagram: videos cortos). */
+  durationSeconds: number | null;
+}
+
 /** URL temporal para bajar el video original. */
 export interface VideoDownloadResponse {
   url: string;
@@ -114,6 +124,12 @@ export interface JobParams {
   comparisonId?: string;
   /** No reutilizar transcripciones guardadas (la prueba lado a lado mide el costo real de cada versión). */
   skipTranscriptCache?: boolean;
+  /**
+   * Tramo del video a procesar, en segundos desde el inicio (pantalla «Duración del video»). Sin valor:
+   * el video completo. Solo se descuentan los minutos del tramo y, si es un enlace, solo se baja ese tramo.
+   */
+  rangeStartSeconds?: number;
+  rangeEndSeconds?: number;
 }
 
 export interface JobResult {

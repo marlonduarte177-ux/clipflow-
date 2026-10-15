@@ -177,6 +177,40 @@ describe("gameplay sin voz", () => {
   });
 });
 
+/** El video de muestra (40 s) repetido `times` veces, sin recomprimir. */
+function concatSample(file: string, times: number) {
+  const list = path.join(root, `concat-${times}.txt`);
+  writeFileSync(list, Array.from({ length: times }, () => `file '${sample}'`).join("\n"));
+  execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", list, "-c", "copy", file]);
+}
+
+describe("tramo elegido en «Duración del video»", () => {
+  it("un archivo subido entero: se procesa y se cobra solo el tramo", async () => {
+    const db = h!.db;
+    const long = path.join(root, "long-200.mp4");
+    concatSample(long, 5);
+    const { job, video } = await seedVideoJob(db, root, { sample: long, params: { clipDurationSeconds: 15, rangeStartSeconds: 40, rangeEndSeconds: 160 } });
+    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, makeDeps(db, root, path.join(root, "work")));
+    expect(result.clipCount).toBeGreaterThan(0);
+    const [row] = await db.select().from(schema.videos).where(eq(schema.videos.id, video.id));
+    // Lo procesado dura el tramo (≈120 s; sin recomprimir, empieza en el fotograma clave anterior: en este
+    // video de prueba, uno cada 10 s), no los 200 s del archivo.
+    expect(row!.durationSeconds).toBeGreaterThan(115);
+    expect(row!.durationSeconds).toBeLessThan(135);
+    const usage = await db.select().from(schema.usage).where(eq(schema.usage.jobId, job.id));
+    expect(usage.find((u) => u.metric === "video_seconds_processed")!.quantity).toBeLessThan(135);
+    const clipRows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
+    for (const c of clipRows) expect(c.endSeconds).toBeLessThanOrEqual(135);
+  });
+
+  it("un tramo que empieza después del final del video se rechaza con un mensaje claro", async () => {
+    const db = h!.db;
+    const { job } = await seedVideoJob(db, root, { sample, params: { rangeStartSeconds: 600, rangeEndSeconds: 900 } });
+    const error = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, makeDeps(db, root, path.join(root, "work"))).catch((e) => e);
+    expect(error).toMatchObject({ code: "invalid_range", retryable: false });
+  });
+});
+
 describe("videos importados por enlace", () => {
   it("descarga el enlace, lo guarda como original, usa el título como nombre y genera clips", async () => {
     const db = h!.db;
@@ -380,13 +414,20 @@ describe("videos importados por enlace", () => {
 
 describe("streams largos de Kick/Twitch: copia liviana para analizar y solo los tramos de los clips", () => {
   function streamDeps(db: Parameters<typeof makeDeps>[0], hd: string, durationSeconds = 40) {
-    const calls = { info: 0, downloads: [] as (string | undefined)[], resolve: 0, sections: [] as { start: number; duration: number }[] };
+    const calls = {
+      info: 0,
+      downloads: [] as (string | undefined)[],
+      downloadSections: [] as ({ startSeconds: number; endSeconds: number } | undefined)[],
+      resolve: 0,
+      sections: [] as { start: number; duration: number }[],
+    };
     const deps = {
       ...makeDeps(db, root, path.join(root, "work")),
       longStreamMinSeconds: 30,
       twitchChat: async () => null,
-      download: async (_url: string, dir: string, options: { quality?: string }) => {
+      download: async (_url: string, dir: string, options: { quality?: string; section?: { startSeconds: number; endSeconds: number } }) => {
         calls.downloads.push(options.quality);
+        calls.downloadSections.push(options.section);
         const file = path.join(dir, "source.mp4");
         execFileSync("cp", [sample, file]); // la "copia liviana"
         return { file, sizeBytes: statSync(file).size, title: "Stream de prueba" };
@@ -431,6 +472,43 @@ describe("streams largos de Kick/Twitch: copia liviana para analizar y solo los 
     await processAnalyzeJob((await claimJob(db, again.id, "test-worker"))!, deps);
     expect(calls.downloads).toEqual(["analysis", "analysis"]);
     expect(calls.resolve).toBe(2);
+  });
+
+  it("tramo elegido de un stream: baja solo ese tramo y corta cada clip en su segundo real del enlace", async () => {
+    const db = h!.db;
+    // El enlace "entero" (200 s) y su tramo 40–160 s (la "copia liviana" que bajaría yt-dlp).
+    const full = path.join(root, "full-200.mp4");
+    const part = path.join(root, "part-120.mp4");
+    concatSample(full, 5);
+    execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-ss", "40", "-i", full, "-t", "120", "-c", "copy", part]);
+    const { job } = await seedVideoJob(db, root, {
+      sample,
+      importUrl: "https://www.twitch.tv/videos/321",
+      params: { clipDurationSeconds: 15, rangeStartSeconds: 40, rangeEndSeconds: 160 },
+    });
+    const { deps, calls } = streamDeps(db, full, 200);
+    const chatAsked: number[] = [];
+    const result = await processAnalyzeJob((await claimJob(db, job.id, "test-worker"))!, {
+      ...deps,
+      twitchChat: async (_id: string, duration: number) => (chatAsked.push(duration), null),
+      download: async (_url: string, dir: string, options: { quality?: string; section?: { startSeconds: number; endSeconds: number } }) => {
+        calls.downloads.push(options.quality);
+        calls.downloadSections.push(options.section);
+        const file = path.join(dir, "source.mp4");
+        execFileSync("cp", [part, file]);
+        return { file, sizeBytes: statSync(file).size, title: "Stream de prueba" };
+      },
+    });
+    expect(result.clipCount).toBeGreaterThan(0);
+    // Sin preguntar la duración a la plataforma: el tramo ya dice cuánto dura.
+    expect(calls.info).toBe(0);
+    expect(calls.downloadSections).toEqual([{ startSeconds: 40, endSeconds: 160 }]);
+    // Cada clip se corta del enlace en su segundo real (40 s + el segundo dentro del tramo).
+    const clipRows = await db.select().from(schema.clips).where(eq(schema.clips.jobId, job.id));
+    expect(calls.sections.map((x) => x.start).sort((a, b) => a - b)).toEqual(clipRows.map((c) => c.startSeconds + 40).sort((a, b) => a - b));
+    for (const c of clipRows) expect(c.endSeconds).toBeLessThanOrEqual(121);
+    // El chat se lee hasta el final del tramo.
+    expect(chatAsked[0]).toBeCloseTo(160, -1);
   });
 
   it("usa el chat del VOD de Twitch como señal extra (y si no se puede leer, sigue igual)", async () => {

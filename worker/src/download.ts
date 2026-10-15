@@ -62,6 +62,11 @@ export interface DownloadOptions {
    * Sin indicar: hasta 1080p, la máxima que se nota en un clip vertical de 1080x1920.
    */
   quality?: "analysis" | "original";
+  /**
+   * Solo este tramo del video (segundos desde el inicio), con `--download-sections`: se baja menos y
+   * más rápido. El límite de duración se aplica al tramo, no al video entero.
+   */
+  section?: { startSeconds: number; endSeconds: number };
 }
 
 export interface Downloaded {
@@ -426,8 +431,11 @@ async function runYtDlp(url: string, dir: string, options: DownloadOptions, prox
     ...(proxy ? ["--proxy", proxy] : []),
     "--merge-output-format",
     "mp4",
+    ...(options.section
+      ? ["--download-sections", `*${Math.floor(options.section.startSeconds)}-${Math.ceil(options.section.endSeconds)}`]
+      : []),
     "--match-filters",
-    `duration <=? ${Math.floor(options.maxDurationSeconds)} & !is_live`,
+    options.section ? "!is_live" : `duration <=? ${Math.floor(options.maxDurationSeconds)} & !is_live`,
     "--max-filesize",
     String(options.maxBytes),
     "--socket-timeout",

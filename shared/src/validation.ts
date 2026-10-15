@@ -32,10 +32,31 @@ export const UploadPartsRequestSchema = z.object({
 export const SUBTITLE_STYLES = ["highlight", "classic", "none"] as const;
 export const SubtitleStyleSchema = z.enum(SUBTITLE_STYLES);
 
+/** Tramo a procesar: como mínimo 2 minutos. */
+export const RANGE_MIN_SECONDS = 120;
+/** Solo los videos de 10 minutos o más muestran la pantalla para elegir el tramo. */
+export const RANGE_PICKER_MIN_VIDEO_SECONDS = 600;
+
+/**
+ * Revisa el tramo pedido (los dos extremos o ninguno; mínimo 2 minutos). Devuelve el tramo, null si
+ * es el video completo, o un mensaje de error.
+ */
+export function checkRange(
+  start: number | undefined,
+  end: number | undefined,
+): { ok: true; range: { startSeconds: number; endSeconds: number } | null } | { ok: false; message: string } {
+  if (start === undefined && end === undefined) return { ok: true, range: null };
+  if (start === undefined || end === undefined) return { ok: false, message: "Falta el inicio o el final del tramo." };
+  if (end - start < RANGE_MIN_SECONDS) return { ok: false, message: "El tramo debe durar al menos 2 minutos." };
+  return { ok: true, range: { startSeconds: start, endSeconds: end } };
+}
+
 /** Opciones que el usuario elige antes de procesar. */
 const ProcessingOptions = {
   clipDurationSeconds: z.number().int().positive().optional(),
   subtitleStyle: SubtitleStyleSchema.optional(),
+  rangeStartSeconds: z.number().int().min(0).max(24 * 3600).optional(),
+  rangeEndSeconds: z.number().int().min(1).max(24 * 3600).optional(),
 };
 
 export const CompleteUploadSchema = z.object({
@@ -81,6 +102,11 @@ export function planUploadParts(sizeBytes: number): { partSizeBytes: number; par
 }
 
 export const ProcessVideoSchema = z.object(ProcessingOptions);
+
+/** Ver los datos de un enlace (miniatura, título, duración) antes de importarlo. */
+export const LinkPreviewSchema = z.object({
+  url: z.string().trim().min(1, "Pega el enlace del video").max(2048, "El enlace es demasiado largo"),
+});
 
 /** Importar un video desde un enlace (lo descarga el worker). */
 export const ImportVideoSchema = z.object({

@@ -4,9 +4,11 @@ import { and, count, desc, eq, gt, inArray, or } from "drizzle-orm";
 import { z } from "zod";
 import {
   checkImportUrl,
+  checkRange,
   CompleteUploadSchema,
   CreateVideoSchema,
   ImportVideoSchema,
+  LinkPreviewSchema,
   ProcessVideoSchema,
   UploadPartsRequestSchema,
   planUploadParts,
@@ -14,6 +16,7 @@ import {
   type CreateVideoResponse,
   type ImportVideoResponse,
   type JobParams,
+  type LinkPreview,
   type ProductConfig,
   type SubtitleStyle,
   type UploadPartUrlsResponse,
@@ -28,6 +31,7 @@ import { deleteVideoRows, purgeVideoFiles } from "./cleanup.js";
 import { sendError, sendValidationError } from "./http.js";
 import { enqueue, toJobDto, wakeWorkers } from "./jobs.js";
 import { replyIfBlocked, type BillingSettings } from "./billing.js";
+import { fetchLinkPreview } from "./link-preview.js";
 import type { WorkerLauncher } from "./launcher.js";
 import type { JobQueue } from "./queue.js";
 import type { VideoStorage } from "./storage.js";
@@ -100,13 +104,23 @@ function cleanFilename(name: string): string {
 /** Opciones de procesamiento elegidas por el usuario, validadas con la configuración del producto. */
 function processingParams(
   product: ProductConfig,
-  input: { clipDurationSeconds?: number; subtitleStyle?: SubtitleStyle },
+  input: { clipDurationSeconds?: number; subtitleStyle?: SubtitleStyle; rangeStartSeconds?: number; rangeEndSeconds?: number },
 ): { ok: true; params: JobParams } | { ok: false; message: string } {
   const duration = input.clipDurationSeconds ?? product.defaultClipDurationSeconds;
   if (!product.clipDurationsSeconds.includes(duration)) {
     return { ok: false, message: `Duraciones permitidas: ${product.clipDurationsSeconds.join(", ")} s.` };
   }
-  return { ok: true, params: { clipDurationSeconds: duration, subtitleStyle: input.subtitleStyle ?? "highlight" } };
+  // Tramo elegido en «Duración del video» (el procesador lo vuelve a ajustar a la duración real).
+  const range = checkRange(input.rangeStartSeconds, input.rangeEndSeconds);
+  if (!range.ok) return range;
+  return {
+    ok: true,
+    params: {
+      clipDurationSeconds: duration,
+      subtitleStyle: input.subtitleStyle ?? "highlight",
+      ...(range.range ? { rangeStartSeconds: range.range.startSeconds, rangeEndSeconds: range.range.endSeconds } : {}),
+    },
+  };
 }
 
 export interface VideoRouteDeps {
@@ -118,7 +132,13 @@ export interface VideoRouteDeps {
   product: ProductConfig;
   billing: BillingSettings;
   uploadUrlExpiresSeconds: number;
+  /** Datos del enlace antes de importarlo (tests: una versión falsa). */
+  linkPreview?: typeof fetchLinkPreview;
 }
+
+/** Tarjetas de enlaces ya consultadas (10 min): pegar el mismo enlace otra vez es instantáneo. */
+const PREVIEW_TTL_MS = 10 * 60 * 1000;
+const previewCache = new Map<string, { at: number; preview: LinkPreview | null }>();
 
 /**
  * Subida de videos directo a S3 (multipart):
@@ -282,6 +302,21 @@ export function videoRoutes(deps: VideoRouteDeps) {
 
     // Importar por enlace: lo descarga el worker (nunca la API). El usuario debe confirmar que
     // tiene derechos o permiso para usar el video; se guarda cuándo lo confirmó.
+    // Paso 1 al crear: miniatura, título y duración del enlace, SIN bajar el video.
+    app.post("/videos/preview", async (request, reply) => {
+      const input = LinkPreviewSchema.safeParse(request.body);
+      if (!input.success) return sendValidationError(reply, input.error);
+      const checked = checkImportUrl(input.data.url);
+      if (!checked.ok) return sendError(reply, 400, "invalid_url", checked.message);
+      const now = Date.now();
+      const cached = previewCache.get(checked.url);
+      if (cached && now - cached.at < PREVIEW_TTL_MS) return { preview: cached.preview };
+      const preview = await (deps.linkPreview ?? fetchLinkPreview)(checked.url);
+      if (previewCache.size > 500) previewCache.clear();
+      previewCache.set(checked.url, { at: now, preview });
+      return { preview };
+    });
+
     app.post("/videos/import", async (request, reply) => {
       const input = ImportVideoSchema.safeParse(request.body);
       if (!input.success) return sendValidationError(reply, input.error);

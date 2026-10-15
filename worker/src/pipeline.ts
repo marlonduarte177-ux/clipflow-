@@ -7,6 +7,7 @@ import {
   bestFrameLabel,
   clampToRange,
   clipDurationRange,
+  checkRange,
   fitToSentences,
   fullTranscriptKey,
   isBillingExempt,
@@ -55,6 +56,7 @@ import {
   extractAudioChunks,
   extractFrames,
   FfmpegError,
+  cutSegment,
   makePhoneCompatible,
   probe,
   renderThumbnail,
@@ -72,6 +74,7 @@ import {
   downloadFromUrl,
   downloadSection,
   fetchMediaInfo,
+  isPlatformUrl,
   isStreamPlatformUrl,
   resolveStreamUrls,
   type DownloadOptions,
@@ -256,6 +259,8 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
   };
   // Paso en curso: si algo falla de forma inesperada, se dice dónde (y se registra el detalle).
   let step = "preparar el trabajo";
+  // Tramo elegido en «Duración del video» (solo para crear clips; «Guardar» baja el video entero).
+  const range = (job.params as JobParams).downloadOnly ? null : jobRange(job.params as JobParams);
 
   const linkOptions = (): DownloadOptions => ({
     ytDlpPath: deps.ytDlpPath ?? "yt-dlp",
@@ -272,7 +277,10 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
    * en 1080p: se baja una copia liviana (160p, ~100 MB por hora) para elegir los momentos, y después
    * solo los tramos de los clips en 1080p. Devuelve si quedó como copia liviana.
    */
-  const importFromLink = async (video: typeof videos.$inferSelect, workDir: string): Promise<{ file: string; analysisCopy: boolean }> => {
+  const importFromLink = async (
+    video: typeof videos.$inferSelect,
+    workDir: string,
+  ): Promise<{ file: string; analysisCopy: boolean; linkOffset: number; trimmed: boolean }> => {
     if (!video.sourceUrl) throw new JobError("import_failed", "Falta el enlace del video.", false);
     step = "descargar el enlace";
     await progress("downloading", 0, true);
@@ -280,11 +288,16 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     let analysisCopy = false;
     try {
       if (!(job.params as JobParams).downloadOnly && isStreamPlatformUrl(video.sourceUrl)) {
-        const media = await (deps.streams?.fetchMediaInfo ?? fetchMediaInfo)(video.sourceUrl, linkOptions());
-        analysisCopy = !media.isLive && (media.durationSeconds ?? 0) >= (deps.longStreamMinSeconds ?? LONG_STREAM_MIN_SECONDS);
+        // Con tramo, lo que cuenta es lo que dura el tramo (no hace falta preguntar a la plataforma).
+        const length = range
+          ? range.endSeconds - range.startSeconds
+          : await (deps.streams?.fetchMediaInfo ?? fetchMediaInfo)(video.sourceUrl, linkOptions()).then((m) => (m.isLive ? 0 : (m.durationSeconds ?? 0)));
+        analysisCopy = length >= (deps.longStreamMinSeconds ?? LONG_STREAM_MIN_SECONDS);
       }
       downloaded = await (deps.download ?? downloadFromUrl)(video.sourceUrl, workDir, {
         ...linkOptions(),
+        // Solo el tramo elegido: se baja menos y más rápido.
+        ...(range ? { section: range } : {}),
         // «Guardar»: la calidad original. Para clips: hasta 1080p (o la copia liviana de un stream largo).
         ...(analysisCopy ? { quality: "analysis" as const } : (job.params as JobParams).downloadOnly ? { quality: "original" as const } : {}),
         onProgress: (f) => void progress("downloading", f).catch(() => undefined),
@@ -313,8 +326,8 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
         originalFilename: filenameFromTitle(downloaded.title, video.originalFilename, ext || ".mp4"),
         uploadedAt: new Date(),
         // La marca se guarda YA: si el trabajo falla antes de terminar, el reintento sabe que es una
-        // copia liviana (y no hace clips en 160p).
-        ...(analysisCopy ? { probe: { clipflowAnalysisCopy: true } } : {}),
+        // copia liviana (y no hace clips en 160p) y desde qué segundo del enlace empieza.
+        ...(analysisCopy ? { probe: { clipflowAnalysisCopy: true, ...(range ? { clipflowRangeStartSeconds: range.startSeconds } : {}) } } : {}),
       })
       .where(eq(videos.id, video.id));
     await deps.db.insert(usage).values({
@@ -326,7 +339,13 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     });
     await progress("downloading", 1, true);
     if (analysisCopy) deps.log.info({ jobId: job.id, sizeBytes: downloaded.sizeBytes }, "stream largo: copia liviana para analizar");
-    return { file: downloaded.file, analysisCopy };
+    return {
+      file: downloaded.file,
+      analysisCopy,
+      linkOffset: range && analysisCopy ? range.startSeconds : 0,
+      // yt-dlp (plataformas) ya bajó solo el tramo; un enlace directo llega entero y se recorta aquí.
+      trimmed: Boolean(range) && isPlatformUrl(video.sourceUrl),
+    };
   };
 
   try {
@@ -341,7 +360,12 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     let input: string;
     // Stream largo analizado con copia liviana: los clips se cortan del enlace en 1080p. Se recuerda
     // en el video (`probe.clipflowAnalysisCopy`) para reprocesar igual sin volver a bajar la copia.
-    let analysisCopy = Boolean((video.probe as { clipflowAnalysisCopy?: boolean } | null)?.clipflowAnalysisCopy);
+    const storedProbe = video.probe as { clipflowAnalysisCopy?: boolean; clipflowRangeStartSeconds?: number } | null;
+    let analysisCopy = Boolean(storedProbe?.clipflowAnalysisCopy);
+    // Copia liviana de un TRAMO del enlace: desde qué segundo del enlace empieza (para cortar los clips).
+    let linkOffset = analysisCopy ? (storedProbe?.clipflowRangeStartSeconds ?? 0) : 0;
+    // El archivo ya es solo el tramo elegido (lo bajó así yt-dlp).
+    let rangeApplied = false;
     // También al REINTENTAR un enlace que no se pudo descargar (quedó rechazado y sin archivo) o cuyo
     // original ya se borró después de hacer los clips: se vuelve a descargar del enlace.
     const originalDeleted = Boolean((video.probe as { clipflowOriginalDeleted?: boolean } | null)?.clipflowOriginalDeleted);
@@ -355,7 +379,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
         await deps.db.update(videos).set({ status: "importing", rejectionReason: null }).where(eq(videos.id, video.id));
       }
       stages = (job.params as JobParams).downloadOnly ? DOWNLOAD_ONLY_STAGES : IMPORT_STAGES;
-      ({ file: input, analysisCopy } = await importFromLink(video, dir));
+      ({ file: input, analysisCopy, linkOffset, trimmed: rangeApplied } = await importFromLink(video, dir));
     } else {
       // 1. Preparar: descargar de S3 y comprobar el contenido real.
       step = "leer el video original";
@@ -373,6 +397,21 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       await rejectVideo(deps.db, video.id, "El archivo no es un video válido o está dañado.");
       throw new JobError("invalid_video", "El archivo no es un video válido o está dañado.", false);
     }
+    // Tramo elegido y el archivo es el video entero (subido, o un enlace directo): se recorta aquí, sin
+    // recomprimir. Un enlace de plataforma ya llega recortado.
+    if (range && !rangeApplied) {
+      if (range.startSeconds >= info.durationSeconds - 30) {
+        throw new JobError("invalid_range", "El tramo elegido empieza después del final del video. Elige otro tramo.", false);
+      }
+      step = "recortar el tramo elegido";
+      const trimmed = path.join(dir, `range${path.extname(input) || ".mp4"}`);
+      const length = Math.min(range.endSeconds, info.durationSeconds) - range.startSeconds;
+      await cutSegment(deps.tools, input, trimmed, range.startSeconds, length, controller.signal);
+      await rm(input, { force: true });
+      input = trimmed;
+      info = await probe(deps.tools, input);
+      deps.log.info({ jobId: job.id, start: range.startSeconds, seconds: Math.round(info.durationSeconds) }, "tramo elegido recortado");
+    }
     if (info.durationSeconds > deps.product.upload.maxDurationSeconds) {
       const msg = "El video supera la duración máxima permitida.";
       await rejectVideo(deps.db, video.id, msg);
@@ -385,7 +424,9 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
         durationSeconds: info.durationSeconds,
         width: info.width,
         height: info.height,
-        probe: analysisCopy ? { ...(info.raw as object), clipflowAnalysisCopy: true } : info.raw,
+        probe: analysisCopy
+          ? { ...(info.raw as object), clipflowAnalysisCopy: true, ...(linkOffset ? { clipflowRangeStartSeconds: linkOffset } : {}) }
+          : info.raw,
       })
       .where(eq(videos.id, video.id));
 
@@ -461,6 +502,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       pipeline,
       box: contentBox,
       skipTranscriptCache: params.skipTranscriptCache === true,
+      range,
     });
     // Las imágenes esperan al análisis de texto; si el trabajo se va a reintentar por OpenAI saturado,
     // no se gastan imágenes ahora. (Se marca como manejada: con la visión apagada nadie la espera.)
@@ -468,7 +510,9 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       if (a.retryLater) throw new Error("se reintentará");
     });
     visionGate.catch(() => undefined);
-    const chatPromise = readTwitchChat(deps, video.sourceUrl, info.durationSeconds, controller.signal, job.id);
+    // El video procesado empieza en este segundo del enlace (tramo elegido): el chat se lee desde ahí.
+    const chatOffset = video.sourceUrl ? (range ? range.startSeconds : linkOffset) : 0;
+    const chatPromise = readTwitchChat(deps, video.sourceUrl, info.durationSeconds, controller.signal, job.id, chatOffset);
     const [raw, ai, vision, chat] = await Promise.all([
       analyzeSignals(deps.tools, input, info, dir, {
         signal: controller.signal,
@@ -627,7 +671,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       const file = path.join(dir, `section-${index}.mp4`);
       const get = deps.streams?.downloadSection ?? downloadSection;
       const run = () =>
-        get(streamSource!, moment.startSeconds, moment.endSeconds - moment.startSeconds, file, {
+        get(streamSource!, linkOffset + moment.startSeconds, moment.endSeconds - moment.startSeconds, file, {
           ffmpegPath: deps.tools.ffmpegPath,
           signal: controller.signal,
         });
@@ -923,6 +967,12 @@ export function jobRun(job: Pick<Job, "id" | "queuedAt">): string {
 }
 
 /** Descuenta los minutos del video. Sin minutos suficientes el trabajo termina con un mensaje claro. */
+/** Tramo pedido en el trabajo (ya revisado por la API): los dos extremos y al menos 2 minutos. */
+function jobRange(params: JobParams): { startSeconds: number; endSeconds: number } | null {
+  const checked = checkRange(params.rangeStartSeconds, params.rangeEndSeconds);
+  return checked.ok ? checked.range : null;
+}
+
 async function chargeMinutes(deps: PipelineDeps, job: Job, videoId: string, durationSeconds: number): Promise<void> {
   if (!deps.billing?.enabled) return;
   const [owner] = await deps.db.select({ email: users.email }).from(users).where(eq(users.id, job.userId));
@@ -1033,16 +1083,19 @@ async function readTwitchChat(
   durationSeconds: number,
   signal: AbortSignal,
   jobId: string,
+  offsetSeconds = 0,
 ): Promise<{ status?: "used" | "unavailable"; series: number[]; messages: number }> {
   const videoId = twitchVideoId(sourceUrl);
   if (!videoId || deps.twitchChat === false) return { series: [], messages: 0 };
   const read = deps.twitchChat ?? fetchTwitchChatActivity;
   try {
     // Como mucho 2 minutos: es una señal extra, no debe frenar el análisis.
-    const activity = await read(videoId, durationSeconds, { signal, deadline: Date.now() + 120_000 });
+    // Con tramo: se lee hasta el final del tramo y se usa solo la parte del tramo.
+    const offset = Math.max(0, Math.floor(offsetSeconds));
+    const activity = await read(videoId, offset + durationSeconds, { signal, deadline: Date.now() + 120_000 });
     if (!activity) return { status: "unavailable", series: [], messages: 0 };
-    deps.log.info({ jobId, messages: activity.messages, samples: activity.samples }, "chat de Twitch leído");
-    return { status: "used", series: activity.series, messages: activity.messages };
+    deps.log.info({ jobId, messages: activity.messages, samples: activity.samples, offset }, "chat de Twitch leído");
+    return { status: "used", series: offset ? activity.series.slice(offset) : activity.series, messages: activity.messages };
   } catch (err) {
     deps.log.warn({ jobId, error: (err as Error).message }, "no se pudo leer el chat de Twitch");
     return { status: "unavailable", series: [], messages: 0 };
@@ -1077,6 +1130,8 @@ async function runAI(
     box?: import("./ffmpeg.js").ContentBox | null;
     /** No reutilizar transcripciones guardadas (prueba lado a lado: costo real). */
     skipTranscriptCache?: boolean;
+    /** Tramo elegido: la transcripción guardada es solo de ese tramo. */
+    range?: { startSeconds: number; endSeconds: number } | null;
   },
 ): Promise<AIOutcome> {
   const empty = { segments: [], captions: [], captionsLanguage: null, language: null, usage: {}, transcribeCostUsd: 0 };
@@ -1094,8 +1149,10 @@ async function runAI(
   const extrasPromise = ids.pipeline === "v2" ? v2Extras(deps, input, dir, info, ids.box ?? null, coveredSeconds, signal, ids.jobId) : null;
   try {
     // ¿Ya se transcribió este video (reintento o nuevo procesamiento)? Se reutiliza: no se paga otra vez.
+    // Con tramo, la transcripción es solo de ese tramo (tiempos desde su inicio): se guarda aparte.
+    const rangeTag = ids.range ? `-r${ids.range.startSeconds}-${ids.range.endSeconds}` : "";
     const cacheKey = ai.transcriptionModel
-      ? transcriptCacheKey(ids.userId, ids.videoId, ai.name, `${ai.transcriptionModel}${TRANSCRIPT_CACHE_VERSION}`)
+      ? transcriptCacheKey(ids.userId, ids.videoId, ai.name, `${ai.transcriptionModel}${TRANSCRIPT_CACHE_VERSION}${rangeTag}`)
       : null;
     const cacheFile = path.join(dir, "transcript-cache.json");
     let cached = cacheKey && !ids.skipTranscriptCache ? await loadTranscript(deps, cacheKey, coveredSeconds, cacheFile) : null;
@@ -1103,7 +1160,7 @@ async function runAI(
     // videos anteriores de ESTE usuario con ese enlace (nunca de otros usuarios). Solo si duran lo
     // mismo: si el anterior se bajó desde otro punto (o el stream seguía creciendo), sus tiempos no
     // coinciden con este video y los subtítulos quedarían corridos.
-    if (!cached && cacheKey && ids.sourceUrl && ai.transcriptionModel && !ids.skipTranscriptCache) {
+    if (!cached && cacheKey && ids.sourceUrl && ai.transcriptionModel && !ids.skipTranscriptCache && !ids.range) {
       const earlier = await deps.db
         .select({ id: videos.id, durationSeconds: videos.durationSeconds })
         .from(videos)
