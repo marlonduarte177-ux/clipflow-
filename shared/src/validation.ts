@@ -106,6 +106,8 @@ export const ProcessVideoSchema = z.object(ProcessingOptions);
 /** Ver los datos de un enlace (miniatura, título, duración) antes de importarlo. */
 export const LinkPreviewSchema = z.object({
   url: z.string().trim().min(1, "Pega el enlace del video").max(2048, "El enlace es demasiado largo"),
+  /** Segundo paso (1–3 s): leer la duración como el procesador, si la consulta rápida no la trajo. */
+  deep: z.boolean().optional(),
 });
 
 /** Importar un video desde un enlace (lo descarga el worker). */

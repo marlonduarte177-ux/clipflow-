@@ -47,6 +47,7 @@ beforeAll(() => {
       securityGroup: worker.securityGroup,
     },
     webOrigins: WEB,
+    downloadProxy: worker.downloadProxy,
   });
   const monitoring = new MonitoringStack(app, "monitoring", {
     env,
@@ -318,6 +319,11 @@ describe("cola y worker", () => {
     expect(env.find((e) => e.Name === "TRANSCRIBE_PROVIDER")?.Value).toBe("deepgram");
     expect((container.Secrets as { Name: string }[]).map((e) => e.Name)).toContain("DEEPGRAM_API_KEY");
     expect(JSON.stringify(t.api.toJSON())).not.toContain("deepgram-api-key");
+    // La API lee la duración de los enlaces con el proxy del procesador (solo ese secreto).
+    const [apiTask] = Object.values(t.api.findResources("AWS::ECS::TaskDefinition"));
+    const apiContainer = (apiTask as { Properties: { ContainerDefinitions: Record<string, unknown>[] } }).Properties.ContainerDefinitions[0]!;
+    expect((apiContainer.Secrets as { Name: string }[]).map((e) => e.Name)).toContain("DOWNLOAD_PROXY_URL");
+    expect((apiContainer.Environment as { Name: string }[]).map((e) => e.Name)).not.toContain("DOWNLOAD_PROXY_URL");
     expect(env.find((e) => e.Name === "OPENAI_V2_MODEL")?.Value).toBe("gpt-6.1-sol");
     expect(env.find((e) => e.Name === "SOUND_DETECTION_ENABLED")?.Value).toBe("true");
     // La API no tiene acceso a la clave.
