@@ -61,7 +61,15 @@ def secrets() -> None:
         out(f"- no se pudieron listar: {err}")
         return
     for s in sorted(data.get("SecretList", []), key=lambda s: s["Name"]):
-        state = "⚠️ PROGRAMADO PARA BORRARSE" if s.get("DeletedDate") else "ok"
+        if s.get("DeletedDate"):
+            state = "⚠️ PROGRAMADO PARA BORRARSE"
+        else:
+            # Si nunca se cambió después de crearse, sigue con el valor de relleno (no se pegó la clave).
+            created, changed = str(s.get("CreatedDate", "")), str(s.get("LastChangedDate", ""))
+            if s["Name"].endswith("/db"):
+                state = "ok"  # la contraseña de la base la genera AWS: no se pega a mano
+            else:
+                state = f"ok (cambiado {changed[:10]})" if changed and changed[:16] != created[:16] else "⚠️ todavía con el valor inicial (falta pegar la clave)"
         out(f"- `{s['Name']}`: {state}")
 
 
@@ -128,7 +136,7 @@ def stopped_tasks() -> None:
 
 
 # Lo que interesa de cada línea de registro (los registros son JSON de pino).
-FIELDS = ["msg", "step", "code", "error", "status", "reason", "detail", "result", "video", "clip", "section", "source", "box", "segment", "crop", "filter", "err", "stderr"]
+FIELDS = ["msg", "host", "proxy", "step", "code", "error", "status", "reason", "detail", "result", "video", "clip", "section", "source", "box", "segment", "crop", "filter", "err", "stderr"]
 PATTERN = '?"aviso de Paddle" ?"trabajo con error" ?"FFmpeg falló" ?"error inesperado" ?"IA no disponible" ?"IA saturada" ?"no se pudo" ?"\\"level\\":50"'
 
 

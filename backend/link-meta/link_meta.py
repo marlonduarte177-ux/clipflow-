@@ -12,6 +12,7 @@ Facebook e Instagram no dan la duración por oEmbed).
 Uso: python3 link_meta.py URL  → imprime un JSON {title, durationSeconds, thumbnailUrl} (vacío si no hay).
 """
 
+import html
 import json
 import os
 import re
@@ -113,21 +114,71 @@ def generic(url, proxy):
     }
 
 
+FACEBOOK = re.compile(r"^https?://([\w-]+\.)?(facebook\.com|fb\.com|fb\.watch)/", re.IGNORECASE)
+
+
+def facebook_page(url, proxy):
+    """Respaldo de Facebook: la duración y el título que trae la página del video (si la muestra)."""
+    from curl_cffi import requests
+
+    proxies = {"http": proxy, "https": proxy} if proxy else None
+    response = requests.get(url, impersonate="chrome", timeout=TIMEOUT, proxies=proxies)
+    response.raise_for_status()
+    page = response.text.replace('\\"', '"').replace("\\/", "/")
+    found = {}
+    ms = re.search(r'"playable_duration_in_ms":(\d+)', page)
+    seconds = re.search(r'"length_in_second":([\d.]+)', page)
+    if ms:
+        found["durationSeconds"] = seconds_or_none(int(ms.group(1)) / 1000)
+    elif seconds:
+        found["durationSeconds"] = seconds_or_none(float(seconds.group(1)))
+    title = re.search(r'<meta property="og:title" content="([^"]{1,300})"', page)
+    image = re.search(r'<meta property="og:image" content="([^"]{1,2000})"', page)
+    if title:
+        found["title"] = html.unescape(title.group(1))
+    if image:
+        found["thumbnailUrl"] = https_or_none(html.unescape(image.group(1)))
+    if not found.get("durationSeconds"):
+        raise RuntimeError("la página no trae los datos del video (pide iniciar sesión)")
+    return found
+
+
+def short_error(err):
+    """Motivo corto para el registro: sin direcciones ni credenciales (el repositorio es público)."""
+    text = re.sub(r"https?://\S+", "<enlace>", str(err))
+    text = re.sub(r"\S+:\S+@\S+", "<proxy>", text)
+    text = text.replace("ERROR: ", "").split("; please report")[0]
+    return f"{type(err).__name__}: {text}"[:180]
+
+
 def main():
     url = sys.argv[1]
     proxy = os.environ.get("CLIPFLOW_PROXY") or None
     match = KICK_VOD.match(url)
     best = {}
+    errors = []
     for attempt in [None, proxy] if proxy else [None]:
-        try:
-            found = kick(url, match.group(1), attempt) if match else generic(url, attempt)
-        except Exception:  # bloqueos, tiempo agotado, enlace privado: se prueba por el proxy
-            found = None
-        if found:
-            best = found
-            if found.get("durationSeconds"):
-                break
-    print(json.dumps({k: v for k, v in best.items() if v is not None}))
+        via = "proxy" if attempt else "directo"
+        readers = [lambda a: kick(url, match.group(1), a)] if match else [lambda a: generic(url, a)]
+        if FACEBOOK.match(url):
+            readers.append(lambda a: facebook_page(url, a))
+        for read in readers:
+            try:
+                found = read(attempt)
+            except Exception as err:  # bloqueos, tiempo agotado, enlace privado: se prueba lo siguiente
+                errors.append(f"{via}: {short_error(err)}")
+                continue
+            if found:
+                best = {**found, **{k: v for k, v in best.items() if v}} if best else found
+                if found.get("durationSeconds"):
+                    break
+        if best.get("durationSeconds"):
+            break
+    result = {k: v for k, v in best.items() if v is not None}
+    if not result.get("durationSeconds"):
+        result["errors"] = errors[-4:]
+        result["proxy"] = bool(proxy)
+    print(json.dumps(result))
 
 
 if __name__ == "__main__":

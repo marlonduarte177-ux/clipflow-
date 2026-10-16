@@ -363,6 +363,14 @@ El original ocupa S3 igual que un video subido y se borra al eliminar el video.
       mismo secreto; ahora también lo lee la API). Como mucho 4 consultas a la vez; tope 25 s.
     - Probado (desde fuera de AWS): Kick 1,1 s, TikTok 1,6 s, Facebook 1,7 s, todos con duración.
       Instagram pide sesión en algunos reels (sin duración: se procesa completo).
+    - **Facebook (16/10/2026):** desde servidores (AWS y otros), Facebook muestra la página de "iniciar
+      sesión" sin los datos del video, y yt-dlp responde "Cannot parse data". Solo funciona por el
+      **proxy residencial**. El proxy se lee igual que en el procesador (`parseProxyUrl` en shared):
+      también el formato que copia Evomi `host:puerto:usuario:clave` (antes la API solo aceptaba la URL).
+      Respaldo: la página del video (`playable_duration_in_ms`, `og:title`, `og:image`).
+    - Si no se pudo leer la duración, la API registra el motivo («no se pudo leer la duración del
+      enlace», con `reason` y si usó el proxy) y el workflow Diagnóstico lo muestra en «Errores de la API».
+      El Diagnóstico también dice si cada secreto sigue con el valor inicial (falta pegar la clave).
   - YouTube sigue sin importarse (lo bloquea desde servidores): se avisa al pegar el enlace.
 - Un archivo: la duración y un fotograma se leen en el navegador; la subida empieza sola.
 - Debajo: «Al continuar confirmas que este es tu propio contenido o que tienes permiso para usarlo.»

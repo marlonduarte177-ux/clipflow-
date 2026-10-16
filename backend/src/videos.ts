@@ -31,7 +31,7 @@ import { deleteVideoRows, purgeVideoFiles } from "./cleanup.js";
 import { sendError, sendValidationError } from "./http.js";
 import { enqueue, toJobDto, wakeWorkers } from "./jobs.js";
 import { replyIfBlocked, type BillingSettings } from "./billing.js";
-import { fetchLinkDetails, fetchLinkPreview, usableProxy } from "./link-preview.js";
+import { fetchLinkDetails, fetchLinkPreview, usableProxy, type LinkDetails } from "./link-preview.js";
 
 /** El proxy residencial (el mismo del procesador) solo si el secreto ya tiene una URL. */
 const defaultLinkDetails = (url: string) => fetchLinkDetails(url, { proxyUrl: usableProxy(process.env.DOWNLOAD_PROXY_URL) });
@@ -138,7 +138,7 @@ export interface VideoRouteDeps {
   /** Datos del enlace antes de importarlo (tests: una versión falsa). */
   linkPreview?: typeof fetchLinkPreview;
   /** Segundo paso, más lento: la duración leída como el procesador (tests: una versión falsa). */
-  linkDetails?: (url: string) => Promise<Partial<LinkPreview> | null>;
+  linkDetails?: (url: string) => Promise<LinkDetails | null>;
 }
 
 /** Tarjetas de enlaces ya consultadas (10 min): pegar el mismo enlace otra vez es instantáneo. */
@@ -328,7 +328,10 @@ export function videoRoutes(deps: VideoRouteDeps) {
           thumbnailUrl: quick.thumbnailUrl ?? details?.thumbnailUrl ?? null,
           durationSeconds: quick.durationSeconds ?? details?.durationSeconds ?? null,
         };
-        request.log.info({ host: new URL(checked.url).hostname, duration: preview?.durationSeconds ?? null }, "datos del enlace leídos");
+        const host = new URL(checked.url).hostname;
+        if (preview?.durationSeconds) request.log.info({ host, duration: preview.durationSeconds }, "datos del enlace leídos");
+        // Sin duración: el motivo queda en el registro (lo muestra el workflow Diagnóstico).
+        else request.log.warn({ host, proxy: details?.proxy ?? null, reason: details?.errors ?? [] }, "no se pudo leer la duración del enlace");
       } else {
         preview = await (deps.linkPreview ?? fetchLinkPreview)(checked.url);
       }
