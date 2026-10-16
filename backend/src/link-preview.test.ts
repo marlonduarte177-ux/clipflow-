@@ -98,6 +98,12 @@ describe("segundo paso: la duración leída como el procesador (Python con yt-dl
     expect(details).toEqual({ title: "https://kick.com/a/videos/01a0b24f-2b40-7d20-b9d1-f1238dd1b2e7", durationSeconds: 7642, thumbnailUrl: "https://images.kick.com/t.webp" });
   });
 
+  it("sin duración, devuelve el motivo (para el registro) y si probó el proxy", async () => {
+    const script = fakeScript('print(json.dumps({"errors": ["directo: RuntimeError: pide iniciar sesión", 7], "proxy": True}))');
+    const details = await fetchLinkDetails("https://www.facebook.com/share/v/1BuH8sY2Lx/", { python: "python3", script });
+    expect(details).toMatchObject({ durationSeconds: null, errors: ["directo: RuntimeError: pide iniciar sesión"], proxy: true });
+  });
+
   it("si falla, tarda o responde cualquier cosa: null o sin datos (nunca un error)", async () => {
     const broken = fakeScript("raise SystemExit(3)");
     expect(await fetchLinkDetails("https://www.tiktok.com/@a/video/1", { python: "python3", script: broken })).toEqual({ title: null, durationSeconds: null, thumbnailUrl: null });
@@ -113,7 +119,9 @@ describe("segundo paso: la duración leída como el procesador (Python con yt-dl
   it("el secreto del proxy solo cuenta si es una URL (al crearlo tiene un relleno)", () => {
     expect(usableProxy("Xk2l9sdfjKLJ2lk3j4lk2j3l4kj23l4k")).toBeNull();
     expect(usableProxy(undefined)).toBeNull();
-    expect(usableProxy("http://u:p@rp.evomi.com:1000")).toBe("http://u:p@rp.evomi.com:1000/");
+    expect(usableProxy("http://u:p@rp.evomi.com:1000")).toBe("http://u:p@rp.evomi.com:1000");
+    // El formato que copia Evomi (host:puerto:usuario:clave), igual que lo entiende el procesador.
+    expect(usableProxy("rp.evomi.com:1000:usuario1:Clave123")).toBe("http://usuario1:Clave123@rp.evomi.com:1000");
     expect(proxyWithSession("http://u:p@proxy.example.com:8000")).toBe("http://u:p@proxy.example.com:8000/");
   });
 });

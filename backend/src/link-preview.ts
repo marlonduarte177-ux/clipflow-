@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import type { LinkPreview } from "@clipflow/shared";
+import { parseProxyUrl, type LinkPreview } from "@clipflow/shared";
 
 /**
  * Datos de un enlace (título, miniatura y duración) SIN bajar el video, para mostrar la tarjeta en
@@ -222,16 +222,16 @@ export function proxyWithSession(proxyUrl: string): string {
   return url.toString();
 }
 
-/** El valor del secreto solo cuenta si es una URL de proxy (al crearlo tiene un relleno al azar). */
+/**
+ * El proxy del secreto, leído igual que en el procesador: URL (`http://usuario:clave@host:puerto`) o el
+ * formato que copia Evomi (`host:puerto:usuario:clave`). null con el valor de relleno o si no se entiende.
+ */
 export function usableProxy(raw: string | undefined): string | null {
-  if (!raw) return null;
-  try {
-    const url = new URL(raw.trim());
-    return (url.protocol === "http:" || url.protocol === "https:") && url.hostname && url.port ? url.toString() : null;
-  } catch {
-    return null;
-  }
+  return parseProxyUrl(raw);
 }
+
+/** Lo que leyó el segundo paso; sin duración, por qué (para el registro, sin datos privados). */
+export type LinkDetails = Partial<LinkPreview> & { errors?: string[]; proxy?: boolean };
 
 export interface DetailsOptions {
   /** Python con yt-dlp y curl-cffi (en la imagen de la API: /opt/yt-dlp/bin/python). */
@@ -251,7 +251,7 @@ let running = 0;
  * procesador (Kick como un navegador real; las demás con yt-dlp, solo los datos) y, si bloquean, por el
  * proxy. ~1–3 s. Nunca lanza: si no se puede, devuelve null.
  */
-export async function fetchLinkDetails(raw: string, options: DetailsOptions = {}): Promise<Partial<LinkPreview> | null> {
+export async function fetchLinkDetails(raw: string, options: DetailsOptions = {}): Promise<LinkDetails | null> {
   const url = new URL(raw);
   if (!platformOf(url) || running >= MAX_RUNNING) return null;
   running++;
@@ -272,10 +272,13 @@ export async function fetchLinkDetails(raw: string, options: DetailsOptions = {}
       });
     });
     const data = JSON.parse(stdout.trim() || "{}") as Record<string, unknown>;
+    const errors = Array.isArray(data.errors) ? data.errors.filter((e): e is string => typeof e === "string").map((e) => e.slice(0, 200)).slice(0, 4) : [];
     return {
       title: text(data.title),
       durationSeconds: seconds(data.durationSeconds),
       thumbnailUrl: httpsUrl(data.thumbnailUrl),
+      ...(errors.length ? { errors } : {}),
+      ...(typeof data.proxy === "boolean" ? { proxy: data.proxy } : {}),
     };
   } catch {
     return null;
