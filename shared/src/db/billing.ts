@@ -111,7 +111,7 @@ export async function refundVideoMinutes(db: Database, input: { userId: string; 
 
 /**
  * Deja el saldo en `minutes` exactos (los minutos no se acumulan entre periodos). `eventId` identifica
- * el pago o el cambio (p. ej. "paddle:txn_…"): si el aviso se repite, no se aplica dos veces.
+ * el pago o el cambio (p. ej. "polar:<pedido>"): si el aviso se repite, no se aplica dos veces.
  * Devuelve false si ya se había aplicado.
  */
 export async function setPlanMinutes(
@@ -158,15 +158,17 @@ export async function latestSubscription(db: DbExecutor, userId: string): Promis
 }
 
 /**
- * Estado real del plan. La prueba es un pago único de 7 días: queda "trialing" en la base y vence sola
- * al pasar `currentPeriodEnd` (no hay aviso de Paddle cuando termina).
+ * Estado real del plan. Las pruebas antiguas de pago único (Paddle) quedaban "trialing" y vencían solas al
+ * pasar `currentPeriodEnd`. En Polar la prueba es parte de la suscripción: su aviso dice cuándo termina.
  */
 export function effectiveStatus(row: SubscriptionRow, now = new Date()): SubscriptionRow["status"] {
-  if (row.planCode === "trial" && row.status === "trialing" && row.currentPeriodEnd && row.currentPeriodEnd <= now) return "expired";
+  if (row.provider !== "polar" && row.planCode === "trial" && row.status === "trialing" && row.currentPeriodEnd && row.currentPeriodEnd <= now) {
+    return "expired";
+  }
   return row.status;
 }
 
-/** ¿Puede crear clips? Plan en prueba (sin vencer), activo o con el cobro pendiente (Paddle reintenta). */
+/** ¿Puede crear clips? Plan en prueba (sin vencer), activo o con el cobro pendiente (Polar reintenta). */
 export function subscriptionAllowsProcessing(row: SubscriptionRow | undefined, now = new Date()): boolean {
   if (!row) return false;
   const status = effectiveStatus(row, now);

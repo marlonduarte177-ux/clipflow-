@@ -34,35 +34,47 @@ export type BillingSettings = Pick<
   ApiConfig,
   | "BILLING_ENABLED"
   | "BILLING_FREE_EMAILS"
-  | "PADDLE_ENVIRONMENT"
-  | "PADDLE_CLIENT_TOKEN"
-  | "PADDLE_PRICE_TRIAL_FEE"
-  | "PADDLE_PRICE_BASIC"
-  | "PADDLE_PRICE_PRO"
-  | "PADDLE_PRICE_MAX"
-  | "PADDLE_PORTAL_URL"
-  | "PADDLE_WEBHOOK_SECRET"
+  | "POLAR_SERVER"
+  | "POLAR_PRODUCT_BASIC"
+  | "POLAR_PRODUCT_PRO"
+  | "POLAR_PRODUCT_MAX"
+  | "POLAR_ACCESS_TOKEN"
+  | "POLAR_WEBHOOK_SECRET"
 >;
 
 /** Sin pagos (local y tests): se procesa sin plan. */
-export const BILLING_OFF: BillingSettings = { BILLING_ENABLED: false, PADDLE_ENVIRONMENT: "sandbox" };
+export const BILLING_OFF: BillingSettings = { BILLING_ENABLED: false, POLAR_SERVER: "sandbox" };
 
-/** Una clave real de avisos de Paddle empieza por "pdl_ntfset_". El relleno de AWS no. */
-export function looksLikePaddleWebhookSecret(value: string | undefined): value is string {
-  return typeof value === "string" && /^pdl_ntfset_\S{10,}$/.test(value.trim());
-}
+const PROVIDER = "polar";
+const POLAR_API = { sandbox: "https://sandbox-api.polar.sh", production: "https://api.polar.sh" } as const;
 
 /**
- * La clave de los avisos tal como se pegó en Secrets Manager. Acepta también la pestaña «Key/value»
- * de AWS (JSON con un solo valor) y comillas alrededor. null si no parece una clave de Paddle.
+ * Valor pegado en Secrets Manager, limpio: acepta la pestaña «Key/value» de AWS (JSON con un solo
+ * valor), comillas y espacios alrededor. undefined si está vacío.
  */
-export function paddleWebhookSecret(stored: string | undefined): string | null {
-  // La clave puede venir sola, entre comillas, en JSON (pestaña Key/value de AWS) o con texto alrededor:
-  // se toma el primer "pdl_ntfset_…" que aparezca (el prefijo, en minúsculas como lo entrega Paddle).
-  const found = /pdl_ntfset_[^\s"',}]+/i.exec(stored ?? "");
-  if (!found) return null;
-  const value = `pdl_ntfset_${found[0].slice("pdl_ntfset_".length)}`;
-  return looksLikePaddleWebhookSecret(value) ? value : null;
+function storedValue(stored: string | undefined): string | undefined {
+  let v = (stored ?? "").trim();
+  if (v.startsWith("{")) {
+    try {
+      const values = Object.values(JSON.parse(v) as Record<string, unknown>).filter((x): x is string => typeof x === "string");
+      v = values.length === 1 ? values[0]!.trim() : v;
+    } catch {
+      // No es JSON: se usa tal cual.
+    }
+  }
+  v = v.replace(/^["']+|["']+$/g, "").trim();
+  return v || undefined;
+}
+
+/** El token de Polar (polar_oat_…) tal como se pegó. null si falta (p. ej. sigue el relleno de AWS). */
+export function polarAccessToken(stored: string | undefined): string | null {
+  const found = /polar_oat_[A-Za-z0-9_-]{10,}/.exec(storedValue(stored) ?? "");
+  return found ? found[0] : null;
+}
+
+/** La clave de los avisos de Polar. null si falta. */
+export function polarWebhookSecret(stored: string | undefined): string | null {
+  return storedValue(stored) ?? null;
 }
 
 /** Forma de lo guardado como clave, sin revelarla: sirve para saber qué se pegó mal. */
@@ -74,8 +86,8 @@ export function describeStoredSecret(stored: string | undefined): Record<string,
     json: v.trim().startsWith("{"),
     espaciosOSaltos: /\s/.test(v.trim()),
     comillas: /["']/.test(v),
-    contienePdl: /pdl/i.test(v),
-    contieneNtfset: /ntfset/i.test(v),
+    empiezaConPolar: /^polar_/i.test(v.trim()),
+    empiezaConWhsec: /^whsec_/i.test(v.trim()),
   };
 }
 
@@ -107,71 +119,94 @@ export async function replyIfBlocked(
   return true;
 }
 
-/** Comprueba la firma de Paddle ("ts=…;h1=…"): HMAC-SHA256 de "ts:cuerpo" con la clave secreta. */
-export function verifyPaddleSignature(rawBody: string, header: string | undefined, secret: string, nowMs = Date.now()): boolean {
-  if (!header) return false;
-  const parts = header.split(";").map((p) => p.trim().split("="));
-  const ts = parts.find(([k]) => k === "ts")?.[1];
-  const signatures = parts.filter(([k]) => k === "h1").map(([, v]) => v ?? "");
-  if (!ts || !/^\d+$/.test(ts) || signatures.length === 0) return false;
+/**
+ * Firma de los avisos de Polar (Standard Webhooks): HMAC-SHA256 de "id.timestamp.cuerpo", en base64,
+ * en la cabecera webhook-signature ("v1,<firma>", varias separadas por espacios). La clave es el texto
+ * de la clave tal cual; si empieza por "whsec_", también se prueba su forma en base64.
+ */
+export function verifyPolarSignature(
+  rawBody: string,
+  headers: { id?: string; timestamp?: string; signature?: string },
+  secret: string,
+  nowMs = Date.now(),
+): boolean {
+  const { id, timestamp, signature } = headers;
+  if (!id || !timestamp || !signature || !/^\d+$/.test(timestamp)) return false;
   // Más de 5 minutos de diferencia: podría ser un aviso viejo reenviado por un tercero.
-  if (Math.abs(nowMs / 1000 - Number(ts)) > 300) return false;
-  const expected = createHmac("sha256", secret).update(`${ts}:${rawBody}`).digest();
-  return signatures.some((sig) => {
-    const given = Buffer.from(sig, "hex");
-    return given.length === expected.length && timingSafeEqual(given, expected);
+  if (Math.abs(nowMs / 1000 - Number(timestamp)) > 300) return false;
+  const keys = [Buffer.from(secret, "utf8")];
+  if (secret.startsWith("whsec_")) keys.push(Buffer.from(secret.slice("whsec_".length), "base64"));
+  const given = signature
+    .split(" ")
+    .map((part) => part.split(","))
+    .filter(([version, value]) => version === "v1" && value)
+    .map(([, value]) => Buffer.from(value!, "base64"));
+  return keys.some((key) => {
+    const expected = createHmac("sha256", key).update(`${id}.${timestamp}.${rawBody}`).digest();
+    return given.some((sig) => sig.length === expected.length && timingSafeEqual(sig, expected));
   });
 }
 
-const PaddleItem = z.object({
-  price_id: z.string().optional(),
-  price: z.object({ id: z.string() }).nullish(),
-});
-const CustomData = z.object({ userId: z.string().optional() }).passthrough().nullish();
-const PaddleEvent = z.object({
-  event_id: z.string(),
-  event_type: z.string(),
-  occurred_at: z.string(),
+const Metadata = z.record(z.string(), z.unknown()).nullish();
+const Customer = z.object({ id: z.string().nullish(), external_id: z.string().nullish() }).passthrough().nullish();
+const PolarEvent = z.object({
+  type: z.string(),
+  timestamp: z.string().nullish(),
   data: z.record(z.string(), z.unknown()),
 });
-const PaddleSubscription = z.object({
+const PolarSubscription = z.object({
   id: z.string(),
   status: z.string(),
+  product_id: z.string().nullish(),
   customer_id: z.string().nullish(),
-  custom_data: CustomData,
-  items: z.array(PaddleItem).default([]),
-  current_billing_period: z.object({ starts_at: z.string(), ends_at: z.string() }).nullish(),
-  scheduled_change: z.object({ action: z.string() }).nullish(),
+  customer: Customer,
+  metadata: Metadata,
+  current_period_start: z.string().nullish(),
+  current_period_end: z.string().nullish(),
+  cancel_at_period_end: z.boolean().nullish(),
+  ended_at: z.string().nullish(),
 });
-const PaddleTransaction = z.object({
+const PolarOrder = z.object({
   id: z.string(),
+  paid: z.boolean().nullish(),
+  status: z.string().nullish(),
+  total_amount: z.number().nullish(),
+  billing_reason: z.string().nullish(),
+  product_id: z.string().nullish(),
   subscription_id: z.string().nullish(),
-  custom_data: CustomData,
-  items: z.array(PaddleItem).default([]),
+  customer: Customer,
+  metadata: Metadata,
 });
 
-const priceIds = (items: z.infer<typeof PaddleItem>[]) =>
-  items.map((i) => i.price?.id ?? i.price_id).filter((id): id is string => Boolean(id));
-
+/** Estados de Polar → los de ClipFlow. */
 const STATUS: Record<string, BillingStatus> = {
   trialing: "trialing",
   active: "active",
   past_due: "past_due",
   canceled: "canceled",
+  unpaid: "expired",
   paused: "expired",
+  incomplete: "expired",
+  incomplete_expired: "expired",
 };
 
-/** Dueño del pago: el que abrió el pago (customData) o el de la suscripción ya guardada. */
-async function resolveUser(db: Database, customUserId: string | undefined, subscriptionId: string | null | undefined) {
-  if (customUserId && z.uuid().safeParse(customUserId).success) {
-    const [user] = await db.select({ id: users.id }).from(users).where(eq(users.id, customUserId));
+/** Cargos de una suscripción que traen minutos: el primero, la renovación (y el fin de la prueba) y el cambio de plan. */
+const PLAN_ORDERS = new Set(["subscription_create", "subscription_cycle", "subscription_update"]);
+
+const userIdIn = (metadata: z.infer<typeof Metadata>) => (typeof metadata?.userId === "string" ? metadata.userId : undefined);
+
+/** Dueño del pago: el que abrió el pago (external_id o metadata) o el de la suscripción ya guardada. */
+async function resolveUser(db: Database, candidates: (string | null | undefined)[], subscriptionId: string | null | undefined) {
+  for (const id of candidates) {
+    if (!id || !z.uuid().safeParse(id).success) continue;
+    const [user] = await db.select({ id: users.id }).from(users).where(eq(users.id, id));
     if (user) return user.id;
   }
   if (subscriptionId) {
     const [row] = await db
       .select({ userId: subscriptions.userId })
       .from(subscriptions)
-      .where(and(eq(subscriptions.provider, "paddle"), eq(subscriptions.providerSubscriptionId, subscriptionId)));
+      .where(and(eq(subscriptions.provider, PROVIDER), eq(subscriptions.providerSubscriptionId, subscriptionId)));
     if (row) return row.userId;
   }
   return null;
@@ -179,50 +214,55 @@ async function resolveUser(db: Database, customUserId: string | undefined, subsc
 
 export class RetryLater extends Error {}
 
-/** Plan mensual de cada precio de Paddle. */
-function monthlyPlanOf(settings: BillingSettings, priceId: string): MonthlyPlanCode | null {
-  if (priceId === settings.PADDLE_PRICE_BASIC) return "basic";
-  if (priceId === settings.PADDLE_PRICE_PRO) return "pro";
-  if (priceId === settings.PADDLE_PRICE_MAX) return "max";
+/** Plan mensual de cada producto de Polar. */
+function planOfProduct(settings: BillingSettings, productId: string | null | undefined): MonthlyPlanCode | null {
+  if (!productId) return null;
+  if (productId === settings.POLAR_PRODUCT_BASIC) return "basic";
+  if (productId === settings.POLAR_PRODUCT_PRO) return "pro";
+  if (productId === settings.POLAR_PRODUCT_MAX) return "max";
   return null;
 }
 
 /**
- * Aplica un aviso de Paddle. Idempotente: los avisos repetidos no cargan minutos dos veces y los
+ * Aplica un aviso de Polar. Idempotente: los avisos repetidos no cargan minutos dos veces y los
  * avisos viejos que llegan tarde no pisan el estado nuevo.
+ * - Prueba (7 días, con tarjeta): 60 min. Al terminar, Polar cobra el Básico (aviso order.paid) → 200 min.
+ * - Cada pago de un plan (primero, renovación, cambio) → los minutos de ese plan.
+ * - Terminó (canceló y venció, o no pagó) → 0 min.
  */
-export async function applyPaddleEvent(db: Database, settings: BillingSettings, raw: unknown, log: FastifyBaseLogger): Promise<void> {
-  const event = PaddleEvent.parse(raw);
-  const occurredAt = new Date(event.occurred_at);
+export async function applyPolarEvent(db: Database, settings: BillingSettings, raw: unknown, log: FastifyBaseLogger): Promise<void> {
+  const event = PolarEvent.parse(raw);
+  const occurredAt = event.timestamp ? new Date(event.timestamp) : new Date();
 
-  if (event.event_type.startsWith("subscription.")) {
-    const sub = PaddleSubscription.parse(event.data);
-    const userId = await resolveUser(db, sub.custom_data?.userId, sub.id);
+  if (event.type.startsWith("subscription.")) {
+    const sub = PolarSubscription.parse(event.data);
+    const plan = planOfProduct(settings, sub.product_id);
+    if (!plan) {
+      log.warn({ event: event.type }, "aviso de Polar con un producto que no es de ClipFlow: se ignora");
+      return;
+    }
+    const userId = await resolveUser(db, [sub.customer?.external_id, userIdIn(sub.metadata)], sub.id);
     if (!userId) throw new RetryLater("suscripción sin usuario");
-    const recurring = priceIds(sub.items).find((id) => monthlyPlanOf(settings, id)) ?? null;
     const status = STATUS[sub.status] ?? "expired";
-    // Si en Paddle el precio de la prueba quedó como suscripción (debe ser pago único), se muestra como prueba.
-    const trialOnly = !recurring && Boolean(settings.PADDLE_PRICE_TRIAL_FEE && priceIds(sub.items).includes(settings.PADDLE_PRICE_TRIAL_FEE));
-    const planCode: PlanCode = status === "trialing" || trialOnly ? "trial" : (recurring && monthlyPlanOf(settings, recurring)) || "basic";
     const values = {
       userId,
-      planCode,
+      planCode: (status === "trialing" ? "trial" : plan) as PlanCode,
       status,
-      provider: "paddle",
+      provider: PROVIDER,
       providerSubscriptionId: sub.id,
-      providerCustomerId: sub.customer_id ?? null,
-      priceId: recurring,
+      providerCustomerId: sub.customer_id ?? sub.customer?.id ?? null,
+      priceId: sub.product_id ?? null,
       providerEventAt: occurredAt,
-      currentPeriodStart: sub.current_billing_period ? new Date(sub.current_billing_period.starts_at) : null,
-      currentPeriodEnd: sub.current_billing_period ? new Date(sub.current_billing_period.ends_at) : null,
-      cancelAtPeriodEnd: sub.scheduled_change?.action === "cancel",
+      currentPeriodStart: sub.current_period_start ? new Date(sub.current_period_start) : null,
+      currentPeriodEnd: sub.current_period_end ? new Date(sub.current_period_end) : null,
+      cancelAtPeriodEnd: Boolean(sub.cancel_at_period_end),
     };
     const [existing] = await db
       .select()
       .from(subscriptions)
-      .where(and(eq(subscriptions.provider, "paddle"), eq(subscriptions.providerSubscriptionId, sub.id)));
+      .where(and(eq(subscriptions.provider, PROVIDER), eq(subscriptions.providerSubscriptionId, sub.id)));
     if (existing?.providerEventAt && existing.providerEventAt > occurredAt) return; // aviso viejo
-    // Paddle manda varios avisos casi a la vez (created, activated…): se inserta o actualiza sin chocar.
+    // Polar manda varios avisos casi a la vez (created, active, updated…): se inserta o actualiza sin chocar.
     await db
       .insert(subscriptions)
       .values(values)
@@ -232,50 +272,29 @@ export async function applyPaddleEvent(db: Database, settings: BillingSettings, 
         set: values,
         setWhere: sql`${subscriptions.providerEventAt} is null or ${subscriptions.providerEventAt} <= ${occurredAt}`,
       });
-    // Terminó (canceló o no pagó): se acaban los minutos.
-    if (status === "canceled" || status === "expired") {
-      await setPlanMinutes(db, { userId, minutes: 0, eventId: `paddle:${sub.id}:${status}`, note: "plan terminado" });
+    if (status === "trialing") {
+      // La prueba no tiene cobro: sus minutos se cargan con la suscripción (una sola vez).
+      await setPlanMinutes(db, { userId, minutes: PLANS.trial.minutes, eventId: `polar:${sub.id}:trial`, note: "prueba de 7 días" });
+    } else if (status === "canceled" || status === "expired") {
+      await setPlanMinutes(db, { userId, minutes: 0, eventId: `polar:${sub.id}:${status}`, note: "plan terminado" });
     }
-    log.info({ event: event.event_type, status }, "suscripción actualizada");
+    log.info({ event: event.type, status }, "suscripción actualizada");
     return;
   }
 
-  if (event.event_type === "transaction.completed") {
-    const txn = PaddleTransaction.parse(event.data);
-    const ids = priceIds(txn.items);
-    const isTrial = Boolean(settings.PADDLE_PRICE_TRIAL_FEE && ids.includes(settings.PADDLE_PRICE_TRIAL_FEE));
-    // Sin suscripción solo se acepta la prueba (pago único); no hay paquetes sueltos.
-    if (!txn.subscription_id && !isTrial) return;
-    const userId = await resolveUser(db, txn.custom_data?.userId, txn.subscription_id);
-    if (!userId) throw new RetryLater("pago sin usuario");
-    // Pago de la prueba (1.99 USD) → 60 min por 7 días. Pago de un plan mensual (primer mes o renovación) → sus minutos.
-    const monthly = ids.map((id) => monthlyPlanOf(settings, id)).find(Boolean);
-    const plan = isTrial ? PLANS.trial : monthly ? PLANS[monthly] : null;
+  if (event.type === "order.paid") {
+    const order = PolarOrder.parse(event.data);
+    // Solo los cargos de una suscripción con dinero (el primer cargo de la prueba es de 0 USD).
+    if (!order.subscription_id || !PLAN_ORDERS.has(order.billing_reason ?? "") || !((order.total_amount ?? 0) > 0)) return;
+    const plan = planOfProduct(settings, order.product_id);
     if (!plan) {
-      log.warn({ event: event.event_type }, "pago con un precio que no es de ClipFlow: se ignora");
+      log.warn({ event: event.type }, "pago con un producto que no es de ClipFlow: se ignora");
       return;
     }
-    if (isTrial && !txn.subscription_id) {
-      // La prueba se guarda como un plan de 7 días (vence solo; ver effectiveStatus). Clave: el pago.
-      const start = occurredAt;
-      const end = new Date(start.getTime() + PLANS.trial.days * 24 * 3600 * 1000);
-      await db
-        .insert(subscriptions)
-        .values({
-          userId,
-          planCode: PLANS.trial.code,
-          status: "trialing",
-          provider: "paddle",
-          providerSubscriptionId: txn.id,
-          priceId: settings.PADDLE_PRICE_TRIAL_FEE ?? null,
-          providerEventAt: occurredAt,
-          currentPeriodStart: start,
-          currentPeriodEnd: end,
-        })
-        .onConflictDoNothing();
-    }
-    const applied = await setPlanMinutes(db, { userId, minutes: plan.minutes, eventId: `paddle:${txn.id}`, note: `plan ${plan.code}` });
-    log.info({ event: event.event_type, plan: plan.code, applied }, "minutos del plan cargados");
+    const userId = await resolveUser(db, [order.customer?.external_id, userIdIn(order.metadata)], order.subscription_id);
+    if (!userId) throw new RetryLater("pago sin usuario");
+    const applied = await setPlanMinutes(db, { userId, minutes: PLANS[plan].minutes, eventId: `polar:${order.id}`, note: `plan ${plan}` });
+    log.info({ event: event.type, plan, applied }, "minutos del plan cargados");
   }
 }
 
@@ -283,23 +302,55 @@ export interface BillingRouteDeps {
   db: Database;
   auth: preHandlerHookHandler;
   settings: BillingSettings;
+  /** Direcciones de la web (para volver después de pagar). */
+  webOrigins: string[];
+  /** Para los tests: llamadas a Polar. */
+  fetch?: typeof fetch;
 }
 
-export function billingRoutes({ db, auth, settings }: BillingRouteDeps) {
-  const monthlyPrice: Record<MonthlyPlanCode, string | undefined> = {
-    basic: settings.PADDLE_PRICE_BASIC,
-    pro: settings.PADDLE_PRICE_PRO,
-    max: settings.PADDLE_PRICE_MAX,
+const CheckoutBody = z.object({ plan: z.enum(MONTHLY_PLANS) });
+
+export function billingRoutes({ db, auth, settings, webOrigins, fetch: polarFetch = fetch }: BillingRouteDeps) {
+  const products: Record<MonthlyPlanCode, string | undefined> = {
+    basic: settings.POLAR_PRODUCT_BASIC,
+    pro: settings.POLAR_PRODUCT_PRO,
+    max: settings.POLAR_PRODUCT_MAX,
   };
-  const checkoutReady = Boolean(
-    settings.PADDLE_CLIENT_TOKEN && settings.PADDLE_PRICE_TRIAL_FEE && MONTHLY_PLANS.every((plan) => monthlyPrice[plan]),
-  );
+  const token = polarAccessToken(settings.POLAR_ACCESS_TOKEN);
+  const checkoutReady = Boolean(token && MONTHLY_PLANS.every((plan) => products[plan]));
+  const api = POLAR_API[settings.POLAR_SERVER];
+
+  /** Dirección de la web que hizo la petición (si es una de las nuestras) para volver a ella. */
+  const webOrigin = (origin: string | string[] | undefined) => {
+    const given = Array.isArray(origin) ? origin[0] : origin;
+    return given && webOrigins.includes(given) ? given : (webOrigins[0] ?? "http://localhost:3000");
+  };
+
+  /** Llama a Polar. Nunca registra el token ni datos del cliente: solo el código y el tipo de error. */
+  async function polar<T>(path: string, body: unknown, log: FastifyBaseLogger): Promise<T | null> {
+    try {
+      const res = await polarFetch(`${api}${path}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15_000),
+      });
+      const data = (await res.json().catch(() => null)) as (T & { error?: unknown; type?: unknown }) | null;
+      if (!res.ok) {
+        log.warn({ path, status: res.status, tipo: data?.error ?? data?.type ?? null }, "Polar rechazó la petición");
+        return null;
+      }
+      return data;
+    } catch (err) {
+      log.warn({ path, reason: err instanceof Error ? err.name : "desconocido" }, "no se pudo hablar con Polar");
+      return null;
+    }
+  }
 
   return async (app: FastifyInstance) => {
     app.get("/billing", { preHandler: auth }, async (request): Promise<BillingResponse> => {
       const user = request.user!;
       const sub = await latestSubscription(db, user.id);
-      const trialEligible = !sub;
       return {
         enabled: settings.BILLING_ENABLED,
         exempt: isBillingExempt(user.email, settings.BILLING_FREE_EMAILS),
@@ -312,44 +363,81 @@ export function billingRoutes({ db, auth, settings }: BillingRouteDeps) {
               cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
             }
           : null,
-        trialEligible,
-        checkout: checkoutReady
-          ? {
-              environment: settings.PADDLE_ENVIRONMENT,
-              clientToken: settings.PADDLE_CLIENT_TOKEN!,
-              options: [
-                // La prueba: pago único (Paddle no deja juntarlo con un plan que empieza en prueba).
-                ...(trialEligible ? [{ plan: "trial" as const, items: [{ priceId: settings.PADDLE_PRICE_TRIAL_FEE!, quantity: 1 }] }] : []),
-                ...MONTHLY_PLANS.map((plan) => ({ plan, items: [{ priceId: monthlyPrice[plan]!, quantity: 1 }] })),
-              ],
-              customData: { userId: user.id },
-              email: user.email,
-            }
-          : null,
-        portalUrl: settings.PADDLE_PORTAL_URL || null,
+        trialEligible: !sub,
+        checkoutReady,
+        portalAvailable: Boolean(token && sub?.provider === PROVIDER),
       };
     });
 
-    // Avisos de Paddle (públicos, sin sesión): la firma prueba que vienen de Paddle. El cuerpo se
+    // Abre el pago de Polar para un plan. Básico, si nunca tuvo plan, empieza con 7 días gratis.
+    app.post("/billing/checkout", { preHandler: auth }, async (request, reply) => {
+      const user = request.user!;
+      const parsed = CheckoutBody.safeParse(request.body);
+      if (!parsed.success) return sendError(reply, 400, "invalid_plan", "Plan inválido.");
+      if (!checkoutReady) return sendError(reply, 503, "billing_not_configured", "Los pagos todavía no están disponibles.");
+      const sub = await latestSubscription(db, user.id);
+      // Ya tiene un plan: se cambia desde «Gestionar suscripción» (así no paga dos planes a la vez).
+      if (sub?.provider === PROVIDER && subscriptionAllowsProcessing(sub)) {
+        return sendError(reply, 409, "already_subscribed", "Ya tienes un plan. Cámbialo en Gestionar suscripción.");
+      }
+      const { plan } = parsed.data;
+      const withTrial = plan === "basic" && !sub;
+      const checkout = await polar<{ url?: string }>(
+        "/v1/checkouts/",
+        {
+          products: [products[plan]],
+          external_customer_id: user.id,
+          ...(user.email ? { customer_email: user.email } : {}),
+          metadata: { userId: user.id, plan },
+          success_url: `${webOrigin(request.headers.origin)}/dashboard/planes?pago=ok`,
+          allow_trial: withTrial,
+          ...(withTrial ? { trial_interval: "day", trial_interval_count: PLANS.trial.days } : {}),
+        },
+        request.log,
+      );
+      if (!checkout?.url) return sendError(reply, 502, "checkout_failed", "No se pudo abrir el pago. Intenta de nuevo.");
+      return { url: checkout.url };
+    });
+
+    // Portal de clientes de Polar: cambiar de plan o de tarjeta, ver facturas, cancelar.
+    app.post("/billing/portal", { preHandler: auth }, async (request, reply) => {
+      const user = request.user!;
+      const sub = await latestSubscription(db, user.id);
+      if (!token || sub?.provider !== PROVIDER) return sendError(reply, 404, "no_subscription", "No tienes una suscripción.");
+      const session = await polar<{ customer_portal_url?: string }>(
+        "/v1/customer-sessions/",
+        { external_customer_id: user.id, return_url: `${webOrigin(request.headers.origin)}/dashboard/planes` },
+        request.log,
+      );
+      if (!session?.customer_portal_url) return sendError(reply, 502, "portal_failed", "No se pudo abrir la suscripción. Intenta de nuevo.");
+      return { url: session.customer_portal_url };
+    });
+
+    // Avisos de Polar (públicos, sin sesión): la firma prueba que vienen de Polar. El cuerpo se
     // necesita tal cual llegó para comprobarla.
     await app.register(async (hooks) => {
       hooks.removeContentTypeParser("application/json");
       hooks.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body, done) => done(null, String(body)));
-      hooks.post("/billing/paddle-webhook", async (request, reply) => {
-        const secret = paddleWebhookSecret(settings.PADDLE_WEBHOOK_SECRET);
+      hooks.post("/billing/polar-webhook", async (request, reply) => {
+        const secret = polarWebhookSecret(settings.POLAR_WEBHOOK_SECRET);
         if (!secret) {
-          // Nunca se registra la clave: solo que no tiene la forma esperada.
-          request.log.warn(
-            { clave: describeStoredSecret(settings.PADDLE_WEBHOOK_SECRET) },
-            "aviso de Paddle sin aplicar: la clave de los avisos en Secrets Manager no empieza por pdl_ntfset_",
-          );
+          request.log.warn("aviso de Polar sin aplicar: falta la clave de los avisos en Secrets Manager");
           return sendError(reply, 503, "billing_not_configured", "Pagos no configurados.");
         }
         const raw = typeof request.body === "string" ? request.body : "";
-        const header = request.headers["paddle-signature"];
-        if (!verifyPaddleSignature(raw, Array.isArray(header) ? header[0] : header, secret)) {
-          request.log.warn("aviso de Paddle con firma inválida");
-          return sendError(reply, 401, "invalid_signature", "Firma inválida.");
+        const header = (name: string) => {
+          const v = request.headers[name];
+          return Array.isArray(v) ? v[0] : v;
+        };
+        const signed = {
+          id: header("webhook-id"),
+          timestamp: header("webhook-timestamp"),
+          signature: header("webhook-signature"),
+        };
+        if (!verifyPolarSignature(raw, signed, secret)) {
+          // Nunca se registra la clave: solo su forma, para saber si se pegó mal.
+          request.log.warn({ clave: describeStoredSecret(settings.POLAR_WEBHOOK_SECRET) }, "aviso de Polar con firma inválida");
+          return sendError(reply, 403, "invalid_signature", "Firma inválida.");
         }
         let payload: unknown;
         try {
@@ -358,16 +446,21 @@ export function billingRoutes({ db, auth, settings }: BillingRouteDeps) {
           return sendError(reply, 400, "invalid_json", "El cuerpo no es JSON válido.");
         }
         try {
-          await applyPaddleEvent(db, settings, payload, request.log);
+          await applyPolarEvent(db, settings, payload, request.log);
         } catch (err) {
-          // Paddle reintenta los avisos que no reciben 200 (p. ej. si el pago llegó antes que el usuario).
-          if (err instanceof RetryLater || err instanceof z.ZodError) {
-            request.log.warn({ reason: err instanceof RetryLater ? err.message : "formato inesperado" }, "aviso de Paddle sin aplicar");
-            return sendError(reply, err instanceof RetryLater ? 503 : 400, "not_applied", "No se pudo aplicar el aviso.");
+          // Polar reintenta los avisos que no reciben 2xx (p. ej. si el pago llegó antes que el usuario).
+          if (err instanceof RetryLater) {
+            request.log.warn({ reason: err.message }, "aviso de Polar sin aplicar");
+            return sendError(reply, 503, "not_applied", "No se pudo aplicar el aviso.");
+          }
+          // Formato que no se entiende: reintentarlo no lo arregla, y Polar apaga la dirección tras muchos fallos.
+          if (err instanceof z.ZodError) {
+            request.log.warn({ reason: "formato inesperado" }, "aviso de Polar sin aplicar");
+            return reply.code(202).send({ ok: false });
           }
           throw err;
         }
-        return { ok: true };
+        return reply.code(202).send({ ok: true });
       });
     });
   };

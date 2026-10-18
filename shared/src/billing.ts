@@ -1,10 +1,10 @@
 /**
  * Planes de ClipFlow (ver docs/planes-y-creditos.md). 1 minuto de crédito = 1 minuto de video.
- * Los precios reales los cobra Paddle; aquí solo se muestran.
+ * Los precios reales los cobra Polar; aquí solo se muestran.
  */
 export const PLANS = {
-  /** Prueba: pago único de 1.99 USD, 60 min por 7 días. No se renueva: después elige un plan mensual. */
-  trial: { code: "trial", minutes: 60, priceUsd: 1.99, days: 7 },
+  /** Prueba gratis de 7 días con 60 min (pide tarjeta). Al terminar pasa sola al Básico, si no se cancela. */
+  trial: { code: "trial", minutes: 60, priceUsd: 0, days: 7 },
   basic: { code: "basic", minutes: 200, priceUsd: 9.99 },
   pro: { code: "pro", minutes: 400, priceUsd: 19.99 },
   max: { code: "max", minutes: 1000, priceUsd: 39.99 },
@@ -18,7 +18,7 @@ export type MonthlyPlanCode = (typeof MONTHLY_PLANS)[number];
 /** Estado de la suscripción tal como lo ve la web. */
 export type BillingStatus = "trialing" | "active" | "past_due" | "canceled" | "expired";
 
-/** Lo que la web necesita para mostrar el plan y abrir el pago de Paddle (nada secreto). */
+/** Lo que la web necesita para mostrar el plan y abrir el pago (nada secreto). */
 export interface BillingResponse {
   /** false mientras los pagos no estén activados: se puede procesar sin plan. */
   enabled: boolean;
@@ -31,19 +31,12 @@ export interface BillingResponse {
     currentPeriodEnd: string | null;
     cancelAtPeriodEnd: boolean;
   } | null;
-  /** Puede usar la prueba de 7 días (nunca tuvo un plan): entonces hay opción "trial". */
+  /** Puede usar la prueba gratis de 7 días (nunca tuvo un plan): el Básico empieza con ella. */
   trialEligible: boolean;
-  /** Datos públicos para abrir el pago (Paddle.js). null si los pagos no están configurados. */
-  checkout: {
-    environment: "sandbox" | "production";
-    clientToken: string;
-    /** Qué cobrar para cada opción. La prueba es un pago único de 1.99 USD (no se renueva). */
-    options: { plan: PlanCode; items: { priceId: string; quantity: number }[] }[];
-    customData: { userId: string };
-    email: string | null;
-  } | null;
-  /** Portal de clientes de Paddle: cambiar tarjeta, ver facturas, cancelar. */
-  portalUrl: string | null;
+  /** Los pagos con Polar están listos (POST /billing/checkout abre el pago). */
+  checkoutReady: boolean;
+  /** Tiene suscripción en Polar: POST /billing/portal abre «Gestionar suscripción». */
+  portalAvailable: boolean;
 }
 
 /** Errores de la API cuando falta plan o minutos (la web muestra «Ver planes»). */

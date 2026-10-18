@@ -19,8 +19,8 @@ const env = {
   region: process.env.CDK_DEFAULT_REGION ?? "us-east-1",
 };
 
-// Pagos con Paddle: valores PÚBLICOS desde variables del environment de GitHub (ver
-// docs/pagos-paddle.md). La clave secreta de los avisos está en Secrets Manager, no aquí.
+// Pagos con Polar: valores PÚBLICOS desde variables del environment de GitHub (ver
+// docs/pagos-polar.md). El token y la clave de los avisos están en Secrets Manager, no aquí.
 const ctx = (name: string): string | undefined => {
   const v = app.node.tryGetContext(name);
   return typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
@@ -28,13 +28,10 @@ const ctx = (name: string): string | undefined => {
 const billing = {
   enabled: ctx("billingEnabled") === "true",
   freeEmails: ctx("billingFreeEmails"),
-  paddleEnvironment: ctx("paddleEnvironment") === "production" ? ("production" as const) : ("sandbox" as const),
-  paddleClientToken: ctx("paddleClientToken"),
-  paddlePriceTrialFee: ctx("paddlePriceTrialFee"),
-  paddlePriceBasic: ctx("paddlePriceBasic"),
-  paddlePricePro: ctx("paddlePricePro"),
-  paddlePriceMax: ctx("paddlePriceMax"),
-  paddlePortalUrl: ctx("paddlePortalUrl"),
+  polarServer: ctx("polarServer") === "production" ? ("production" as const) : ("sandbox" as const),
+  polarProductBasic: ctx("polarProductBasic"),
+  polarProductPro: ctx("polarProductPro"),
+  polarProductMax: ctx("polarProductMax"),
 };
 
 const auth = new AuthStack(app, `${prefix}-auth`, { env, stage, protectData: config.protectData });

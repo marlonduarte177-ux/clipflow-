@@ -396,7 +396,7 @@ export const creditLedger = pgTable(
 );
 
 /**
- * Cargas de minutos ya aplicadas por un pago (p. ej. "paddle:txn_…"). Si el proveedor repite el aviso,
+ * Cargas de minutos ya aplicadas por un pago (p. ej. "polar:<pedido>"). Si el proveedor repite el aviso,
  * no se vuelven a cargar los minutos.
  */
 export const billingEvents = pgTable("billing_events", {
@@ -407,7 +407,7 @@ export const billingEvents = pgTable("billing_events", {
   createdAt: createdAt(),
 });
 
-/** Suscripciones (hoy, Paddle). Las crea y actualiza el aviso (webhook) del proveedor. */
+/** Suscripciones (hoy, Polar). Las crea y actualiza el aviso (webhook) del proveedor. */
 export const subscriptions = pgTable(
   "subscriptions",
   {
@@ -420,7 +420,7 @@ export const subscriptions = pgTable(
     /** Proveedor de pagos (null hasta integrarlo) y su identificador. */
     provider: text("provider"),
     providerSubscriptionId: text("provider_subscription_id"),
-    /** Cliente y precio en el proveedor (Paddle: ctm_…, pri_…). */
+    /** Cliente y precio en el proveedor (Polar: cliente y producto). */
     providerCustomerId: text("provider_customer_id"),
     priceId: text("price_id"),
     /** Momento del último aviso aplicado: los avisos viejos que llegan tarde se ignoran. */

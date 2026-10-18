@@ -26,7 +26,7 @@ export default function RefundsPageEn() {
           title: "When you are eligible for a refund",
           body: (
             <ul>
-              <li>You request it within {days} calendar days of the charge (the trial or a monthly payment).</li>
+              <li>You request it within {days} calendar days of the charge (a monthly payment, including the first one after the free trial).</li>
               <li>Since that charge, you have processed at most {maxMinutesUsed} minutes of video.</li>
               <li>We refund 100% of that charge, to the same payment method.</li>
             </ul>
@@ -56,8 +56,8 @@ export default function RefundsPageEn() {
           title: "How to request it",
           body: (
             <p>
-              Email us at {mail} with your account email, or reply to the purchase receipt sent by Paddle. Paddle.com is the Merchant of
-              Record for our orders and issues the refund. It usually shows up in your account within 5 to 10 business days, depending on
+              Email us at {mail} with your account email, or reply to the purchase receipt sent by Polar. Polar (polar.sh) is the Merchant
+              of Record for our orders and issues the refund. It usually shows up in your account within 5 to 10 business days, depending on
               your bank.
             </p>
           ),

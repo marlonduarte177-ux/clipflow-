@@ -12,82 +12,13 @@ import {
   MONTHLY_PLANS,
   PLANS,
   type BillingResponse,
-  type PlanCode,
+  type MonthlyPlanCode,
 } from "@clipflow/shared";
 import { BackIcon, CheckIcon } from "@/components/icons";
 import { Alert } from "@/components/ui";
 import { errorMessage } from "@/i18n/locale";
 import { useLocale, useT } from "@/i18n/provider";
 import { apiFetch } from "@/lib/api";
-
-/** Paddle.js (pagos). Se carga solo en esta página. */
-const PADDLE_JS = "https://cdn.paddle.com/paddle/v2/paddle.js";
-
-interface PaddleGlobal {
-  Environment: { set: (env: "sandbox") => void };
-  Initialize: (options: {
-    token: string;
-    eventCallback?: (event: PaddleEvent) => void;
-  }) => void;
-  Checkout: {
-    open: (options: {
-      items: { priceId: string; quantity: number }[];
-      customer?: { email: string };
-      customData?: Record<string, string>;
-      settings?: {
-        displayMode?: "overlay";
-        theme?: "dark" | "light";
-        locale?: string;
-        allowLogout?: boolean;
-      };
-    }) => void;
-  };
-}
-declare global {
-  interface Window {
-    Paddle?: PaddleGlobal;
-  }
-}
-
-/** Aviso de Paddle.js (pago completado, error del pago…). */
-interface PaddleEvent {
-  name?: string;
-  type?: string;
-  code?: string;
-  detail?: string;
-  error?: { code?: string; detail?: string };
-}
-
-let paddleReady: Promise<PaddleGlobal> | null = null;
-/** Paddle se inicializa una vez: los avisos van siempre a la página que está abierta. */
-let paddleListener: ((event: PaddleEvent) => void) | null = null;
-function loadPaddle(
-  checkout: NonNullable<BillingResponse["checkout"]>,
-  onEvent: (event: PaddleEvent) => void,
-): Promise<PaddleGlobal> {
-  paddleListener = onEvent;
-  paddleReady ??= new Promise<PaddleGlobal>((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = PADDLE_JS;
-    script.async = true;
-    script.onload = () => {
-      const paddle = window.Paddle;
-      if (!paddle) return reject(new Error("Paddle no cargó"));
-      if (checkout.environment === "sandbox") paddle.Environment.set("sandbox");
-      paddle.Initialize({
-        token: checkout.clientToken,
-        eventCallback: (e) => paddleListener?.(e),
-      });
-      resolve(paddle);
-    };
-    script.onerror = () => {
-      paddleReady = null;
-      reject(new Error("Paddle no cargó"));
-    };
-    document.head.appendChild(script);
-  });
-  return paddleReady;
-}
 
 const allows = (b: BillingResponse | null) =>
   b?.subscription?.status === "trialing" ||
@@ -99,85 +30,74 @@ export function PlansView() {
   const { locale } = useLocale();
   const [billing, setBilling] = useState<BillingResponse | null>(null);
   const [error, setError] = useState("");
-  const [opening, setOpening] = useState<PlanCode | null>(null);
+  const [opening, setOpening] = useState<MonthlyPlanCode | "portal" | null>(
+    null,
+  );
   const [activating, setActivating] = useState(false);
   const [activated, setActivated] = useState(false);
   const polling = useRef(false);
-  /** Plan y minutos al abrir el pago: se espera a que cambien (durante la prueba ya hay plan activo). */
-  const before = useRef("");
 
   const refresh = useCallback(
     () => apiFetch<BillingResponse>("/billing").then(setBilling),
     [],
   );
 
-  useEffect(() => {
-    refresh().catch((err: Error) => setError(errorMessage(err)));
-  }, [refresh]);
-
-  // Tras pagar, Paddle avisa a ClipFlow por su cuenta: se espera a que el plan aparezca activo.
+  // Al volver del pago (?pago=ok), Polar avisa a ClipFlow por su cuenta: se espera a que el plan aparezca.
   const waitForPlan = useCallback(async () => {
     if (polling.current) return;
     polling.current = true;
     setActivating(true);
     for (let i = 0; i < 30; i++) {
-      await new Promise((r) => setTimeout(r, 2000));
       const next = await apiFetch<BillingResponse>("/billing").catch(
         () => null,
       );
       if (next) setBilling(next);
-      const changed =
-        next &&
-        JSON.stringify([next.subscription, next.creditMinutes]) !==
-          before.current;
-      if (changed && allows(next) && (next?.creditMinutes ?? 0) > 0) {
+      if (allows(next) && (next?.creditMinutes ?? 0) > 0) {
         setActivated(true);
         break;
       }
+      await new Promise((r) => setTimeout(r, 2000));
     }
     setActivating(false);
     polling.current = false;
   }, []);
 
-  async function onBuy(plan: PlanCode) {
-    const checkout = billing?.checkout;
-    const option = checkout?.options.find((o) => o.plan === plan);
-    if (!checkout || !option) return;
+  /** ¿Volvió del pago? Se lee una vez (y se quita de la dirección para que recargar no espere otra vez). */
+  const returned = useRef<boolean | null>(null);
+
+  useEffect(() => {
+    if (returned.current === null) {
+      const url = new URL(window.location.href);
+      returned.current = url.searchParams.get("pago") === "ok";
+      url.searchParams.delete("pago");
+      window.history.replaceState(null, "", url.pathname + url.search);
+    }
+    if (returned.current) {
+      const timer = setTimeout(() => void waitForPlan(), 0);
+      return () => clearTimeout(timer);
+    }
+    refresh().catch((err: Error) => setError(errorMessage(err)));
+  }, [refresh, waitForPlan]);
+
+  /** Abre el pago de Polar (en su página) o «Gestionar suscripción». */
+  async function go(target: MonthlyPlanCode | "portal") {
     setError("");
-    setOpening(plan);
-    before.current = JSON.stringify([
-      billing?.subscription ?? null,
-      billing?.creditMinutes ?? 0,
-    ]);
+    setOpening(target);
     try {
-      const paddle = await loadPaddle(checkout, (event) => {
-        const name = event.name ?? event.type;
-        if (name === "checkout.completed") void waitForPlan();
-        // Paddle rechazó el pago por su configuración: se muestra su código para poder corregirlo.
-        if (name === "checkout.error") {
-          const code =
-            event.error?.code ??
-            event.code ??
-            event.error?.detail ??
-            event.detail;
-          setError(code ? `${t.plans.failed} (${code})` : t.plans.failed);
-        }
-      });
-      paddle.Checkout.open({
-        items: option.items,
-        ...(checkout.email ? { customer: { email: checkout.email } } : {}),
-        customData: checkout.customData,
-        settings: {
-          displayMode: "overlay",
-          theme: "dark",
-          locale,
-          allowLogout: false,
-        },
-      });
-    } catch {
-      setError(t.plans.failed);
-    } finally {
+      const { url } =
+        target === "portal"
+          ? await apiFetch<{ url: string }>("/billing/portal", {
+              method: "POST",
+            })
+          : await apiFetch<{ url: string }>("/billing/checkout", {
+              method: "POST",
+              body: { plan: target },
+            });
+      window.location.assign(url);
+    } catch (err) {
+      setError(errorMessage(err as Error));
       setOpening(null);
+      void refresh().catch(() => undefined);
     }
   }
 
@@ -191,6 +111,8 @@ export function PlansView() {
   const sub = billing?.subscription;
   const hasPlan = allows(billing);
   const isTrial = hasPlan && sub?.planCode === "trial";
+  const ready = Boolean(billing?.checkoutReady);
+  const busy = !ready || opening !== null || activating;
 
   return (
     <div className="mx-auto max-w-xl">
@@ -244,7 +166,7 @@ export function PlansView() {
                       : t.plans.renews(date(sub.currentPeriodEnd))}
                   </p>
                 ) : null}
-                {isTrial ? (
+                {isTrial && !sub.cancelAtPeriodEnd ? (
                   <p className="mt-3 text-sm text-[#8B909A]">
                     {t.plans.trialUpgrade}
                   </p>
@@ -252,45 +174,45 @@ export function PlansView() {
                 {sub.status === "past_due" ? (
                   <p className="mt-3 text-sm text-red-300">{t.plans.pastDue}</p>
                 ) : null}
-                {billing.portalUrl && !isTrial ? (
-                  <a
-                    href={billing.portalUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-4 flex h-12 items-center justify-center rounded-2xl border border-line text-[15px] font-semibold"
-                  >
-                    {t.plans.manage}
-                  </a>
-                ) : null}
-                {billing.portalUrl && !isTrial ? (
-                  <p className="mt-2 text-center text-xs text-[#8B909A]">
-                    {t.plans.manageHint}
-                  </p>
+                {billing.portalAvailable ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => go("portal")}
+                      disabled={opening !== null}
+                      className="mt-4 flex h-12 w-full items-center justify-center rounded-2xl border border-line text-[15px] font-semibold disabled:opacity-50"
+                    >
+                      {opening === "portal" ? t.plans.opening : t.plans.manage}
+                    </button>
+                    <p className="mt-2 text-center text-xs text-[#8B909A]">
+                      {t.plans.manageHint}
+                    </p>
+                  </>
                 ) : null}
               </Card>
             ) : null}
-            {/* Sin plan, o durante la prueba (para pasarse a un plan mensual): los planes. */}
-            {!hasPlan || isTrial ? (
+            {/* Sin plan: la prueba gratis (si nunca tuvo plan) y los planes mensuales. */}
+            {!hasPlan ? (
               <>
-                {billing.checkout ? null : (
+                {ready ? null : (
                   <Alert kind="info">{t.plans.unavailable}</Alert>
                 )}
                 {billing.trialEligible ? (
                   <PlanCard
                     name={t.plans.names.trial}
-                    price={usd(PLANS.trial.priceUsd)}
+                    price={t.plans.trialFree}
                     period={t.plans.trialPeriod}
                     minutes={t.plans.minutes(PLANS.trial.minutes)}
-                    note={t.plans.trialThen}
+                    note={`${t.plans.trialThen} ${t.plans.trialCard}`}
                     action={
-                      billing.checkout
-                        ? opening === "trial"
+                      ready
+                        ? opening === "basic"
                           ? t.plans.opening
                           : t.plans.startTrial
                         : t.plans.soon
                     }
-                    onAction={() => onBuy("trial")}
-                    busy={!billing.checkout || opening !== null || activating}
+                    onAction={() => go("basic")}
+                    busy={busy}
                     highlight
                   />
                 ) : null}
@@ -303,14 +225,14 @@ export function PlansView() {
                     minutes={t.plans.monthlyMinutes(PLANS[plan].minutes)}
                     badge={plan === "pro" ? t.plans.popular : undefined}
                     action={
-                      billing.checkout
+                      ready
                         ? opening === plan
                           ? t.plans.opening
                           : t.plans.choose(t.plans.names[plan])
                         : t.plans.soon
                     }
-                    onAction={() => onBuy(plan)}
-                    busy={!billing.checkout || opening !== null || activating}
+                    onAction={() => go(plan)}
+                    busy={busy}
                     highlight={!billing.trialEligible && plan === "pro"}
                   />
                 ))}

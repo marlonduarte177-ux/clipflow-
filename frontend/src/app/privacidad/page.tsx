@@ -36,7 +36,7 @@ export default function PrivacyPage() {
                 errores) para mantener el servicio.
               </li>
               <li>
-                <strong>Pagos:</strong> los gestiona Paddle. Nosotros no recibimos ni guardamos los datos de tu tarjeta; solo sabemos tu plan y
+                <strong>Pagos:</strong> los gestiona Polar. Nosotros no recibimos ni guardamos los datos de tu tarjeta; solo sabemos tu plan y
                 si el pago se realizó.
               </li>
             </ul>
@@ -81,7 +81,7 @@ export default function PrivacyPage() {
                   sus condiciones para empresas, no usa estos datos para entrenar sus modelos.
                 </li>
                 <li>
-                  <strong>Paddle:</strong> procesa los pagos como comerciante registrado.
+                  <strong>Polar:</strong> procesa los pagos como comerciante registrado.
                 </li>
                 <li>
                   <strong>Proveedor de red para importar enlaces:</strong> cuando una plataforma bloquea la importación desde nuestros

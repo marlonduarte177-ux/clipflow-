@@ -77,7 +77,7 @@ const EnvSchema = z.object({
     .transform((v) => v === "true"),
 
 
-  // --- Pagos: con "true", cada video descuenta sus minutos del plan (ver docs/pagos-paddle.md) ---
+  // --- Pagos: con "true", cada video descuenta sus minutos del plan (ver docs/pagos-polar.md) ---
   BILLING_ENABLED: z
     .enum(["true", "false"])
     .default("false")

@@ -69,7 +69,7 @@ export default async function Home() {
                     <span className="font-semibold">{t.plans.names[code]}</span>
                     {code === "pro" ? <span className="mt-1 text-xs text-accent">{t.plans.popular}</span> : null}
                     <span className="mt-3 text-3xl font-extrabold">
-                      ${plan.priceUsd.toFixed(2)}
+                      {trial ? t.plans.trialFree : `$${plan.priceUsd.toFixed(2)}`}
                       <span className="ml-1 text-sm font-normal text-muted">{trial ? t.plans.trialPeriod : t.plans.perMonth}</span>
                     </span>
                     <span className="mt-2 text-sm text-muted">

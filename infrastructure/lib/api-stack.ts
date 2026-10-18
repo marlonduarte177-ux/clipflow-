@@ -41,21 +41,19 @@ export interface ApiStackProps extends StackProps {
     taskFamily: string;
     securityGroup: ec2.ISecurityGroup;
   };
-  /** Pagos con Paddle: valores públicos (variables del environment de GitHub; nada secreto). */
+  /** Pagos con Polar: valores públicos (variables del environment de GitHub; nada secreto). */
   billing?: BillingProps;
 }
 
-/** Configuración pública de pagos. La clave de los avisos va aparte, en Secrets Manager. */
+/** Configuración pública de pagos. El token y la clave de los avisos van aparte, en Secrets Manager. */
 export interface BillingProps {
   enabled?: boolean;
   freeEmails?: string;
-  paddleEnvironment?: "sandbox" | "production";
-  paddleClientToken?: string;
-  paddlePriceTrialFee?: string;
-  paddlePriceBasic?: string;
-  paddlePricePro?: string;
-  paddlePriceMax?: string;
-  paddlePortalUrl?: string;
+  polarServer?: "sandbox" | "production";
+  /** ID de cada producto mensual en Polar. */
+  polarProductBasic?: string;
+  polarProductPro?: string;
+  polarProductMax?: string;
 }
 
 /**
@@ -97,13 +95,21 @@ export class ApiStack extends Stack {
       },
     });
 
-    // Clave secreta de los avisos de Paddle: el usuario pega la real en Secrets Manager. El relleno
-    // lleva signos de puntuación: una clave real no los tiene, así la API sabe que falta.
-    const paddleWebhookSecret = new secretsmanager.Secret(this, "PaddleWebhookSecret", {
-      secretName: `${prefix}/paddle-webhook-secret`,
-      description: "Clave secreta de los avisos de Paddle (Developer tools → Notifications). Reemplaza el valor por la tuya.",
-      generateSecretString: { passwordLength: 32, requireEachIncludedType: true, excludeCharacters: "\"'\\ /@" },
-      removalPolicy: props.stage === "production" || props.protectData ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
+    // Polar: el token de acceso (abre los pagos) y la clave de los avisos. Se crean con un valor de
+    // relleno y el usuario pega los reales en Secrets Manager. Mientras el token no empiece por
+    // polar_oat_, los pagos quedan cerrados («Disponible muy pronto»).
+    const keep = props.stage === "production" || props.protectData ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY;
+    const polarAccessToken = new secretsmanager.Secret(this, "PolarAccessToken", {
+      secretName: `${prefix}/polar-access-token`,
+      description: "Token de Polar (Settings → Developers → New token). Reemplaza el valor por el tuyo (polar_oat_…).",
+      generateSecretString: { passwordLength: 32, excludePunctuation: true },
+      removalPolicy: keep,
+    });
+    const polarWebhookSecret = new secretsmanager.Secret(this, "PolarWebhookSecret", {
+      secretName: `${prefix}/polar-webhook-secret`,
+      description: "Clave secreta de los avisos de Polar (Settings → Webhooks). Reemplaza el valor por la tuya.",
+      generateSecretString: { passwordLength: 32, excludePunctuation: true },
+      removalPolicy: keep,
     });
     const billing = props.billing ?? {};
 
@@ -133,19 +139,17 @@ export class ApiStack extends Stack {
         RUN_MIGRATIONS_ON_START: "true",
         BILLING_ENABLED: billing.enabled ? "true" : "false",
         BILLING_FREE_EMAILS: billing.freeEmails ?? "",
-        PADDLE_ENVIRONMENT: billing.paddleEnvironment ?? "sandbox",
-        PADDLE_CLIENT_TOKEN: billing.paddleClientToken ?? "",
-        PADDLE_PRICE_TRIAL_FEE: billing.paddlePriceTrialFee ?? "",
-        PADDLE_PRICE_BASIC: billing.paddlePriceBasic ?? "",
-        PADDLE_PRICE_PRO: billing.paddlePricePro ?? "",
-        PADDLE_PRICE_MAX: billing.paddlePriceMax ?? "",
-        PADDLE_PORTAL_URL: billing.paddlePortalUrl ?? "",
+        POLAR_SERVER: billing.polarServer ?? "sandbox",
+        POLAR_PRODUCT_BASIC: billing.polarProductBasic ?? "",
+        POLAR_PRODUCT_PRO: billing.polarProductPro ?? "",
+        POLAR_PRODUCT_MAX: billing.polarProductMax ?? "",
       },
       // Usuario y contraseña de la BD: los inyecta ECS desde Secrets Manager.
       secrets: {
         DB_USER: ecs.Secret.fromSecretsManager(dbSecret, "username"),
         DB_PASSWORD: ecs.Secret.fromSecretsManager(dbSecret, "password"),
-        PADDLE_WEBHOOK_SECRET: ecs.Secret.fromSecretsManager(paddleWebhookSecret),
+        POLAR_ACCESS_TOKEN: ecs.Secret.fromSecretsManager(polarAccessToken),
+        POLAR_WEBHOOK_SECRET: ecs.Secret.fromSecretsManager(polarWebhookSecret),
       },
       healthCheck: {
         command: [
@@ -278,8 +282,8 @@ export class ApiStack extends Stack {
     });
 
     httpApi.addRoutes({ path: "/health", methods: [apigw.HttpMethod.GET], integration });
-    // Avisos de Paddle: sin sesión de usuario (los firma Paddle y la API comprueba la firma).
-    httpApi.addRoutes({ path: "/billing/paddle-webhook", methods: [apigw.HttpMethod.POST], integration });
+    // Avisos de Polar: sin sesión de usuario (los firma Polar y la API comprueba la firma).
+    httpApi.addRoutes({ path: "/billing/polar-webhook", methods: [apigw.HttpMethod.POST], integration });
     httpApi.addRoutes({
       path: "/{proxy+}",
       methods: [apigw.HttpMethod.GET, apigw.HttpMethod.POST, apigw.HttpMethod.PATCH, apigw.HttpMethod.DELETE],
@@ -294,8 +298,9 @@ export class ApiStack extends Stack {
     this.apiUrl = httpApi.apiEndpoint;
     this.httpApi = httpApi;
     new CfnOutput(this, "ApiUrl", { value: httpApi.apiEndpoint });
-    // Dirección que se pega en Paddle → Developer tools → Notifications.
-    new CfnOutput(this, "PaddleWebhookUrl", { value: `${httpApi.apiEndpoint}/billing/paddle-webhook` });
-    new CfnOutput(this, "PaddleWebhookSecretName", { value: paddleWebhookSecret.secretName });
+    // Dirección que se pega en Polar → Settings → Webhooks.
+    new CfnOutput(this, "PolarWebhookUrl", { value: `${httpApi.apiEndpoint}/billing/polar-webhook` });
+    new CfnOutput(this, "PolarAccessTokenSecretName", { value: polarAccessToken.secretName });
+    new CfnOutput(this, "PolarWebhookSecretName", { value: polarWebhookSecret.secretName });
   }
 }
