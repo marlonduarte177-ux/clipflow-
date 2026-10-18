@@ -91,6 +91,17 @@ export class WorkerStack extends Stack {
       removalPolicy: props.stage === "production" || props.protectData ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     });
 
+    // Secreto del antiguo proxy de descargas (Evomi). Ya no lo usa nadie, pero se conserva (vacío) y se sigue
+    // exportando: la API lo importaba y CloudFormation no deja borrar una exportación en uso. Así el
+    // despliegue pasa en un solo paso; si algún día se vuelve a usar un proxy, ya está aquí.
+    const downloadProxy = new secretsmanager.Secret(this, "DownloadProxy", {
+      secretName: `${prefix}/download-proxy`,
+      description: "Proxy de descargas (sin uso por ahora).",
+      generateSecretString: { passwordLength: 32, excludePunctuation: true },
+      removalPolicy: props.stage === "production" || props.protectData ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
+    });
+    this.exportValue(downloadProxy.secretArn);
+
     const cluster = new ecs.Cluster(this, "WorkerCluster", { clusterName: `${prefix}-workers`, vpc: props.vpc });
     this.cluster = cluster;
     this.taskFamily = `${prefix}-worker`;

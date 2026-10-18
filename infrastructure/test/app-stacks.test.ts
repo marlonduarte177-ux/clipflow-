@@ -293,9 +293,15 @@ describe("cola y worker", () => {
     }
   });
 
-  it("ya no hay proxy de descargas: ni secreto ni variable en el procesador o la API", () => {
-    expect(JSON.stringify(t.worker.toJSON())).not.toMatch(/download-proxy|DOWNLOAD_PROXY_URL/);
-    expect(JSON.stringify(t.api.toJSON())).not.toMatch(/download-proxy|DOWNLOAD_PROXY_URL/);
+  it("ya no hay proxy de descargas: ninguna variable en el procesador o la API", () => {
+    expect(JSON.stringify(t.worker.toJSON())).not.toContain("DOWNLOAD_PROXY_URL");
+    expect(JSON.stringify(t.api.toJSON())).not.toMatch(/download-proxy|DOWNLOAD_PROXY_URL|DownloadProxy/);
+  });
+
+  it("conserva el secreto del proxy y su exportación (la API la importaba: borrarla rompe el despliegue)", () => {
+    t.worker.hasResourceProperties("AWS::SecretsManager::Secret", { Name: "clipflow-staging/download-proxy" });
+    const outputs = t.worker.toJSON().Outputs as Record<string, { Export?: { Name?: string } }>;
+    expect(Object.values(outputs).map((o) => o.Export?.Name)).toContain("worker:ExportsOutputRefDownloadProxy046CB95F71939659");
   });
 
   it("la clave de OpenAI vive en Secrets Manager y llega al worker como secreto", () => {
