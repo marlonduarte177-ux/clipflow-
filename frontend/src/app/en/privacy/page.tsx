@@ -37,7 +37,7 @@ export default function PrivacyPageEn() {
                 errors) to keep the service running.
               </li>
               <li>
-                <strong>Payments:</strong> handled by Paddle. We never receive or store your card details; we only know your plan and whether
+                <strong>Payments:</strong> handled by Polar. We never receive or store your card details; we only know your plan and whether
                 the payment succeeded.
               </li>
             </ul>
@@ -82,7 +82,7 @@ export default function PrivacyPageEn() {
                   it does not use this data to train its models.
                 </li>
                 <li>
-                  <strong>Paddle:</strong> processes payments as Merchant of Record.
+                  <strong>Polar:</strong> processes payments as Merchant of Record.
                 </li>
                 <li>
                   <strong>Network provider for link imports:</strong> when a platform blocks imports from our servers, the video is requested

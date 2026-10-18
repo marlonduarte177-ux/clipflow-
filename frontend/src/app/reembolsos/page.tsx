@@ -25,7 +25,7 @@ export default function RefundsPage() {
           title: "Cuándo tienes derecho a reembolso",
           body: (
             <ul>
-              <li>Lo pides dentro de los {days} días naturales siguientes al cobro (de la prueba o de una mensualidad).</li>
+              <li>Lo pides dentro de los {days} días naturales siguientes al cobro (de una mensualidad, incluida la primera después de la prueba gratis).</li>
               <li>Desde ese cobro, has procesado como máximo {maxMinutesUsed} minutos de video.</li>
               <li>Se devuelve el 100 % de ese cobro, por el mismo medio de pago.</li>
             </ul>
@@ -54,8 +54,8 @@ export default function RefundsPage() {
           title: "Cómo pedirlo",
           body: (
             <p>
-              Escríbenos a {mail} con el correo de tu cuenta, o responde al recibo de compra que te envió Paddle. Paddle.com es el comerciante
-              registrado de nuestros pedidos y es quien hace la devolución. Suele verse en tu cuenta en 5 a 10 días hábiles, según tu banco.
+              Escríbenos a {mail} con el correo de tu cuenta, o responde al recibo de compra que te envió Polar. Polar (polar.sh) es el
+              comerciante registrado de nuestros pedidos y es quien hace la devolución. Suele verse en tu cuenta en 5 a 10 días hábiles, según tu banco.
             </p>
           ),
         },

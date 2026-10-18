@@ -68,4 +68,4 @@ puede crear uno aparte y dejar `staging` solo para pruebas.
 ## Pendiente
 
 - Revisar con Paddle si aceptan la política de 7 días / 15 minutos.
-- **Planes y pagos** con Paddle: implementado; falta configurarlo y activarlo (ver `docs/pagos-paddle.md`).
+- **Planes y pagos** con Polar: implementado; falta configurarlo y activarlo (ver `docs/pagos-polar.md`).

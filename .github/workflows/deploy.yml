@@ -48,31 +48,27 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
       - name: cdk deploy
         working-directory: infrastructure
-        # Correo de alertas, presupuesto y pagos (Paddle): variables del environment en GitHub
-        # (pueden estar vacías). Son valores públicos; la clave secreta de Paddle está en AWS.
+        # Correo de alertas, presupuesto y pagos (Polar): variables del environment en GitHub
+        # (pueden estar vacías). Son valores públicos; el token y la clave de Polar están en AWS.
         env:
           ALERT_EMAIL: ${{ vars.ALERT_EMAIL }}
           MONTHLY_BUDGET_USD: ${{ vars.MONTHLY_BUDGET_USD }}
           BILLING_ENABLED: ${{ vars.BILLING_ENABLED }}
           # Correos exentos de pagar: como secreto, para que no aparezcan en los registros públicos.
           BILLING_FREE_EMAILS: ${{ secrets.BILLING_FREE_EMAILS }}
-          PADDLE_ENVIRONMENT: ${{ vars.PADDLE_ENVIRONMENT }}
-          PADDLE_CLIENT_TOKEN: ${{ vars.PADDLE_CLIENT_TOKEN }}
-          PADDLE_PRICE_TRIAL_FEE: ${{ vars.PADDLE_PRICE_TRIAL_FEE }}
-          PADDLE_PRICE_BASIC: ${{ vars.PADDLE_PRICE_BASIC }}
-          PADDLE_PRICE_PRO: ${{ vars.PADDLE_PRICE_PRO }}
-          PADDLE_PRICE_MAX: ${{ vars.PADDLE_PRICE_MAX }}
-          PADDLE_PORTAL_URL: ${{ vars.PADDLE_PORTAL_URL }}
+          POLAR_SERVER: ${{ vars.POLAR_SERVER }}
+          POLAR_PRODUCT_BASIC: ${{ vars.POLAR_PRODUCT_BASIC }}
+          POLAR_PRODUCT_PRO: ${{ vars.POLAR_PRODUCT_PRO }}
+          POLAR_PRODUCT_MAX: ${{ vars.POLAR_PRODUCT_MAX }}
           # Versión del análisis con IA para los usuarios: vacío o "v2" = la nueva (GPT-6.1 Sol); "classic" = la anterior.
           AI_PIPELINE: ${{ vars.AI_PIPELINE }}
         run: >-
           npx cdk deploy --all -c stage=${{ inputs.stage }}
           -c alertEmail="$ALERT_EMAIL" -c monthlyBudgetUsd="$MONTHLY_BUDGET_USD"
           -c billingEnabled="$BILLING_ENABLED" -c billingFreeEmails="$BILLING_FREE_EMAILS"
-          -c paddleEnvironment="$PADDLE_ENVIRONMENT" -c paddleClientToken="$PADDLE_CLIENT_TOKEN"
-          -c paddlePriceTrialFee="$PADDLE_PRICE_TRIAL_FEE"
-          -c paddlePriceBasic="$PADDLE_PRICE_BASIC" -c paddlePricePro="$PADDLE_PRICE_PRO"
-          -c paddlePriceMax="$PADDLE_PRICE_MAX" -c paddlePortalUrl="$PADDLE_PORTAL_URL"
+          -c polarServer="$POLAR_SERVER"
+          -c polarProductBasic="$POLAR_PRODUCT_BASIC" -c polarProductPro="$POLAR_PRODUCT_PRO"
+          -c polarProductMax="$POLAR_PRODUCT_MAX"
           -c aiPipeline="$AI_PIPELINE"
           --require-approval never --outputs-file cdk-outputs.json
       - name: Resumen

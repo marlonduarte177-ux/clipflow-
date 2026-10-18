@@ -20,17 +20,17 @@ describe("minutos del plan", () => {
   it("la carga deja el saldo exacto del plan (no se acumula) y un aviso repetido no carga dos veces", async () => {
     const db = h!.db;
     const user = await upsertUser(db, { cognitoSub: "s1", email: "a@example.com" });
-    expect(await setPlanMinutes(db, { userId: user.id, minutes: 60, eventId: "paddle:txn_1", note: "prueba" })).toBe(true);
+    expect(await setPlanMinutes(db, { userId: user.id, minutes: 60, eventId: "polar:ord_1", note: "prueba" })).toBe(true);
     expect(await getCreditBalance(db, user.id)).toBe(60);
     await chargeVideoMinutes(db, { userId: user.id, videoId: video, run: "j1@1", minutes: 20 });
     // El mismo aviso otra vez: no vuelve a llenar el saldo.
-    expect(await setPlanMinutes(db, { userId: user.id, minutes: 60, eventId: "paddle:txn_1", note: "prueba" })).toBe(false);
+    expect(await setPlanMinutes(db, { userId: user.id, minutes: 60, eventId: "polar:ord_1", note: "prueba" })).toBe(false);
     expect(await getCreditBalance(db, user.id)).toBe(40);
     // Renovación: 600 exactos (lo que sobraba no se suma).
-    await setPlanMinutes(db, { userId: user.id, minutes: 600, eventId: "paddle:txn_2", note: "pro" });
+    await setPlanMinutes(db, { userId: user.id, minutes: 600, eventId: "polar:ord_2", note: "pro" });
     expect(await getCreditBalance(db, user.id)).toBe(600);
     // Cancelado: queda en 0.
-    await setPlanMinutes(db, { userId: user.id, minutes: 0, eventId: "paddle:sub_1:ended", note: "fin" });
+    await setPlanMinutes(db, { userId: user.id, minutes: 0, eventId: "polar:sub_1:canceled", note: "fin" });
     expect(await getCreditBalance(db, user.id)).toBe(0);
   });
 

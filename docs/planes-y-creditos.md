@@ -1,6 +1,6 @@
 # Planes, minutos y descargas (decidido el 03/10/2026)
 
-**Implementado con Paddle** (08/10/2026): ver [pagos-paddle.md](pagos-paddle.md). Se activa con
+**Implementado con Polar** (18/10/2026; antes Paddle): ver [pagos-polar.md](pagos-polar.md). Se activa con
 `BILLING_ENABLED=true`; hasta entonces no hay límites. No se cargan minutos a mano.
 
 ## Cómo funciona
@@ -11,12 +11,12 @@
 
 | Plan | Precio | Minutos |
 |---|---|---|
-| Prueba | **1.99 USD** por 7 días (pago único, no se renueva) | **60 min**; al terminar elige un plan mensual |
+| Prueba gratis | **0 USD** por 7 días (pide tarjeta) | **60 min**; al terminar pasa sola al Básico, salvo que se cancele |
 | Básico | **9.99 USD/mes** | **200 min** por mes |
 | Pro | **19.99 USD/mes** | **400 min** por mes |
 | Max | **39.99 USD/mes** | **1000 min** por mes |
 
-(Precios decididos el 08/10/2026; antes eran Prueba 1 USD y Pro 15 USD con 600 min.)
+(Precios decididos el 08/10/2026; el 18/10/2026 la prueba de 1.99 USD pasó a ser gratis por 7 días.)
 
 Reglas:
 - **Los minutos no se acumulan** de un mes a otro.
@@ -36,10 +36,10 @@ Reglas:
 ## Costos de referencia
 
 - ~0,01 USD por minuto de video (Whisper ~0,006 + GPT y servidor). Medido: 2,5 h ≈ 0,93 USD de OpenAI.
-- Costo máximo si se usan todos los minutos (~0,01 USD/min): Prueba ~0,60 USD de 1.99; Básico ~2 USD de
-  9.99; Pro ~4 USD de 19.99; Max ~10 USD de 39.99 (más la comisión de Paddle).
+- Costo máximo si se usan todos los minutos (~0,01 USD/min): Prueba ~0,60 USD (gratis: se recupera si pasa al Básico); Básico ~2 USD de
+  9.99; Pro ~4 USD de 19.99; Max ~10 USD de 39.99 (más la comisión de Polar).
 
 ## Pendiente
 
-1. Configurar Paddle y activar los cobros (pasos en [pagos-paddle.md](pagos-paddle.md)).
+1. Configurar Polar y activar los cobros (pasos en [pagos-polar.md](pagos-polar.md)).
 2. Paquete extra de minutos (por decidir).

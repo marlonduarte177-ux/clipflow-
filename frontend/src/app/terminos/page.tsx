@@ -75,8 +75,9 @@ export default function TermsPage() {
             <>
               <ul>
                 <li>
-                  <strong>Prueba:</strong> {LEGAL.plans.trial.priceUsd} USD por {LEGAL.plans.trial.days} días, con {LEGAL.plans.trial.minutes}{" "}
-                  minutos de video. Es un pago único: no se renueva ni se cobra nada más al terminar. Solo una vez por persona.
+                  <strong>Prueba gratis:</strong> {LEGAL.plans.trial.days} días gratis con {LEGAL.plans.trial.minutes} minutos de video; después
+                  empieza sola el plan Básico ({LEGAL.plans.basic.priceUsd} USD al mes), salvo que la canceles antes de que termine. Para empezarla
+                  se pide una tarjeta; durante la prueba no se cobra nada. Solo una vez por persona.
                 </li>
                 <li>
                   <strong>Básico:</strong> {LEGAL.plans.basic.priceUsd} USD al mes, con {LEGAL.plans.basic.minutes} minutos de video por mes.
@@ -93,8 +94,8 @@ export default function TermsPage() {
                 <li>Los precios pueden incluir impuestos según tu país. Te avisaremos con anticipación de cualquier cambio de precio.</li>
               </ul>
               <p>
-                Nuestro proceso de compra lo realiza nuestro revendedor en línea Paddle.com. Paddle.com es el comerciante registrado (Merchant
-                of Record) de todos nuestros pedidos. Paddle atiende las consultas de facturación y gestiona las devoluciones.
+                Nuestro proceso de compra lo realiza nuestro revendedor en línea Polar (polar.sh). Polar es el comerciante registrado (Merchant
+                of Record) de todos nuestros pedidos, atiende las consultas de facturación y gestiona las devoluciones.
               </p>
             </>
           ),

@@ -76,8 +76,9 @@ export default function TermsPageEn() {
             <>
               <ul>
                 <li>
-                  <strong>Trial:</strong> USD {LEGAL.plans.trial.priceUsd} for {LEGAL.plans.trial.days} days, with {LEGAL.plans.trial.minutes}{" "}
-                  minutes of video. It is a one-time payment: it does not renew and nothing else is charged when it ends. Once per person.
+                  <strong>Free trial:</strong> {LEGAL.plans.trial.days} days free with {LEGAL.plans.trial.minutes} minutes of video, then the
+                  Basic plan (USD {LEGAL.plans.basic.priceUsd} per month) starts automatically unless you cancel before the trial ends. A card is
+                  required to start it; nothing is charged during the trial. Once per person.
                 </li>
                 <li>
                   <strong>Basic:</strong> USD {LEGAL.plans.basic.priceUsd} per month, with {LEGAL.plans.basic.minutes} minutes of video per month.
@@ -94,8 +95,8 @@ export default function TermsPageEn() {
                 <li>Prices may include taxes depending on your country. We will notify you in advance of any price change.</li>
               </ul>
               <p>
-                Our order process is conducted by our online reseller Paddle.com. Paddle.com is the Merchant of Record for all our orders.
-                Paddle provides all customer service inquiries and handles returns.
+                Our order process is conducted by our online reseller Polar (polar.sh). Polar is the Merchant of Record for all our orders and
+                handles billing inquiries and returns.
               </p>
             </>
           ),

@@ -74,9 +74,9 @@ def secrets() -> None:
 
 
 def billing() -> None:
-    """Pagos: qué valores de Paddle le llegaron a la API (solo si están llenos, nunca su contenido)."""
+    """Pagos: qué valores de Polar le llegaron a la API (solo si están llenos, nunca su contenido)."""
     out("")
-    out("## Pagos (Paddle): valores que recibió la API")
+    out("## Pagos (Polar): valores que recibió la API")
     tasks, err = aws("ecs", "list-task-definitions", "--family-prefix", f"{PREFIX}-api", "--sort", "DESC", "--max-items", "1")
     arns = (tasks or {}).get("taskDefinitionArns", [])
     if err or not arns:
@@ -93,23 +93,23 @@ def billing() -> None:
     containers = described["taskDefinition"]["containerDefinitions"]
     env = {e["name"]: e.get("value", "") for c in containers for e in c.get("environment", [])}
     secrets = {s["name"] for c in containers for s in c.get("secrets", [])}
-    keys = ["BILLING_ENABLED", "PADDLE_ENVIRONMENT", "PADDLE_CLIENT_TOKEN", "PADDLE_PRICE_TRIAL_FEE",
-            "PADDLE_PRICE_BASIC", "PADDLE_PRICE_PRO", "PADDLE_PRICE_MAX", "PADDLE_PORTAL_URL", "BILLING_FREE_EMAILS"]
+    keys = ["BILLING_ENABLED", "POLAR_SERVER", "POLAR_PRODUCT_BASIC", "POLAR_PRODUCT_PRO", "POLAR_PRODUCT_MAX", "BILLING_FREE_EMAILS"]
+    uuid = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
     for k in keys:
         if k not in env:
             out(f"- `{k}`: no existe (falta desplegar esta versión)")
-        elif k in ("BILLING_ENABLED", "PADDLE_ENVIRONMENT"):
+        elif k in ("BILLING_ENABLED", "POLAR_SERVER"):
             out(f"- `{k}`: {env[k] or 'vacío'}")
         else:
-            v = env[k]
-            ok = bool(v) and (not k.startswith("PADDLE_PRICE") or v.startswith("pri_")) and (k != "PADDLE_CLIENT_TOKEN" or v.startswith(("test_", "live_")))
-            # Los ids de precio no son secretos; aun así solo se muestra cómo empiezan (pri_, pro_, 9.99…).
-            hint = f" (empieza con «{v[:4]}», debería ser «pri_»)" if v and not ok and k.startswith("PADDLE_PRICE") else ""
-            out(f"- `{k}`: {'ok' if ok else ('vacío' if not v else 'formato raro' + hint)}")
-    out(f"- `PADDLE_WEBHOOK_SECRET`: {'conectado a Secrets Manager' if 'PADDLE_WEBHOOK_SECRET' in secrets else 'no conectado'}")
-    meta, err = aws("secretsmanager", "describe-secret", "--secret-id", f"{PREFIX}/paddle-webhook-secret")
-    if not err and meta:
-        out(f"- clave de avisos cambiada por última vez: {meta.get('LastChangedDate', '?')} (la API la lee al arrancar)")
+            v = env[k].strip()
+            # El ID de producto de Polar tiene la forma 8-4-4-4-12; nunca se muestra entero.
+            ok = bool(v) and (not k.startswith("POLAR_PRODUCT") or bool(uuid.match(v)))
+            out(f"- `{k}`: {'ok' if ok else ('vacío' if not v else 'formato raro (copia el ID del producto en Polar)')}")
+    for k, name in (("POLAR_ACCESS_TOKEN", "polar-access-token"), ("POLAR_WEBHOOK_SECRET", "polar-webhook-secret")):
+        out(f"- `{k}`: {'conectado a Secrets Manager' if k in secrets else 'no conectado'}")
+        meta, err = aws("secretsmanager", "describe-secret", "--secret-id", f"{PREFIX}/{name}")
+        if not err and meta:
+            out(f"  - cambiado por última vez: {meta.get('LastChangedDate', '?')} (la API lo lee al arrancar)")
 
 
 def stopped_tasks() -> None:
@@ -136,8 +136,8 @@ def stopped_tasks() -> None:
 
 
 # Lo que interesa de cada línea de registro (los registros son JSON de pino).
-FIELDS = ["msg", "host", "step", "code", "error", "status", "reason", "detail", "result", "video", "clip", "section", "source", "box", "segment", "crop", "filter", "err", "stderr"]
-PATTERN = '?"aviso de Paddle" ?"trabajo con error" ?"FFmpeg falló" ?"error inesperado" ?"IA no disponible" ?"IA saturada" ?"no se pudo" ?"\\"level\\":50"'
+FIELDS = ["msg", "host", "event", "path", "tipo", "clave", "step", "code", "error", "status", "reason", "detail", "result", "video", "clip", "section", "source", "box", "segment", "crop", "filter", "err", "stderr"]
+PATTERN = '?"aviso de Polar" ?"Polar rechazó" ?"trabajo con error" ?"FFmpeg falló" ?"error inesperado" ?"IA no disponible" ?"IA saturada" ?"no se pudo" ?"\\"level\\":50"'
 
 
 def log_errors(group: str, title: str) -> None:
@@ -166,12 +166,12 @@ def log_errors(group: str, title: str) -> None:
         out(f"- {when(e['timestamp'])}: " + " · ".join(parts))
 
 
-def paddle_events() -> None:
-    """Avisos de Paddle que llegaron a la API y qué se hizo con ellos (sin datos del cliente)."""
+def polar_events() -> None:
+    """Avisos de Polar que llegaron a la API y qué se hizo con ellos (sin datos del cliente)."""
     out("")
-    out(f"## Avisos de Paddle recibidos (últimas {HOURS} h)")
+    out(f"## Avisos de Polar recibidos (últimas {HOURS} h)")
     start = int((time.time() - HOURS * 3600) * 1000)
-    pattern = '?"paddle-webhook" ?"aviso de Paddle" ?"suscripción actualizada" ?"minutos del plan" ?"precio que no es de ClipFlow"'
+    pattern = '?"polar-webhook" ?"aviso de Polar" ?"suscripción actualizada" ?"minutos del plan" ?"producto que no es de ClipFlow" ?"Polar rechazó" ?"hablar con Polar"'
     data, err = aws("logs", "filter-log-events", "--log-group-name", f"/clipflow/{STAGE}/api", "--start-time", str(start),
                     "--filter-pattern", pattern, "--max-items", "500")
     if err:
@@ -179,7 +179,7 @@ def paddle_events() -> None:
         return
     events = data.get("events", [])[-25:]
     if not events:
-        out("- ninguno: Paddle no envió avisos a la API (revisa la URL en Paddle → Notifications)")
+        out("- ninguno: Polar no envió avisos a la API (revisa la URL en Polar → Settings → Webhooks)")
         return
     # Respuesta de cada aviso: el registro "request completed" lleva el mismo reqId.
     req_ids = []
@@ -307,7 +307,7 @@ def main() -> None:
     stopped_tasks()
     log_errors(f"/clipflow/{STAGE}/worker", "Errores del procesador")
     log_errors(f"/clipflow/{STAGE}/api", "Errores de la API")
-    paddle_events()
+    polar_events()
     if SUMMARY:
         with open(SUMMARY, "a", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")

@@ -165,6 +165,12 @@ const EXACT: Record<string, string> = {
   "Cancela tu plan antes de eliminar la cuenta (Cuenta → Plan → Gestionar suscripción).":
     "Cancel your plan before deleting your account (Account → Plan → Manage subscription).",
   "Firma inválida.": "Invalid signature.",
+  "Plan inválido.": "Invalid plan.",
+  "Los pagos todavía no están disponibles.": "Payments are not available yet.",
+  "Ya tienes un plan. Cámbialo en Gestionar suscripción.": "You already have a plan. Change it in Manage subscription.",
+  "No se pudo abrir el pago. Intenta de nuevo.": "Couldn't open checkout. Try again.",
+  "No tienes una suscripción.": "You don't have a subscription.",
+  "No se pudo abrir la suscripción. Intenta de nuevo.": "Couldn't open your subscription. Try again.",
   "No se pudo aplicar el aviso.": "The notification could not be applied.",
   "Necesitas un plan para crear clips. Elige uno en Planes.": "You need a plan to create clips. Choose one in Plans.",
   "Ya usaste todos los minutos de tu plan. Se recargan con la próxima renovación.":

@@ -37,7 +37,7 @@ const EnvSchema = z.object({
   COGNITO_USER_POOL_ID: z.string().regex(/^[\w-]+_[0-9a-zA-Z]+$/, "formato esperado: us-east-1_XXXXXXX"),
   COGNITO_CLIENT_ID: z.string().min(1),
 
-  // --- Pagos (Paddle). Ver docs/pagos-paddle.md ---
+  // --- Pagos (Polar). Ver docs/pagos-polar.md ---
   /** "true" exige plan y minutos para crear clips. Mientras sea "false", se procesa sin plan. */
   BILLING_ENABLED: z
     .enum(["true", "false"])
@@ -45,18 +45,16 @@ const EnvSchema = z.object({
     .transform((v) => v === "true"),
   /** Correos que no necesitan plan (p. ej. el del dueño), separados por coma. */
   BILLING_FREE_EMAILS: z.string().optional(),
-  PADDLE_ENVIRONMENT: z.enum(["sandbox", "production"]).default("sandbox"),
-  /** Token público de Paddle.js (live_… o test_…): no es secreto. */
-  PADDLE_CLIENT_TOKEN: z.string().optional(),
-  /** Precios de Paddle (pri_…): la prueba (pago único de 1.99 USD) y los tres planes mensuales. */
-  PADDLE_PRICE_TRIAL_FEE: z.string().optional(),
-  PADDLE_PRICE_BASIC: z.string().optional(),
-  PADDLE_PRICE_PRO: z.string().optional(),
-  PADDLE_PRICE_MAX: z.string().optional(),
-  /** Portal de clientes de Paddle (cambiar tarjeta, facturas, cancelar). */
-  PADDLE_PORTAL_URL: z.string().optional(),
-  /** Clave secreta de los avisos de Paddle. En AWS la inyecta ECS desde Secrets Manager. */
-  PADDLE_WEBHOOK_SECRET: z.string().optional(),
+  /** "sandbox" (pruebas, sin cobrar de verdad) o "production". */
+  POLAR_SERVER: z.enum(["sandbox", "production"]).default("sandbox"),
+  /** Productos mensuales de Polar (su ID, no es secreto). Básico lleva la prueba gratis de 7 días. */
+  POLAR_PRODUCT_BASIC: z.string().optional(),
+  POLAR_PRODUCT_PRO: z.string().optional(),
+  POLAR_PRODUCT_MAX: z.string().optional(),
+  /** Token de acceso de Polar (polar_oat_…). En AWS lo inyecta ECS desde Secrets Manager. */
+  POLAR_ACCESS_TOKEN: z.string().optional(),
+  /** Clave secreta de los avisos (webhooks) de Polar. En AWS la inyecta ECS desde Secrets Manager. */
+  POLAR_WEBHOOK_SECRET: z.string().optional(),
 });
 
 export type ApiConfig = z.infer<typeof EnvSchema>;
