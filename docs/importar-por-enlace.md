@@ -4,6 +4,12 @@ Fecha: 01/10/2026. En **Subir video → Enlace** se pega el enlace de un video d
 Facebook, Kick o Twitch**, o un enlace directo a un archivo `.mp4`/`.mov`/`.webm`/`.mkv`. ClipFlow lo descarga y lo
 procesa igual que un video subido.
 
+> **Proxy residencial retirado (16/10/2026).** Ya no se usa Evomi (sin saldo): el procesador y la API
+> descargan y leen los datos del enlace siempre directo desde AWS. Se quitaron el secreto
+> `download-proxy`, su variable en el procesador y la API, y la alarma «proxy sin saldo». Si Instagram
+> o Facebook bloquean a nuestros servidores, la app lo dice claro («descárgalo y súbelo como archivo»).
+> Lo que sigue sobre el proxy queda como historia.
+
 **YouTube, por ahora no (02/10/2026).** Se probó con proxy residencial (Evomi) y con el generador
 de tokens de YouTube, y YouTube siguió bloqueando la descarga (403). A pedido del dueño del producto
 se quitó; se retomará más adelante.
@@ -363,13 +369,12 @@ El original ocupa S3 igual que un video subido y se borra al eliminar el video.
       mismo secreto; ahora también lo lee la API). Como mucho 4 consultas a la vez; tope 25 s.
     - Probado (desde fuera de AWS): Kick 1,1 s, TikTok 1,6 s, Facebook 1,7 s, todos con duración.
       Instagram pide sesión en algunos reels (sin duración: se procesa completo).
-    - **Facebook (16/10/2026):** desde servidores (AWS y otros), Facebook muestra la página de "iniciar
-      sesión" sin los datos del video, y yt-dlp responde "Cannot parse data". Solo funciona por el
-      **proxy residencial**. El proxy se lee igual que en el procesador (`parseProxyUrl` en shared):
-      también el formato que copia Evomi `host:puerto:usuario:clave` (antes la API solo aceptaba la URL).
-      Respaldo: la página del video (`playable_duration_in_ms`, `og:title`, `og:image`).
+    - **Facebook (16/10/2026):** desde servidores (AWS y otros), Facebook a menudo muestra la página de
+      "iniciar sesión" sin los datos del video, y yt-dlp responde "Cannot parse data". Respaldo: la página
+      del video (`playable_duration_in_ms`, `og:title`, `og:image`). Sin proxy, si Facebook no muestra los
+      datos, la tarjeta sale sin duración y se procesa completo.
     - Si no se pudo leer la duración, la API registra el motivo («no se pudo leer la duración del
-      enlace», con `reason` y si usó el proxy) y el workflow Diagnóstico lo muestra en «Errores de la API».
+      enlace», con `reason`) y el workflow Diagnóstico lo muestra en «Errores de la API».
       El Diagnóstico también dice si cada secreto sigue con el valor inicial (falta pegar la clave).
   - YouTube sigue sin importarse (lo bloquea desde servidores): se avisa al pegar el enlace.
 - Un archivo: la duración y un fotograma se leen en el navegador; la subida empieza sola.

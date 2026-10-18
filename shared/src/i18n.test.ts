@@ -30,9 +30,6 @@ describe("translateMessage", () => {
       "We couldn't open the original video to cut the clips: We couldn't find a video at that link.",
     );
     expect(translateMessage("falló la transcripción: La clave de OpenAI no es válida", "en")).toBe("transcription failed: The OpenAI key is not valid");
-    expect(translateMessage("Nuestro servicio de descarga no respondió (proxy: sin saldo, 402). Lo intentaremos de nuevo.", "en")).toContain(
-      "proxy: no balance, 402",
-    );
     expect(translateMessage("falló la transcripción: OpenAI tuvo un error temporal (503)", "en")).toBe(
       "transcription failed: OpenAI had a temporary error (503)",
     );

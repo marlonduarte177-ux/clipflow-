@@ -5,7 +5,7 @@ import { loadProductConfig } from "@clipflow/shared";
 import { createDb, databaseUrlFromEnv } from "@clipflow/shared/db";
 import { DeepgramTranscriber, looksLikeDeepgramKey, withDeepgram } from "./ai/deepgram.js";
 import { OpenAIProvider } from "./ai/openai.js";
-import { describeProxyValue, loadWorkerConfig, looksLikeOpenAIKey, parseProxyUrl } from "./config.js";
+import { loadWorkerConfig, looksLikeOpenAIKey } from "./config.js";
 import { runConsumer } from "./consumer.js";
 import { createS3WorkerStorage } from "./storage.js";
 
@@ -60,7 +60,6 @@ const aiClassic = ai && deepgram ? withDeepgram(ai, deepgram) : ai;
 const aiNew = aiV2 && deepgram ? withDeepgram(aiV2, deepgram) : aiV2;
 const aiDisabledReason = config.AI_PROVIDER === "none" ? "IA desactivada por configuración" : "Falta la clave de OpenAI en Secrets Manager";
 
-const downloadProxyUrl = parseProxyUrl(config.DOWNLOAD_PROXY_URL);
 
 let stopping = false;
 const stop = (signal: string) => {
@@ -81,8 +80,6 @@ log.info(
     vision: config.AI_VISION_ENABLED,
     billing: config.BILLING_ENABLED,
     faces: config.FACE_TRACKING_ENABLED,
-    // Solo el host del proxy: nunca el usuario ni la contraseña.
-    downloadProxy: downloadProxyUrl ? new URL(downloadProxyUrl).hostname : describeProxyValue(config.DOWNLOAD_PROXY_URL),
   },
   "worker iniciado",
 );
@@ -111,8 +108,6 @@ try {
       faceTracking: config.FACE_TRACKING_ENABLED,
       billing: { enabled: config.BILLING_ENABLED, freeEmails: config.BILLING_FREE_EMAILS },
       ytDlpPath: config.YTDLP_PATH,
-      downloadProxyUrl,
-      downloadProxyProblem: downloadProxyUrl ? null : describeProxyValue(config.DOWNLOAD_PROXY_URL),
       vision: {
         enabled: config.AI_VISION_ENABLED,
         intervalSeconds: config.AI_VISION_INTERVAL_SECONDS,

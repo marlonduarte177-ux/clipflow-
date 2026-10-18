@@ -30,10 +30,7 @@ Reglas:
 > Desactivado el 03/10/2026 por Paddle (ver `docs/importar-por-enlace.md`). Si se reactiva, aplican estas reglas.
 
 - **No gasta minutos** (no usa OpenAI).
-- **Pro: ilimitadas mientras no pasen por el proxy residencial (Evomi).** TikTok, Kick, Twitch y los
-  enlaces directos bajan sin proxy, así que no tienen límite.
-- **Las que sí pasan por Evomi** (cuando Instagram o Facebook bloquean al servidor) tienen un tope,
-  porque Evomi se paga por GB. Por decidir: p. ej. 2 GB al mes por usuario.
+- **Pro: ilimitadas.** Desde el 16/10/2026 no hay proxy residencial: todo baja directo, sin costo por GB.
 - Prueba: mismo criterio, con un tope menor (por decidir).
 
 ## Costos de referencia

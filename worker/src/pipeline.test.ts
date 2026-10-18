@@ -434,7 +434,7 @@ describe("streams largos de Kick/Twitch: copia liviana para analizar y solo los 
       },
       streams: {
         fetchMediaInfo: async () => (calls.info++, { title: "Stream de prueba", durationSeconds, isLive: false }),
-        resolveStreamUrls: async (): Promise<StreamSource> => (calls.resolve++, { urls: [hd], proxy: null }),
+        resolveStreamUrls: async (): Promise<StreamSource> => (calls.resolve++, { urls: [hd] }),
         // El corte real con FFmpeg, sobre un archivo local en lugar del HLS de la plataforma.
         downloadSection: async (src: StreamSource, start: number, duration: number, out: string, o: { ffmpegPath: string }) => {
           calls.sections.push({ start, duration });

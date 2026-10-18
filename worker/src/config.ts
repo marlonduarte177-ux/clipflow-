@@ -15,11 +15,6 @@ const EnvSchema = z.object({
   FFPROBE_PATH: z.string().default("ffprobe"),
   /** yt-dlp para importar videos por enlace (TikTok, Instagram, Facebook, Kick). */
   YTDLP_PATH: z.string().default("yt-dlp"),
-  /**
-   * Proxy residencial para plataformas que bloquean a AWS (Instagram, Facebook…). Viene de Secrets Manager;
-   * mientras tenga el valor de relleno (no es una URL), el proxy queda apagado.
-   */
-  DOWNLOAD_PROXY_URL: z.string().optional(),
   /** Tiempo que un mensaje queda oculto a otros workers; se renueva mientras se procesa. */
   SQS_VISIBILITY_SECONDS: z.coerce.number().int().min(60).max(43_200).default(300),
   /** Costo estimado por hora del worker (Fargate 4 vCPU / 8 GB x86 en us-east-1 ≈ 0.1975). */
@@ -107,5 +102,3 @@ export function looksLikeOpenAIKey(value: string | undefined): value is string {
   return typeof value === "string" && /^sk-[A-Za-z0-9_-]{20,}$/.test(value.trim());
 }
 
-// El proxy lo leen el procesador (descargas) y la API (datos del enlace): la misma lectura en los dos.
-export { describeProxyValue, parseProxyUrl } from "@clipflow/shared";

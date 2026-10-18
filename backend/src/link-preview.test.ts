@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { DEFAULT_PRODUCT_CONFIG, type LinkPreview } from "@clipflow/shared";
 import { BILLING_OFF } from "./billing.js";
-import { fetchLinkDetails, fetchLinkPreview, kickRecord, proxyWithSession, usableProxy } from "./link-preview.js";
+import { fetchLinkDetails, fetchLinkPreview, kickRecord } from "./link-preview.js";
 import { bearer, closeTestApp, createTestApp, type TestContext } from "./test-helpers.js";
 
 /** fetch falso: anota a dónde se pidió y responde lo que diga `reply`. */
@@ -78,7 +78,7 @@ describe("tarjeta del enlace (sin bajar el video)", () => {
 });
 
 describe("segundo paso: la duración leída como el procesador (Python con yt-dlp)", () => {
-  /** Script de Python falso: dice qué recibió (URL y si hay proxy) y responde como el de verdad. */
+  /** Script de Python falso: dice qué recibió y responde como el de verdad. */
   function fakeScript(body: string) {
     const dir = mkdtempSync(path.join(tmpdir(), "link-meta-"));
     const file = path.join(dir, "fake.py");
@@ -86,22 +86,19 @@ describe("segundo paso: la duración leída como el procesador (Python con yt-dl
     return file;
   }
 
-  it("devuelve título, duración y miniatura; el proxy va por variable de entorno (no en los argumentos)", async () => {
+  it("devuelve título, duración y miniatura (sin pasarle las claves de la API)", async () => {
     const script = fakeScript(
-      'print(json.dumps({"title": sys.argv[1], "durationSeconds": 7642.4, "thumbnailUrl": "https://images.kick.com/t.webp" if os.environ.get("CLIPFLOW_PROXY", "").startswith("http://u:p_country-US_session-") else None}))',
+      'print(json.dumps({"title": sys.argv[1], "durationSeconds": 7642.4, "thumbnailUrl": "https://images.kick.com/t.webp" if "DATABASE_URL" not in os.environ else None}))',
     );
-    const details = await fetchLinkDetails("https://kick.com/a/videos/01a0b24f-2b40-7d20-b9d1-f1238dd1b2e7", {
-      python: "python3",
-      script,
-      proxyUrl: "http://u:p@rp.evomi.com:1000",
-    });
+    process.env.DATABASE_URL ??= "postgres://secreto";
+    const details = await fetchLinkDetails("https://kick.com/a/videos/01a0b24f-2b40-7d20-b9d1-f1238dd1b2e7", { python: "python3", script });
     expect(details).toEqual({ title: "https://kick.com/a/videos/01a0b24f-2b40-7d20-b9d1-f1238dd1b2e7", durationSeconds: 7642, thumbnailUrl: "https://images.kick.com/t.webp" });
   });
 
-  it("sin duración, devuelve el motivo (para el registro) y si probó el proxy", async () => {
-    const script = fakeScript('print(json.dumps({"errors": ["directo: RuntimeError: pide iniciar sesión", 7], "proxy": True}))');
+  it("sin duración, devuelve el motivo (para el registro)", async () => {
+    const script = fakeScript('print(json.dumps({"errors": ["RuntimeError: pide iniciar sesión", 7]}))');
     const details = await fetchLinkDetails("https://www.facebook.com/share/v/1BuH8sY2Lx/", { python: "python3", script });
-    expect(details).toMatchObject({ durationSeconds: null, errors: ["directo: RuntimeError: pide iniciar sesión"], proxy: true });
+    expect(details).toMatchObject({ durationSeconds: null, errors: ["RuntimeError: pide iniciar sesión"] });
   });
 
   it("si falla, tarda o responde cualquier cosa: null o sin datos (nunca un error)", async () => {
@@ -116,14 +113,6 @@ describe("segundo paso: la duración leída como el procesador (Python con yt-dl
     expect(await fetchLinkDetails("https://example.com/v.mp4", { python: "python3", script: slow })).toBeNull();
   });
 
-  it("el secreto del proxy solo cuenta si es una URL (al crearlo tiene un relleno)", () => {
-    expect(usableProxy("Xk2l9sdfjKLJ2lk3j4lk2j3l4kj23l4k")).toBeNull();
-    expect(usableProxy(undefined)).toBeNull();
-    expect(usableProxy("http://u:p@rp.evomi.com:1000")).toBe("http://u:p@rp.evomi.com:1000");
-    // El formato que copia Evomi (host:puerto:usuario:clave), igual que lo entiende el procesador.
-    expect(usableProxy("rp.evomi.com:1000:usuario1:Clave123")).toBe("http://usuario1:Clave123@rp.evomi.com:1000");
-    expect(proxyWithSession("http://u:p@proxy.example.com:8000")).toBe("http://u:p@proxy.example.com:8000/");
-  });
 });
 
 describe("POST /videos/preview", () => {
