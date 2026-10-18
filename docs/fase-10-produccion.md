@@ -17,7 +17,6 @@ Estado al 03/10/2026.
 |---|---|
 | `alert-jobs-failed` | Un trabajo de video falló 6 veces y quedó en la cola de errores. |
 | `alert-openai-account` | OpenAI rechazó la clave o la cuenta no tiene saldo: los videos salen sin IA. |
-| `alert-download-proxy` | El proxy de descargas (Evomi) no tiene saldo (402). |
 | `alert-api-5xx` | La API respondió 10 o más errores 5xx en 5 minutos. |
 | `alert-db-storage` | A la base de datos le quedan menos de 2 GB. |
 | `alert-db-cpu` | La CPU de la base de datos lleva 15 minutos por encima del 80 %. |

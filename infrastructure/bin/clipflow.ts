@@ -72,7 +72,6 @@ const api = new ApiStack(app, `${prefix}-api`, {
   },
   webOrigins: config.webOrigins,
   billing,
-  downloadProxy: worker.downloadProxy,
 });
 
 // Alertas por correo y presupuesto. El correo y el presupuesto llegan desde variables de GitHub

@@ -47,7 +47,6 @@ beforeAll(() => {
       securityGroup: worker.securityGroup,
     },
     webOrigins: WEB,
-    downloadProxy: worker.downloadProxy,
   });
   const monitoring = new MonitoringStack(app, "monitoring", {
     env,
@@ -294,14 +293,9 @@ describe("cola y worker", () => {
     }
   });
 
-  it("el proxy de descarga vive en Secrets Manager, llega solo al worker y nunca como texto", () => {
-    t.worker.hasResourceProperties("AWS::SecretsManager::Secret", { Name: "clipflow-staging/download-proxy" });
-    const [taskDef] = Object.values(t.worker.findResources("AWS::ECS::TaskDefinition"));
-    const container = (taskDef as { Properties: { ContainerDefinitions: Record<string, unknown>[] } }).Properties
-      .ContainerDefinitions[0]!;
-    expect((container.Environment as { Name: string }[]).map((e) => e.Name)).not.toContain("DOWNLOAD_PROXY_URL");
-    expect((container.Secrets as { Name: string }[]).map((e) => e.Name)).toContain("DOWNLOAD_PROXY_URL");
-    expect(JSON.stringify(t.api.toJSON())).not.toContain("download-proxy");
+  it("ya no hay proxy de descargas: ni secreto ni variable en el procesador o la API", () => {
+    expect(JSON.stringify(t.worker.toJSON())).not.toMatch(/download-proxy|DOWNLOAD_PROXY_URL/);
+    expect(JSON.stringify(t.api.toJSON())).not.toMatch(/download-proxy|DOWNLOAD_PROXY_URL/);
   });
 
   it("la clave de OpenAI vive en Secrets Manager y llega al worker como secreto", () => {
@@ -319,11 +313,6 @@ describe("cola y worker", () => {
     expect(env.find((e) => e.Name === "TRANSCRIBE_PROVIDER")?.Value).toBe("deepgram");
     expect((container.Secrets as { Name: string }[]).map((e) => e.Name)).toContain("DEEPGRAM_API_KEY");
     expect(JSON.stringify(t.api.toJSON())).not.toContain("deepgram-api-key");
-    // La API lee la duración de los enlaces con el proxy del procesador (solo ese secreto).
-    const [apiTask] = Object.values(t.api.findResources("AWS::ECS::TaskDefinition"));
-    const apiContainer = (apiTask as { Properties: { ContainerDefinitions: Record<string, unknown>[] } }).Properties.ContainerDefinitions[0]!;
-    expect((apiContainer.Secrets as { Name: string }[]).map((e) => e.Name)).toContain("DOWNLOAD_PROXY_URL");
-    expect((apiContainer.Environment as { Name: string }[]).map((e) => e.Name)).not.toContain("DOWNLOAD_PROXY_URL");
     expect(env.find((e) => e.Name === "OPENAI_V2_MODEL")?.Value).toBe("gpt-6.1-sol");
     expect(env.find((e) => e.Name === "SOUND_DETECTION_ENABLED")?.Value).toBe("true");
     // La API no tiene acceso a la clave.
@@ -352,10 +341,10 @@ describe("cola y worker", () => {
 });
 
 describe("alertas", () => {
-  it("avisa por correo de trabajos fallidos, OpenAI o el proxy sin saldo, errores de la API y la base de datos", () => {
+  it("avisa por correo de trabajos fallidos, OpenAI sin saldo, errores de la API y la base de datos", () => {
     const m = t.monitoring;
     m.hasResourceProperties("AWS::SNS::Subscription", { Protocol: "email", Endpoint: "alertas@example.com" });
-    for (const name of ["jobs-failed", "openai-account", "download-proxy", "api-5xx", "db-storage", "db-cpu"]) {
+    for (const name of ["jobs-failed", "openai-account", "api-5xx", "db-storage", "db-cpu"]) {
       m.hasResourceProperties("AWS::CloudWatch::Alarm", {
         AlarmName: `clipflow-staging-alert-${name}`,
         AlarmActions: [Match.objectLike({ Ref: Match.anyValue() })],
@@ -370,7 +359,7 @@ describe("alertas", () => {
   it("sin correo configurado: alarmas sí, pero sin suscripción ni presupuesto", () => {
     t.monitoringQuiet.resourceCountIs("AWS::SNS::Subscription", 0);
     t.monitoringQuiet.resourceCountIs("AWS::Budgets::Budget", 0);
-    t.monitoringQuiet.resourceCountIs("AWS::CloudWatch::Alarm", 6);
+    t.monitoringQuiet.resourceCountIs("AWS::CloudWatch::Alarm", 5);
   });
 });
 

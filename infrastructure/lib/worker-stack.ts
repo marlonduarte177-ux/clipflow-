@@ -50,8 +50,6 @@ export class WorkerStack extends Stack {
   readonly taskDefinition: ecs.FargateTaskDefinition;
   readonly securityGroup: ec2.SecurityGroup;
   readonly taskFamily: string;
-  /** Proxy residencial: también lo usa la API para leer la duración de un enlace (Kick, Facebook…). */
-  readonly downloadProxy: secretsmanager.Secret;
 
   constructor(scope: Construct, id: string, props: WorkerStackProps) {
     super(scope, id, props);
@@ -93,17 +91,6 @@ export class WorkerStack extends Stack {
       removalPolicy: props.stage === "production" || props.protectData ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     });
 
-    // Proxy residencial para importar de plataformas que bloquean a AWS (Instagram, Facebook…). Se crea con un
-    // valor de relleno (el proxy queda apagado) y el usuario pega su URL en Secrets Manager:
-    // http://USUARIO:CONTRASEÑA@rp.evomi.com:1000. La leen el worker (descargas) y la API (datos del enlace).
-    const downloadProxy = new secretsmanager.Secret(this, "DownloadProxy", {
-      secretName: `${prefix}/download-proxy`,
-      description: "Proxy residencial para descargar videos por enlace. Valor: http://USUARIO:CONTRASEÑA@host:puerto",
-      generateSecretString: { passwordLength: 32, excludePunctuation: true },
-      removalPolicy: props.stage === "production" || props.protectData ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
-    });
-
-    this.downloadProxy = downloadProxy;
     const cluster = new ecs.Cluster(this, "WorkerCluster", { clusterName: `${prefix}-workers`, vpc: props.vpc });
     this.cluster = cluster;
     this.taskFamily = `${prefix}-worker`;
@@ -178,7 +165,6 @@ export class WorkerStack extends Stack {
         // una clave nueva se usa desde el siguiente video).
         OPENAI_API_KEY: ecs.Secret.fromSecretsManager(openAiKey),
         DEEPGRAM_API_KEY: ecs.Secret.fromSecretsManager(deepgramKey),
-        DOWNLOAD_PROXY_URL: ecs.Secret.fromSecretsManager(downloadProxy),
         DB_USER: ecs.Secret.fromSecretsManager(dbSecret, "username"),
         DB_PASSWORD: ecs.Secret.fromSecretsManager(dbSecret, "password"),
       },
@@ -295,6 +281,5 @@ export class WorkerStack extends Stack {
     new CfnOutput(this, "QueueUrl", { value: this.queue.queueUrl });
     new CfnOutput(this, "OpenAiSecretName", { value: openAiKey.secretName });
     new CfnOutput(this, "DeepgramSecretName", { value: deepgramKey.secretName });
-    new CfnOutput(this, "DownloadProxySecretName", { value: downloadProxy.secretName });
   }
 }

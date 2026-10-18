@@ -139,10 +139,6 @@ export interface PipelineDeps {
   faceTracking?: boolean;
   /** yt-dlp, para importar videos de TikTok, Instagram, Facebook y Kick. */
   ytDlpPath?: string;
-  /** Proxy residencial para plataformas que bloquean a AWS (null = sin proxy). */
-  downloadProxyUrl?: string | null;
-  /** Sin proxy: por qué ("mal escrito", "sin configurar"). */
-  downloadProxyProblem?: string | null;
   /** Descarga de enlaces (se reemplaza en tests). */
   download?: typeof downloadFromUrl;
   /** Streams largos: datos del enlace, URLs del video y tramos (se reemplazan en tests). */
@@ -264,8 +260,6 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
 
   const linkOptions = (): DownloadOptions => ({
     ytDlpPath: deps.ytDlpPath ?? "yt-dlp",
-    proxyUrl: deps.downloadProxyUrl ?? null,
-    proxyProblem: deps.downloadProxyProblem ?? null,
     ffmpegPath: deps.tools.ffmpegPath,
     maxBytes: deps.product.upload.maxBytes,
     maxDurationSeconds: deps.product.upload.maxDurationSeconds,

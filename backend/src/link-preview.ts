@@ -1,7 +1,6 @@
 import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { parseProxyUrl, type LinkPreview } from "@clipflow/shared";
+import type { LinkPreview } from "@clipflow/shared";
 
 /**
  * Datos de un enlace (título, miniatura y duración) SIN bajar el video, para mostrar la tarjeta en
@@ -209,35 +208,13 @@ export async function fetchLinkPreview(raw: string, options: PreviewOptions = {}
   };
 }
 
-/** Proxy de Evomi con país y sesión fijos (como el procesador). Otro proveedor: la URL tal cual. */
-export function proxyWithSession(proxyUrl: string): string {
-  const url = new URL(proxyUrl);
-  if (url.hostname.endsWith("evomi.com") && url.password) {
-    const password = decodeURIComponent(url.password);
-    let extra = "";
-    if (!password.includes("_country-")) extra += "_country-US";
-    if (!password.includes("_session-")) extra += `_session-${randomBytes(6).toString("base64url").replace(/[^A-Za-z0-9]/g, "x").slice(0, 8)}_lifetime-60`;
-    if (extra) url.password = `${url.password}${extra}`;
-  }
-  return url.toString();
-}
-
-/**
- * El proxy del secreto, leído igual que en el procesador: URL (`http://usuario:clave@host:puerto`) o el
- * formato que copia Evomi (`host:puerto:usuario:clave`). null con el valor de relleno o si no se entiende.
- */
-export function usableProxy(raw: string | undefined): string | null {
-  return parseProxyUrl(raw);
-}
-
 /** Lo que leyó el segundo paso; sin duración, por qué (para el registro, sin datos privados). */
-export type LinkDetails = Partial<LinkPreview> & { errors?: string[]; proxy?: boolean };
+export type LinkDetails = Partial<LinkPreview> & { errors?: string[] };
 
 export interface DetailsOptions {
   /** Python con yt-dlp y curl-cffi (en la imagen de la API: /opt/yt-dlp/bin/python). */
   python?: string;
   script?: string;
-  proxyUrl?: string | null;
   timeoutMs?: number;
 }
 
@@ -248,8 +225,8 @@ let running = 0;
 
 /**
  * Segundo paso de la tarjeta, cuando la consulta rápida no trajo la duración: lo mismo que lee el
- * procesador (Kick como un navegador real; las demás con yt-dlp, solo los datos) y, si bloquean, por el
- * proxy. ~1–3 s. Nunca lanza: si no se puede, devuelve null.
+ * procesador (Kick como un navegador real; las demás con yt-dlp, solo los datos; Facebook, además, la
+ * página del video). ~1–3 s. Nunca lanza: si no se puede, devuelve null (o el motivo, sin duración).
  */
 export async function fetchLinkDetails(raw: string, options: DetailsOptions = {}): Promise<LinkDetails | null> {
   const url = new URL(raw);
@@ -259,8 +236,8 @@ export async function fetchLinkDetails(raw: string, options: DetailsOptions = {}
     const stdout = await new Promise<string>((resolve) => {
       const child = spawn(options.python ?? process.env.LINK_META_PYTHON ?? "/opt/yt-dlp/bin/python", ["-I", options.script ?? LINK_META_SCRIPT, url.toString()], {
         stdio: ["ignore", "pipe", "ignore"],
-        // Solo lo necesario (nunca las claves de la API); el proxy va por variable, no en los argumentos.
-        env: { PATH: process.env.PATH ?? "", HOME: "/tmp", ...(options.proxyUrl ? { CLIPFLOW_PROXY: proxyWithSession(options.proxyUrl) } : {}) },
+        // Solo lo necesario: nunca las claves de la API.
+        env: { PATH: process.env.PATH ?? "", HOME: "/tmp" },
       });
       let out = "";
       const timer = setTimeout(() => child.kill("SIGKILL"), options.timeoutMs ?? 25_000);
@@ -278,7 +255,6 @@ export async function fetchLinkDetails(raw: string, options: DetailsOptions = {}
       durationSeconds: seconds(data.durationSeconds),
       thumbnailUrl: httpsUrl(data.thumbnailUrl),
       ...(errors.length ? { errors } : {}),
-      ...(typeof data.proxy === "boolean" ? { proxy: data.proxy } : {}),
     };
   } catch {
     return null;

@@ -43,8 +43,6 @@ export interface ApiStackProps extends StackProps {
   };
   /** Pagos con Paddle: valores públicos (variables del environment de GitHub; nada secreto). */
   billing?: BillingProps;
-  /** Proxy residencial del procesador: para leer la duración de enlaces que bloquean a AWS. */
-  downloadProxy?: secretsmanager.ISecret;
 }
 
 /** Configuración pública de pagos. La clave de los avisos va aparte, en Secrets Manager. */
@@ -148,7 +146,6 @@ export class ApiStack extends Stack {
         DB_USER: ecs.Secret.fromSecretsManager(dbSecret, "username"),
         DB_PASSWORD: ecs.Secret.fromSecretsManager(dbSecret, "password"),
         PADDLE_WEBHOOK_SECRET: ecs.Secret.fromSecretsManager(paddleWebhookSecret),
-        ...(props.downloadProxy ? { DOWNLOAD_PROXY_URL: ecs.Secret.fromSecretsManager(props.downloadProxy) } : {}),
       },
       healthCheck: {
         command: [

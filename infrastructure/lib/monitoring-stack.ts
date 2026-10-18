@@ -29,7 +29,7 @@ export interface MonitoringStackProps extends StackProps {
 /**
  * Avisos por correo cuando algo falla o el gasto sube:
  * - trabajos de video que fallaron una y otra vez (cola de errores);
- * - OpenAI sin saldo o con la clave inválida, y el proxy de descargas sin saldo;
+ * - OpenAI sin saldo o con la clave inválida;
  * - la API respondiendo errores 5xx;
  * - la base de datos con poco espacio o con la CPU al tope;
  * - el gasto de AWS del mes por encima del 80 % (y del 100 %) del presupuesto.
@@ -88,12 +88,6 @@ export class MonitoringStack extends Stack {
       "openai-account",
       '?"insufficient_quota" ?"invalid_api_key"',
       "OpenAI rechazó la clave o la cuenta no tiene saldo: los videos se procesan sin IA. Revisa Billing en platform.openai.com.",
-    );
-    logAlarm(
-      "ProxyAlarm",
-      "download-proxy",
-      '"sin saldo, 402"',
-      "El proxy de descargas (Evomi) no tiene saldo: Instagram y Facebook pueden fallar. Recarga en Evomi.",
     );
 
     alarm("ApiErrorsAlarm", {

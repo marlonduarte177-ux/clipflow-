@@ -31,10 +31,9 @@ import { deleteVideoRows, purgeVideoFiles } from "./cleanup.js";
 import { sendError, sendValidationError } from "./http.js";
 import { enqueue, toJobDto, wakeWorkers } from "./jobs.js";
 import { replyIfBlocked, type BillingSettings } from "./billing.js";
-import { fetchLinkDetails, fetchLinkPreview, usableProxy, type LinkDetails } from "./link-preview.js";
+import { fetchLinkDetails, fetchLinkPreview, type LinkDetails } from "./link-preview.js";
 
-/** El proxy residencial (el mismo del procesador) solo si el secreto ya tiene una URL. */
-const defaultLinkDetails = (url: string) => fetchLinkDetails(url, { proxyUrl: usableProxy(process.env.DOWNLOAD_PROXY_URL) });
+const defaultLinkDetails = (url: string) => fetchLinkDetails(url);
 import type { WorkerLauncher } from "./launcher.js";
 import type { JobQueue } from "./queue.js";
 import type { VideoStorage } from "./storage.js";
@@ -331,7 +330,7 @@ export function videoRoutes(deps: VideoRouteDeps) {
         const host = new URL(checked.url).hostname;
         if (preview?.durationSeconds) request.log.info({ host, duration: preview.durationSeconds }, "datos del enlace leídos");
         // Sin duración: el motivo queda en el registro (lo muestra el workflow Diagnóstico).
-        else request.log.warn({ host, proxy: details?.proxy ?? null, reason: details?.errors ?? [] }, "no se pudo leer la duración del enlace");
+        else request.log.warn({ host, reason: details?.errors ?? [] }, "no se pudo leer la duración del enlace");
       } else {
         preview = await (deps.linkPreview ?? fetchLinkPreview)(checked.url);
       }

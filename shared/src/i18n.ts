@@ -31,16 +31,6 @@ const STEPS: Record<string, string> = {
   "la preparación del audio": "audio preparation",
 };
 
-/** Motivos de fallo del proxy de descargas. */
-const PROXY_REASONS: Record<string, string> = {
-  "usuario o contraseña incorrectos, 407": "wrong username or password, 407",
-  "sin saldo, 402": "no balance, 402",
-  "el proveedor no permite este sitio, 403": "the provider does not allow this site, 403",
-  "no se encontró el servidor del proxy": "proxy server not found",
-  "tiempo de espera agotado": "timed out",
-  "no se pudo conectar": "could not connect",
-};
-
 const EXACT: Record<string, string> = {
   // API
   "Datos inválidos.": "Invalid data.",
@@ -196,7 +186,6 @@ const RULES: Rule[] = [
   [/^No pudimos abrir el video original para cortar los clips: (.+)$/s, (m, t) => `We couldn't open the original video to cut the clips: ${t(m[1]!)}`],
   [/^No se pudo bajar un tramo del video \((.+)\)\.$/s, (m, t) => `Part of the video could not be downloaded (${t(m[1]!)}).`],
   [/^No se pudo iniciar la descarga \((.+)\)\.$/s, (m) => `The download could not be started (${m[1]}).`],
-  [/^Nuestro servicio de descarga no respondió \(proxy: (.+)\)\. Lo intentaremos de nuevo\.$/, (m) => `Our download service did not respond (proxy: ${PROXY_REASONS[m[1]!] ?? m[1]}). We'll try again.`],
   [/^S3 respondió (\d+)( sin ETag)?$/, (m) => `S3 responded ${m[1]}${m[2] ? " without ETag" : ""}`],
   [/^El enlace respondió con un error \((\d+)\)\.$/, (m) => `The link returned an error (${m[1]}).`],
   [/^falló (.+?): (.+)$/s, (m, t) => `${STEPS[m[1]!] ?? m[1]} failed: ${t(m[2]!)}`],

@@ -6,4 +6,3 @@ export * from "./storage-keys.js";
 export * from "./features.js";
 export * from "./i18n.js";
 export * from "./billing.js";
-export * from "./proxy.js";
