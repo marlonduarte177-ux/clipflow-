@@ -249,6 +249,30 @@ describe("pagos con Polar", () => {
     expect(res.statusCode).toBe(503);
   });
 
+  it("un token nuevo pegado en Secrets Manager se usa sin desplegar (y se relee si Polar rechaza el viejo)", async () => {
+    let stored = "polar_oat_viejoviejoviejo";
+    const reads: boolean[] = [];
+    const accessToken = { get: async (fresh = false) => (reads.push(fresh), stored) };
+    const auths: (string | null)[] = [];
+    const billingFetch = (async (_url: string | URL, init?: RequestInit) => {
+      const auth = new Headers(init?.headers).get("authorization");
+      auths.push(auth);
+      const ok = auth === "Bearer polar_oat_nuevonuevonuevo";
+      return new Response(JSON.stringify(ok ? { url: "https://sandbox.polar.sh/checkout/co_2" } : { error: "invalid_token" }), { status: ok ? 201 : 401 });
+    }) as typeof globalThis.fetch;
+    ctx = await createTestApp(undefined, { ...settings, POLAR_ACCESS_TOKEN: "relleno-de-aws" }, { billingFetch, billingSecrets: { accessToken } });
+    await me("eva");
+    // El del arranque era el relleno; el de Secrets Manager ya es un token: los pagos se abren.
+    expect(await billing("eva")).toMatchObject({ checkoutReady: true });
+    // Polar rechaza el viejo; mientras tanto se pegó el nuevo: se relee y funciona en el mismo intento.
+    stored = "polar_oat_viejoviejoviejo";
+    const changed = accessToken.get;
+    accessToken.get = async (fresh = false) => (fresh ? "polar_oat_nuevonuevonuevo" : changed(fresh));
+    const res = await checkout("eva", "basic");
+    expect(res.json()).toEqual({ url: "https://sandbox.polar.sh/checkout/co_2" });
+    expect(auths).toEqual(["Bearer polar_oat_viejoviejoviejo", "Bearer polar_oat_nuevonuevonuevo"]);
+  });
+
   it("sin token de Polar los pagos no se abren", async () => {
     ctx = await createTestApp(undefined, { ...settings, POLAR_ACCESS_TOKEN: "relleno-de-aws" });
     await me("dani");

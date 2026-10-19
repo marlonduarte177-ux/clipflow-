@@ -55,6 +55,9 @@ const EnvSchema = z.object({
   POLAR_ACCESS_TOKEN: z.string().optional(),
   /** Clave secreta de los avisos (webhooks) de Polar. En AWS la inyecta ECS desde Secrets Manager. */
   POLAR_WEBHOOK_SECRET: z.string().optional(),
+  /** Nombres de esos dos secretos en Secrets Manager: la API los relee cada minuto (sin desplegar). */
+  POLAR_ACCESS_TOKEN_SECRET_ID: z.string().optional(),
+  POLAR_WEBHOOK_SECRET_ID: z.string().optional(),
 });
 
 export type ApiConfig = z.infer<typeof EnvSchema>;

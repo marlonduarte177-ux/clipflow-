@@ -95,11 +95,12 @@ token y la clave de los avisos de la cuenta real son distintos a los de sandbox.
 ## Si algo falla
 
 - **«Disponible muy pronto» en los planes:** falta el token del paso 5 (o no empieza por `polar_oat_`), o
-  falta algún ID de producto del paso 8. Después de cambiar el token hay que **desplegar otra vez** (la API
-  lo lee al arrancar).
+  falta algún ID de producto del paso 8. Un token o una clave nuevos pegados en Secrets Manager se usan
+  solos en menos de un minuto (no hace falta desplegar). El token necesita los permisos `checkouts:write`
+  y `customer_sessions:write`: sin ellos Polar responde `insufficient_scope` (se ve en el Diagnóstico).
 - **El pago se hizo pero el plan no aparece:** la clave del paso 7 no coincide o el paso 6 tiene otra URL.
   En Polar → Settings → Webhooks → el endpoint se ve si la API respondió 403 (firma) o 503 (falta la clave).
-  Al corregir la clave, despliega y reenvía esos avisos (*Redeliver*). Polar apaga el endpoint si falla
+  Al corregir la clave, reenvía esos avisos (*Redeliver*). Polar apaga el endpoint si falla
   muchas veces seguidas: vuelve a activarlo ahí mismo.
 - **Diagnóstico** (Actions → Diagnóstico) muestra los valores de Polar que recibió la API y los avisos que
   llegaron.

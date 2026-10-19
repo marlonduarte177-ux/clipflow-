@@ -27,6 +27,7 @@ import {
 import type { AuthUser } from "./auth.js";
 import type { ApiConfig } from "./config.js";
 import { sendError } from "./http.js";
+import type { LiveSecret } from "./secrets.js";
 
 const { subscriptions, users } = schema;
 
@@ -306,18 +307,27 @@ export interface BillingRouteDeps {
   webOrigins: string[];
   /** Para los tests: llamadas a Polar. */
   fetch?: typeof fetch;
+  /**
+   * El token y la clave de los avisos leídos de Secrets Manager mientras la API funciona: una clave
+   * nueva se usa en menos de un minuto, sin desplegar. Sin esto (local, tests), los del arranque.
+   */
+  liveSecrets?: { accessToken?: LiveSecret; webhookSecret?: LiveSecret };
 }
 
 const CheckoutBody = z.object({ plan: z.enum(MONTHLY_PLANS) });
 
-export function billingRoutes({ db, auth, settings, webOrigins, fetch: polarFetch = fetch }: BillingRouteDeps) {
+export function billingRoutes({ db, auth, settings, webOrigins, fetch: polarFetch = fetch, liveSecrets = {} }: BillingRouteDeps) {
   const products: Record<MonthlyPlanCode, string | undefined> = {
     basic: settings.POLAR_PRODUCT_BASIC,
     pro: settings.POLAR_PRODUCT_PRO,
     max: settings.POLAR_PRODUCT_MAX,
   };
-  const token = polarAccessToken(settings.POLAR_ACCESS_TOKEN);
-  const checkoutReady = Boolean(token && MONTHLY_PLANS.every((plan) => products[plan]));
+  const productsReady = MONTHLY_PLANS.every((plan) => products[plan]);
+  /** El token actual: el de Secrets Manager (si se puede leer) o el del arranque. */
+  const currentToken = async (fresh = false) =>
+    polarAccessToken((await liveSecrets.accessToken?.get(fresh)) ?? settings.POLAR_ACCESS_TOKEN);
+  const currentWebhookSecret = async (fresh = false) =>
+    (await liveSecrets.webhookSecret?.get(fresh)) ?? settings.POLAR_WEBHOOK_SECRET;
   const api = POLAR_API[settings.POLAR_SERVER];
 
   /** Dirección de la web que hizo la petición (si es una de las nuestras) para volver a ella. */
@@ -329,12 +339,20 @@ export function billingRoutes({ db, auth, settings, webOrigins, fetch: polarFetc
   /** Llama a Polar. Nunca registra el token ni datos del cliente: solo el código y el tipo de error. */
   async function polar<T>(path: string, body: unknown, log: FastifyBaseLogger): Promise<T | null> {
     try {
-      const res = await polarFetch(`${api}${path}`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(15_000),
-      });
+      const send = (token: string | null) =>
+        polarFetch(`${api}${path}`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(15_000),
+        });
+      const token = await currentToken();
+      let res = await send(token);
+      // Token rechazado: quizá se acaba de cambiar en Secrets Manager. Se relee y se prueba una vez más.
+      if (res.status === 401 || res.status === 403) {
+        const fresh = await currentToken(true);
+        if (fresh && fresh !== token) res = await send(fresh);
+      }
       const data = (await res.json().catch(() => null)) as (T & { error?: unknown; type?: unknown }) | null;
       if (!res.ok) {
         log.warn({ path, status: res.status, tipo: data?.error ?? data?.type ?? null }, "Polar rechazó la petición");
@@ -351,6 +369,7 @@ export function billingRoutes({ db, auth, settings, webOrigins, fetch: polarFetc
     app.get("/billing", { preHandler: auth }, async (request): Promise<BillingResponse> => {
       const user = request.user!;
       const sub = await latestSubscription(db, user.id);
+      const token = await currentToken();
       return {
         enabled: settings.BILLING_ENABLED,
         exempt: isBillingExempt(user.email, settings.BILLING_FREE_EMAILS),
@@ -364,7 +383,7 @@ export function billingRoutes({ db, auth, settings, webOrigins, fetch: polarFetc
             }
           : null,
         trialEligible: !sub,
-        checkoutReady,
+        checkoutReady: Boolean(token && productsReady),
         portalAvailable: Boolean(token && sub?.provider === PROVIDER),
       };
     });
@@ -374,7 +393,7 @@ export function billingRoutes({ db, auth, settings, webOrigins, fetch: polarFetc
       const user = request.user!;
       const parsed = CheckoutBody.safeParse(request.body);
       if (!parsed.success) return sendError(reply, 400, "invalid_plan", "Plan inválido.");
-      if (!checkoutReady) return sendError(reply, 503, "billing_not_configured", "Los pagos todavía no están disponibles.");
+      if (!productsReady || !(await currentToken())) return sendError(reply, 503, "billing_not_configured", "Los pagos todavía no están disponibles.");
       const sub = await latestSubscription(db, user.id);
       // Ya tiene un plan: se cambia desde «Gestionar suscripción» (así no paga dos planes a la vez).
       if (sub?.provider === PROVIDER && subscriptionAllowsProcessing(sub)) {
@@ -403,7 +422,7 @@ export function billingRoutes({ db, auth, settings, webOrigins, fetch: polarFetc
     app.post("/billing/portal", { preHandler: auth }, async (request, reply) => {
       const user = request.user!;
       const sub = await latestSubscription(db, user.id);
-      if (!token || sub?.provider !== PROVIDER) return sendError(reply, 404, "no_subscription", "No tienes una suscripción.");
+      if (sub?.provider !== PROVIDER || !(await currentToken())) return sendError(reply, 404, "no_subscription", "No tienes una suscripción.");
       const session = await polar<{ customer_portal_url?: string }>(
         "/v1/customer-sessions/",
         { external_customer_id: user.id, return_url: `${webOrigin(request.headers.origin)}/dashboard/planes` },
@@ -419,7 +438,8 @@ export function billingRoutes({ db, auth, settings, webOrigins, fetch: polarFetc
       hooks.removeContentTypeParser("application/json");
       hooks.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body, done) => done(null, String(body)));
       hooks.post("/billing/polar-webhook", async (request, reply) => {
-        const secret = polarWebhookSecret(settings.POLAR_WEBHOOK_SECRET);
+        let stored = await currentWebhookSecret();
+        let secret = polarWebhookSecret(stored);
         if (!secret) {
           request.log.warn("aviso de Polar sin aplicar: falta la clave de los avisos en Secrets Manager");
           return sendError(reply, 503, "billing_not_configured", "Pagos no configurados.");
@@ -434,9 +454,16 @@ export function billingRoutes({ db, auth, settings, webOrigins, fetch: polarFetc
           timestamp: header("webhook-timestamp"),
           signature: header("webhook-signature"),
         };
-        if (!verifyPolarSignature(raw, signed, secret)) {
+        let valid = verifyPolarSignature(raw, signed, secret);
+        if (!valid && liveSecrets.webhookSecret) {
+          // Quizá la clave se acaba de cambiar en Secrets Manager: se relee y se prueba una vez más.
+          stored = await currentWebhookSecret(true);
+          secret = polarWebhookSecret(stored);
+          valid = Boolean(secret) && verifyPolarSignature(raw, signed, secret!);
+        }
+        if (!valid) {
           // Nunca se registra la clave: solo su forma, para saber si se pegó mal.
-          request.log.warn({ clave: describeStoredSecret(settings.POLAR_WEBHOOK_SECRET) }, "aviso de Polar con firma inválida");
+          request.log.warn({ clave: describeStoredSecret(stored) }, "aviso de Polar con firma inválida");
           return sendError(reply, 403, "invalid_signature", "Firma inválida.");
         }
         let payload: unknown;

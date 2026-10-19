@@ -4,7 +4,7 @@ import type { MeResponse, ProductConfig } from "@clipflow/shared";
 import { getCreditBalance, type Database } from "@clipflow/shared/db";
 import { accountRoutes } from "./account.js";
 import { adminRoutes } from "./admin.js";
-import { BILLING_OFF, billingRoutes, type BillingSettings } from "./billing.js";
+import { BILLING_OFF, billingRoutes, type BillingRouteDeps, type BillingSettings } from "./billing.js";
 import type { ApiConfig } from "./config.js";
 import { requireAuth, type EmailLookup, type TokenVerifier } from "./auth.js";
 import { clipRoutes } from "./clips.js";
@@ -28,6 +28,8 @@ export interface AppDeps {
   billing?: BillingSettings;
   /** Llamadas a Polar (tests: una versión falsa, sin internet). */
   billingFetch?: typeof fetch;
+  /** Token y clave de Polar leídos de Secrets Manager mientras la API funciona. */
+  billingSecrets?: BillingRouteDeps["liveSecrets"];
   /** false en tests para no llenar la salida de logs. */
   logger?: boolean;
   /** Datos de enlaces antes de importarlos (tests: una versión falsa, sin internet). */
@@ -35,7 +37,7 @@ export interface AppDeps {
   linkDetails?: VideoRouteDeps["linkDetails"];
 }
 
-export async function buildApp({ config, verifyToken, lookupEmail, db, storage, queue, launcher, product, billing = BILLING_OFF, billingFetch, logger = true, linkPreview, linkDetails }: AppDeps): Promise<FastifyInstance> {
+export async function buildApp({ config, verifyToken, lookupEmail, db, storage, queue, launcher, product, billing = BILLING_OFF, billingFetch, billingSecrets, logger = true, linkPreview, linkDetails }: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
     logger: logger
       ? {
@@ -102,7 +104,7 @@ export async function buildApp({ config, verifyToken, lookupEmail, db, storage, 
     return { userId: request.user!.id, email: request.user!.email, creditMinutes };
   });
   await app.register(accountRoutes({ db, auth, storage }));
-  await app.register(billingRoutes({ db, auth, settings: billing, webOrigins: config.CORS_ALLOWED_ORIGINS, fetch: billingFetch }));
+  await app.register(billingRoutes({ db, auth, settings: billing, webOrigins: config.CORS_ALLOWED_ORIGINS, fetch: billingFetch, liveSecrets: billingSecrets }));
   // Prueba lado a lado de la versión actual y la nueva del análisis (solo el dueño: correos exentos).
   await app.register(adminRoutes({ db, auth, storage, queue, launcher, product, adminEmails: billing.BILLING_FREE_EMAILS }));
 
