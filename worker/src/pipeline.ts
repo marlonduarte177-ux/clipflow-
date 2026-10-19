@@ -13,6 +13,7 @@ import {
   isBillingExempt,
   minutesForSeconds,
   NO_MINUTES_CODE,
+  notEnoughMinutesMessage,
   reactionSignalFromSounds,
   transcriptCacheKey,
   segmentsForRange,
@@ -979,7 +980,7 @@ async function chargeMinutes(deps: PipelineDeps, job: Job, videoId: string, dura
     if (!(err instanceof InsufficientCreditsError)) throw err;
     throw new JobError(
       NO_MINUTES_CODE,
-      `Este video dura ${minutes} min y te quedan ${err.balance} min de tu plan. Se recargan con la próxima renovación.`,
+      notEnoughMinutesMessage(minutes, err.balance),
       false,
     );
   }

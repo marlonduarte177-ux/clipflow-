@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
@@ -7,6 +8,8 @@ import {
   translateMessage,
   DEFAULT_PRODUCT_CONFIG,
   FEATURES,
+  minutesForSeconds,
+  RANGE_MIN_SECONDS,
   RANGE_PICKER_MIN_VIDEO_SECONDS,
   resolveVideoMimeType,
   type BillingResponse,
@@ -265,8 +268,20 @@ export function UploadView() {
   const totalSeconds = isLink ? (preview?.durationSeconds ?? null) : videoSeconds;
   const thumbnail = isLink ? (preview?.thumbnailUrl ?? null) : poster;
   const identified = isLink ? preview !== null : file !== null;
-  const canPickRange = totalSeconds !== null && totalSeconds >= RANGE_PICKER_MIN_VIDEO_SECONDS && !confirmed;
   const availableMinutes = billing?.enabled && !billing.exempt ? billing.creditMinutes : null;
+  // Minutos que gasta lo elegido. Si no alcanzan, no se empieza: hay que elegir un tramo más corto.
+  const processSeconds = totalSeconds === null ? null : range ? range.endSeconds - range.startSeconds : totalSeconds;
+  const needMinutes = processSeconds === null ? null : minutesForSeconds(processSeconds);
+  const short = availableMinutes !== null && needMinutes !== null && needMinutes > availableMinutes;
+  // Alcanza para un tramo de al menos 2 minutos (el mínimo).
+  const canFit = availableMinutes !== null && availableMinutes * 60 >= RANGE_MIN_SECONDS;
+  const canPickRange =
+    totalSeconds !== null && !confirmed && (totalSeconds >= RANGE_PICKER_MIN_VIDEO_SECONDS || (short && canFit && totalSeconds > RANGE_MIN_SECONDS));
+  // Al abrir la pantalla sin minutos suficientes, ya viene con un tramo que sí alcanza.
+  const pickerValue =
+    short && !range && canFit && totalSeconds !== null
+      ? { startSeconds: 0, endSeconds: Math.min(Math.floor(totalSeconds), availableMinutes! * 60) }
+      : range;
 
   return (
     <div className="mx-auto max-w-xl space-y-6 pb-24 sm:pb-0">
@@ -412,6 +427,15 @@ export function UploadView() {
         </span>
       </button>
 
+      {short ? (
+        <div className="-mt-3 flex flex-wrap items-center justify-between gap-2 px-1 text-sm text-[#ff9a9a]">
+          <span>{t.upload.notEnough(needMinutes!, availableMinutes!)}</span>
+          <Link href="/dashboard/planes" className="font-semibold text-accent">
+            {t.range.upgrade}
+          </Link>
+        </div>
+      ) : null}
+
       <DurationPicker value={clipSeconds} onChange={setClipSeconds} disabled={confirmed} />
       <SubtitlePicker value={subtitleStyle} onChange={setSubtitleStyle} disabled={confirmed} />
 
@@ -456,11 +480,11 @@ export function UploadView() {
               </button>
             ) : null}
             <button
-              onClick={isLink ? () => onImport("clips") : onCreateClips}
-              disabled={isLink ? !preview || importing : !file || confirmed || phase === "error"}
+              onClick={short ? () => setPicking(true) : isLink ? () => onImport("clips") : onCreateClips}
+              disabled={short ? !canPickRange : isLink ? !preview || importing : !file || confirmed || phase === "error"}
               className="flex h-14 flex-1 items-center justify-center gap-2 rounded-2xl bg-accent text-[17px] font-bold text-on-accent transition hover:brightness-105 disabled:opacity-50"
             >
-              {confirmed ? (phase === "uploading" ? t.upload.startsAfterUpload : t.upload.starting) : t.common.createClips}
+              {short ? t.upload.pickShorter : confirmed ? (phase === "uploading" ? t.upload.startsAfterUpload : t.upload.starting) : t.common.createClips}
             </button>
           </div>
           <p className="text-center text-xs text-muted">{isLink ? t.upload.linkFooter : file && phase === "uploading" ? t.upload.keepAwake : t.upload.canClose}</p>
@@ -471,7 +495,7 @@ export function UploadView() {
       {picking && totalSeconds ? (
         <RangePicker
           durationSeconds={totalSeconds}
-          value={range}
+          value={pickerValue}
           thumbnailUrl={thumbnail}
           availableMinutes={availableMinutes}
           onCancel={() => setPicking(false)}

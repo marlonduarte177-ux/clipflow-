@@ -44,6 +44,11 @@ export const NO_PLAN_CODE = "no_plan";
 export const NO_MINUTES_CODE = "no_minutes";
 export const NO_PLAN_MESSAGE = "Necesitas un plan para crear clips. Elige uno en Planes.";
 export const NO_MINUTES_MESSAGE = "Ya usaste todos los minutos de tu plan. Se recargan con la próxima renovación.";
+/** El video (o el tramo) gasta más minutos de los que quedan: hay que elegir un tramo más corto. */
+export const NOT_ENOUGH_MINUTES_CODE = "not_enough_minutes";
+export function notEnoughMinutesMessage(need: number, left: number): string {
+  return `Este video dura ${need} min y te quedan ${left} min. Elige un tramo más corto en «Duración del video» o mejora tu plan.`;
+}
 
 /** Minutos que gasta un video (se redondea hacia arriba; mínimo 1). */
 export function minutesForSeconds(seconds: number): number {

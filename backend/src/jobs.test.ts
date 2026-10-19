@@ -107,6 +107,21 @@ describe("trabajos de procesamiento", () => {
     expect(retry.json()).toMatchObject({ status: "queued", attempts: 0 });
   });
 
+  it("reintentar con un tramo más corto guarda el tramo (cuando no alcanzaban los minutos)", async () => {
+    const { complete } = await uploadedVideo("alice");
+    const { job } = (await complete()).json();
+    await db()
+      .update(schema.processingJobs)
+      .set({ status: "failed", errorCode: "no_minutes", errorMessage: "Este video dura 82 min y te quedan 60 min." })
+      .where(eq(schema.processingJobs.id, job.id));
+    const listed = await app().inject({ method: "GET", url: `/jobs/${job.id}`, headers: bearer("alice") });
+    expect(listed.json()).toMatchObject({ errorCode: "no_minutes" });
+    const tooShort = await app().inject({ method: "POST", url: `/jobs/${job.id}/retry`, headers: bearer("alice"), payload: { rangeStartSeconds: 0, rangeEndSeconds: 60 } });
+    expect(tooShort.statusCode).toBe(400);
+    const retry = await app().inject({ method: "POST", url: `/jobs/${job.id}/retry`, headers: bearer("alice"), payload: { rangeStartSeconds: 600, rangeEndSeconds: 3600 } });
+    expect(retry.json()).toMatchObject({ status: "queued", errorCode: null, params: { rangeStartSeconds: 600, rangeEndSeconds: 3600 } });
+  });
+
   it("un trabajo fallido muestra el mensaje y se puede reintentar", async () => {
     const { complete } = await uploadedVideo("alice");
     const { job } = (await complete()).json();

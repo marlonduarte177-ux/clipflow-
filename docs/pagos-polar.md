@@ -27,9 +27,15 @@ contratan directamente (se cobran desde el primer día).
   - con cada pago de un plan (fin de la prueba, renovación o cambio de plan) deja el saldo en los minutos
     del plan (200, 400 o 1000). Los minutos **no se acumulan**;
   - si la suscripción termina (cancelada y vencida, o sin pago), el saldo queda en 0.
+  - si cancela **durante la prueba**, la prueba termina en ese momento: el saldo queda en 0 y no vuelve
+    aunque la reactive (los minutos del Básico llegan con el primer cobro). Así nadie usa los 60 min
+    gratis y cancela antes de pagar. Puede contratar un plan pagado cuando quiera.
   Los avisos repetidos no cargan minutos dos veces y los avisos viejos no pisan el estado nuevo.
 - **Sin plan no se procesa:** la API responde «Necesitas un plan…» al subir, importar, crear clips o
   reintentar. La web muestra el enlace «Ver planes».
+- **Si los minutos no alcanzan, no empieza:** la web obliga a elegir un tramo más corto en «Duración del
+  video» (ya viene marcado uno que alcanza) y la API lo vuelve a revisar antes de subir, importar,
+  procesar o reintentar. Un video que falló por eso se reintenta eligiendo un tramo desde su página.
 - **El procesador descuenta los minutos** del video (redondeado hacia arriba) apenas lo mide; si el
   procesamiento **falla o se cancela, los devuelve**.
 - **Eliminar la cuenta** con un plan (o una prueba) que se sigue renovando no se permite: primero hay que

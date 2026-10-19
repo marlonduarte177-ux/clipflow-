@@ -30,7 +30,7 @@ import { createJob, schema, type Database } from "@clipflow/shared/db";
 import { deleteVideoRows, purgeVideoFiles } from "./cleanup.js";
 import { sendError, sendValidationError } from "./http.js";
 import { enqueue, toJobDto, wakeWorkers } from "./jobs.js";
-import { replyIfBlocked, type BillingSettings } from "./billing.js";
+import { replyIfBlocked, replyIfNotEnoughMinutes, secondsToProcess, type BillingSettings } from "./billing.js";
 import { fetchLinkDetails, fetchLinkPreview, type LinkDetails } from "./link-preview.js";
 
 const defaultLinkDetails = (url: string) => fetchLinkDetails(url);
@@ -376,6 +376,11 @@ export function videoRoutes(deps: VideoRouteDeps) {
         );
       }
       if (!downloadOnly && (await replyIfBlocked(db, billing, request.user!, reply))) return reply;
+      if (!downloadOnly) {
+        // Duración leída en la tarjeta del enlace (si se pudo): no se descarga nada que no alcance a cobrarse.
+        const known = (previewCache.get(`deep:${checked.url}`) ?? previewCache.get(checked.url))?.preview?.durationSeconds;
+        if (await replyIfNotEnoughMinutes(db, billing, request.user!, secondsToProcess(options.params as { rangeStartSeconds?: number; rangeEndSeconds?: number }, known), reply)) return reply;
+      }
 
       const videoId = crypto.randomUUID();
       const [row] = await db
@@ -450,6 +455,8 @@ export function videoRoutes(deps: VideoRouteDeps) {
 
       const options = processingParams(product, input.data);
       if (!options.ok) return sendError(reply, 400, "invalid_duration", options.message);
+      const declared = secondsToProcess(options.params, row.declaredDurationSeconds);
+      if (await replyIfNotEnoughMinutes(db, billing, request.user!, declared, reply)) return reply;
 
       const { partCount } = planUploadParts(row.sizeBytes);
       const parts = [...input.data.parts].sort((a, b) => a.partNumber - b.partNumber);
@@ -549,6 +556,8 @@ export function videoRoutes(deps: VideoRouteDeps) {
       const options = processingParams(product, input.data);
       if (!options.ok) return sendError(reply, 400, "invalid_duration", options.message);
       if (await replyIfBlocked(db, billing, request.user!, reply)) return reply;
+      const seconds = secondsToProcess(options.params, row.durationSeconds ?? row.declaredDurationSeconds);
+      if (await replyIfNotEnoughMinutes(db, billing, request.user!, seconds, reply)) return reply;
       const { job, created } = await createJob(db, {
         userId,
         videoId: row.id,

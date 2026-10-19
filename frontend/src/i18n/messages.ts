@@ -213,6 +213,8 @@ const es = {
     readingDuration: "Leyendo duración…",
     changeVideo: "Cambiar video",
     rangeCharge: (minutes: number) => `Se descuentan ${minutes} min de tu plan`,
+    notEnough: (need: number, left: number) => `Este video gasta ${need} min y te quedan ${left} min. Elige un tramo más corto.`,
+    pickShorter: "Elegir un tramo más corto",
   },
   range: {
     title: "Duración del video",
@@ -634,6 +636,8 @@ const en: Messages = {
     readingDuration: "Reading length…",
     changeVideo: "Change video",
     rangeCharge: (minutes: number) => `${minutes} min will be used from your plan`,
+    notEnough: (need: number, left: number) => `This video uses ${need} min and you have ${left} min left. Choose a shorter part.`,
+    pickShorter: "Choose a shorter part",
     canClose: "You can close the page once processing starts.",
   },
   range: {
