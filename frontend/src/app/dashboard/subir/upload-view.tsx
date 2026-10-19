@@ -27,6 +27,7 @@ import { Alert } from "@/components/ui";
 import { errorMessage } from "@/i18n/locale";
 import { useLocale, useT } from "@/i18n/provider";
 import { apiConfigured, apiFetch, formatBytes, formatDuration } from "@/lib/api";
+import { useIsAdmin } from "@/lib/admin";
 import { readVideoDuration, readVideoPoster, uploadVideo, type UploadProgress } from "@/lib/uploader";
 
 // Límites mostrados al usuario; la API los vuelve a comprobar siempre.
@@ -69,6 +70,8 @@ export function UploadView() {
   const [importing, setImporting] = useState(false);
   // Tramo elegido en «Duración del video» (null: el video completo).
   const [range, setRange] = useState<VideoRange | null>(null);
+  // «Guardar» (bajar el video sin clips): solo para los administradores.
+  const admin = useIsAdmin();
   const [picking, setPicking] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
@@ -467,7 +470,7 @@ export function UploadView() {
         <div className="mx-auto max-w-xl space-y-2">
           <div className="flex gap-2">
             {/* Otra acción con el mismo enlace: bajar el video tal cual, sin clips (si está activada). */}
-            {isLink && FEATURES.downloadOnly ? (
+            {isLink && FEATURES.downloadOnly && admin ? (
               <button
                 type="button"
                 onClick={() => onImport("download")}

@@ -3,6 +3,7 @@ import type { FastifyBaseLogger, FastifyInstance, FastifyReply, preHandlerHookHa
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
+  FEATURES,
   isBillingExempt,
   NO_MINUTES_CODE,
   NO_MINUTES_MESSAGE,
@@ -121,6 +122,11 @@ export async function replyIfBlocked(
   if (!block) return false;
   await sendError(reply, 402, block.code, block.message);
   return true;
+}
+
+/** «Guardar» (bajar un video de otra plataforma tal cual): solo para los correos de administrador. */
+export function canSaveVideos(settings: BillingSettings, user: Pick<AuthUser, "email">): boolean {
+  return FEATURES.downloadOnly && isBillingExempt(user.email, settings.BILLING_FREE_EMAILS);
 }
 
 /**

@@ -6,7 +6,8 @@ import { bearer, closeTestApp, createTestApp, type TestContext } from "./test-he
 
 let ctx: TestContext | undefined;
 beforeEach(async () => {
-  ctx = await createTestApp();
+  // «admin@example.com» es correo de administrador: solo él puede usar «Guardar».
+  ctx = await createTestApp(undefined, { BILLING_ENABLED: false, POLAR_SERVER: "sandbox", BILLING_FREE_EMAILS: "admin@example.com" });
 });
 afterEach(async () => {
   await closeTestApp(ctx);
@@ -114,7 +115,7 @@ describe("tramo elegido en «Duración del video»", () => {
   });
 });
 
-describe.runIf(!FEATURES.downloadOnly)("«Descargar solo el video» desactivado", () => {
+describe("«Guardar» es solo para administradores: el público no puede bajar videos", () => {
   it("rechaza las importaciones de solo descarga sin crear nada", async () => {
     const projectId = await newProject("alice");
     const res = await importVideo("alice", { projectId, url: "https://www.tiktok.com/@ana/video/9", rightsConfirmed: true, downloadOnly: true });
@@ -136,17 +137,17 @@ describe.runIf(!FEATURES.downloadOnly)("«Descargar solo el video» desactivado"
   });
 });
 
-describe.runIf(FEATURES.downloadOnly)("solo descargar el video (sin clips)", () => {
+describe.runIf(FEATURES.downloadOnly)("«Guardar» (solo administradores): bajar el video sin clips", () => {
   it("crea un trabajo de solo descarga; luego se baja el original con su nombre y se pueden crear clips", async () => {
-    const projectId = await newProject("alice");
-    const res = await importVideo("alice", { projectId, url: "https://www.tiktok.com/@ana/video/9", rightsConfirmed: true, downloadOnly: true });
+    const projectId = await newProject("admin");
+    const res = await importVideo("admin", { projectId, url: "https://www.tiktok.com/@ana/video/9", rightsConfirmed: true, downloadOnly: true });
     expect(res.statusCode).toBe(201);
     const { video, job } = res.json();
     expect(job.params).toEqual({ downloadOnly: true });
     expect(ctx!.queue.sent).toEqual([job.id]);
 
     // Mientras se descarga, todavía no hay nada que bajar.
-    const early = await app().inject({ method: "GET", url: `/videos/${video.id}/download`, headers: bearer("alice") });
+    const early = await app().inject({ method: "GET", url: `/videos/${video.id}/download`, headers: bearer("admin") });
     expect(early.statusCode).toBe(409);
 
     // El worker lo dejó listo (con su título como nombre).
@@ -156,7 +157,7 @@ describe.runIf(FEATURES.downloadOnly)("solo descargar el video (sin clips)", () 
       .where(eq(schema.videos.id, video.id));
     await ctx!.database.db.update(schema.processingJobs).set({ status: "completed" }).where(eq(schema.processingJobs.id, job.id));
 
-    const dl = await app().inject({ method: "GET", url: `/videos/${video.id}/download`, headers: bearer("alice") });
+    const dl = await app().inject({ method: "GET", url: `/videos/${video.id}/download`, headers: bearer("admin") });
     expect(dl.statusCode).toBe(200);
     expect(dl.json().url).toContain(`originals/`);
     expect(dl.json().url).toContain("Cancion-de-prueba-hola.mp4");
@@ -167,7 +168,7 @@ describe.runIf(FEATURES.downloadOnly)("solo descargar el video (sin clips)", () 
     const processed = await app().inject({
       method: "POST",
       url: `/videos/${video.id}/process`,
-      headers: bearer("alice"),
+      headers: bearer("admin"),
       payload: { clipDurationSeconds: 30, subtitleStyle: "highlight" },
     });
     expect(processed.statusCode).toBe(201);
@@ -178,25 +179,25 @@ describe.runIf(FEATURES.downloadOnly)("solo descargar el video (sin clips)", () 
 
 describe.runIf(FEATURES.downloadOnly)("streams largos analizados con copia liviana", () => {
   it("no se ofrece la copia liviana para descargar y se explica cómo bajar el video completo", async () => {
-    const projectId = await newProject("alice");
-    const { video } = (await importVideo("alice", { projectId, url: "https://www.twitch.tv/videos/1", rightsConfirmed: true })).json();
+    const projectId = await newProject("admin");
+    const { video } = (await importVideo("admin", { projectId, url: "https://www.twitch.tv/videos/1", rightsConfirmed: true })).json();
     await ctx!.database.db
       .update(schema.videos)
       .set({ status: "ready", sizeBytes: 1234, probe: { clipflowAnalysisCopy: true } })
       .where(eq(schema.videos.id, video.id));
-    const res = await app().inject({ method: "GET", url: `/videos/${video.id}/download`, headers: bearer("alice") });
+    const res = await app().inject({ method: "GET", url: `/videos/${video.id}/download`, headers: bearer("admin") });
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toMatchObject({ code: "analysis_copy", message: expect.stringContaining("Descargar solo el video") });
   });
 
   it("si el original ya se borró después de crear los clips, lo dice (en vez de un enlace roto)", async () => {
-    const projectId = await newProject("alice");
-    const { video } = (await importVideo("alice", { projectId, url: "https://www.tiktok.com/@ana/video/9", rightsConfirmed: true })).json();
+    const projectId = await newProject("admin");
+    const { video } = (await importVideo("admin", { projectId, url: "https://www.tiktok.com/@ana/video/9", rightsConfirmed: true })).json();
     await ctx!.database.db
       .update(schema.videos)
       .set({ status: "ready", sizeBytes: 1234, probe: { clipflowOriginalDeleted: true } })
       .where(eq(schema.videos.id, video.id));
-    const res = await app().inject({ method: "GET", url: `/videos/${video.id}/download`, headers: bearer("alice") });
+    const res = await app().inject({ method: "GET", url: `/videos/${video.id}/download`, headers: bearer("admin") });
     expect(res.statusCode).toBe(410);
     expect(res.json().error).toMatchObject({ code: "original_deleted", message: expect.stringContaining("Tus clips siguen disponibles") });
   });
