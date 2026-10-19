@@ -6,7 +6,8 @@ export const FEATURES = {
   /**
    * «Descargar solo el video» (bajar un video de otra plataforma tal cual, sin clips).
    * Desactivado el 03/10/2026 para cumplir con la pasarela de pago (Paddle); reactivado el 12/10/2026
-   * como «Guardar» (proyecto en pausa, solo para el dueño). Con `false`:
+   * como «Guardar». Desde el 19/10/2026 solo lo ven y usan los correos de administrador
+   * (BILLING_FREE_EMAILS); para el público no existe. Con `false`, nadie:
    * - la API rechaza las importaciones `downloadOnly` y no entrega el original de un video
    *   importado por enlace;
    * - la web no muestra el botón ni los botones de descarga.

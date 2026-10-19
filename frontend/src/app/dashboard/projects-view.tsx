@@ -8,6 +8,7 @@ import { isActive, JobProgress } from "@/components/job-progress";
 import { Alert } from "@/components/ui";
 import { errorMessage } from "@/i18n/locale";
 import { useLocale, useT } from "@/i18n/provider";
+import { useIsAdmin } from "@/lib/admin";
 import { apiConfigured, apiFetch, formatDuration } from "@/lib/api";
 
 async function fetchAll() {
@@ -25,6 +26,7 @@ async function fetchAll() {
 /** Inicio: tus videos, con su estado, y acceso a sus clips. */
 export function ProjectsView() {
   const t = useT();
+  const admin = useIsAdmin();
   const [projects, setProjects] = useState<ProjectDto[] | null>(null);
   const [videos, setVideos] = useState<VideoDto[]>([]);
   const [jobs, setJobs] = useState<Record<string, JobDto>>({});
@@ -197,7 +199,7 @@ export function ProjectsView() {
               </span>
               <span className="flex min-w-0 flex-1 flex-col justify-center gap-2">
                 <span className="truncate text-[15px] font-semibold">{video.originalFilename}</span>
-                <VideoState video={video} job={job} />
+                <VideoState video={video} job={job} admin={admin} />
               </span>
             </>
           );
@@ -229,7 +231,7 @@ export function ProjectsView() {
   );
 }
 
-function VideoState({ video, job }: { video: VideoDto; job: JobDto | undefined }) {
+function VideoState({ video, job, admin }: { video: VideoDto; job: JobDto | undefined; admin: boolean }) {
   const t = useT();
   const { locale } = useLocale();
   if (video.status === "pending_upload") return <span className="text-xs text-yellow-200">{t.projects.pending}</span>;
@@ -238,7 +240,7 @@ function VideoState({ video, job }: { video: VideoDto; job: JobDto | undefined }
   if (job?.status === "completed" && job.result?.downloadOnly) {
     return (
       <span className="flex items-center gap-2">
-        <span className="whitespace-nowrap rounded-full border border-accent/60 px-2.5 py-0.5 text-xs font-bold text-accent">{FEATURES.downloadOnly ? t.projects.readyDownload : t.projects.readyClips}</span>
+        <span className="whitespace-nowrap rounded-full border border-accent/60 px-2.5 py-0.5 text-xs font-bold text-accent">{FEATURES.downloadOnly && admin ? t.projects.readyDownload : t.projects.readyClips}</span>
         <span className="text-xs text-muted">{formatDuration(video.durationSeconds)}</span>
       </span>
     );

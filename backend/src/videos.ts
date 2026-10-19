@@ -24,13 +24,12 @@ import {
   type VideoDto,
   type VideoListResponse,
   DOWNLOAD_DISABLED_MESSAGE,
-  FEATURES,
 } from "@clipflow/shared";
 import { createJob, schema, type Database } from "@clipflow/shared/db";
 import { deleteVideoRows, purgeVideoFiles } from "./cleanup.js";
 import { sendError, sendValidationError } from "./http.js";
 import { enqueue, toJobDto, wakeWorkers } from "./jobs.js";
-import { replyIfBlocked, replyIfNotEnoughMinutes, secondsToProcess, type BillingSettings } from "./billing.js";
+import { canSaveVideos, replyIfBlocked, replyIfNotEnoughMinutes, secondsToProcess, type BillingSettings } from "./billing.js";
 import { fetchLinkDetails, fetchLinkPreview, type LinkDetails } from "./link-preview.js";
 
 const defaultLinkDetails = (url: string) => fetchLinkDetails(url);
@@ -346,7 +345,8 @@ export function videoRoutes(deps: VideoRouteDeps) {
       if (!checked.ok) return sendError(reply, 400, "invalid_url", checked.message);
       // "Solo descargar": sin opciones de clips. Si después quiere clips, usa "Crear clips" en el video.
       const downloadOnly = input.data.downloadOnly === true;
-      if (downloadOnly && !FEATURES.downloadOnly) return sendError(reply, 403, "download_disabled", DOWNLOAD_DISABLED_MESSAGE);
+      // «Guardar» es solo para los administradores.
+      if (downloadOnly && !canSaveVideos(billing, request.user!)) return sendError(reply, 403, "download_disabled", DOWNLOAD_DISABLED_MESSAGE);
       const options = downloadOnly ? ({ ok: true, params: { downloadOnly: true } } as const) : processingParams(product, input.data);
       if (!options.ok) return sendError(reply, 400, "invalid_duration", options.message);
       const userId = request.user!.id;
@@ -524,7 +524,7 @@ export function videoRoutes(deps: VideoRouteDeps) {
       }
       // Un video importado por enlace no se entrega tal cual mientras «Descargar solo el video» esté
       // desactivado (sí sus clips). Un archivo que subió el propio usuario, sí.
-      if (row.sourceUrl && !FEATURES.downloadOnly) return sendError(reply, 403, "download_disabled", DOWNLOAD_DISABLED_MESSAGE);
+      if (row.sourceUrl && !canSaveVideos(billing, request.user!)) return sendError(reply, 403, "download_disabled", DOWNLOAD_DISABLED_MESSAGE);
       // Video bajado de un enlace para hacer clips: el original se borró al terminarlos.
       if ((row.probe as { clipflowOriginalDeleted?: boolean } | null)?.clipflowOriginalDeleted) {
         return sendError(reply, 410, "original_deleted", "El video original se borró después de crear los clips. Tus clips siguen disponibles.");

@@ -318,7 +318,7 @@ export function VideoView({ videoId }: { videoId: string }) {
       {downloadReady ? (
         <div className="mx-auto max-w-xl space-y-7">
           {/* Con «Descargar solo el video» desactivado, de los videos ya bajados solo se pueden crear clips. */}
-          {FEATURES.downloadOnly ? (
+          {FEATURES.downloadOnly && admin ? (
           <div className="space-y-4 rounded-[22px] border border-line bg-surface p-5">
             <div className="flex items-center gap-3">
               <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-accent text-on-accent">

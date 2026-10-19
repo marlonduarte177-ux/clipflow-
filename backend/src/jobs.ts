@@ -1,9 +1,9 @@
 import type { FastifyInstance, FastifyReply, preHandlerHookHandler } from "fastify";
 import { and, count, desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { checkRange, NO_MINUTES_CODE, type JobDto, type JobListResponse } from "@clipflow/shared";
+import { checkRange, DOWNLOAD_DISABLED_MESSAGE, NO_MINUTES_CODE, type JobDto, type JobListResponse } from "@clipflow/shared";
 import { requestCancel, resetJobForRetry, schema, type Database, type Job } from "@clipflow/shared/db";
-import { replyIfBlocked, replyIfNotEnoughMinutes, secondsToProcess, type BillingSettings } from "./billing.js";
+import { canSaveVideos, replyIfBlocked, replyIfNotEnoughMinutes, secondsToProcess, type BillingSettings } from "./billing.js";
 import { sendError } from "./http.js";
 import type { WorkerLauncher } from "./launcher.js";
 import type { JobQueue } from "./queue.js";
@@ -131,6 +131,7 @@ export function jobRoutes(deps: {
       if (!existing) return notFound(reply);
       const downloadOnly = (existing.params as { downloadOnly?: boolean } | null)?.downloadOnly === true;
       if (!downloadOnly && (await replyIfBlocked(db, billing, request.user!, reply))) return reply;
+      if (downloadOnly && !canSaveVideos(billing, request.user!)) return sendError(reply, 403, "download_disabled", DOWNLOAD_DISABLED_MESSAGE);
       // Reintentar con un tramo más corto (p. ej. cuando no alcanzaban los minutos).
       const body = RetryBody.safeParse(request.body ?? {});
       if (!body.success) return sendError(reply, 400, "invalid_range", "Tramo inválido.");
