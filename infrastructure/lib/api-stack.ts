@@ -143,6 +143,9 @@ export class ApiStack extends Stack {
         POLAR_PRODUCT_BASIC: billing.polarProductBasic ?? "",
         POLAR_PRODUCT_PRO: billing.polarProductPro ?? "",
         POLAR_PRODUCT_MAX: billing.polarProductMax ?? "",
+        // La API relee estos secretos cada minuto: una clave nueva funciona sin desplegar.
+        POLAR_ACCESS_TOKEN_SECRET_ID: `${prefix}/polar-access-token`,
+        POLAR_WEBHOOK_SECRET_ID: `${prefix}/polar-webhook-secret`,
       },
       // Usuario y contraseña de la BD: los inyecta ECS desde Secrets Manager.
       secrets: {
@@ -193,6 +196,9 @@ export class ApiStack extends Stack {
       }),
     );
     props.queue.grantSendMessages(taskDefinition.taskRole);
+    // Leer (solo leer) el token y la clave de Polar mientras funciona: así una clave nueva se usa sin desplegar.
+    polarAccessToken.grantRead(taskDefinition.taskRole);
+    polarWebhookSecret.grantRead(taskDefinition.taskRole);
 
     // Encender el procesador de video al instante: solo ESTA definición de tarea, en ESTE cluster.
     taskDefinition.taskRole.addToPrincipalPolicy(

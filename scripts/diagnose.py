@@ -109,7 +109,7 @@ def billing() -> None:
         out(f"- `{k}`: {'conectado a Secrets Manager' if k in secrets else 'no conectado'}")
         meta, err = aws("secretsmanager", "describe-secret", "--secret-id", f"{PREFIX}/{name}")
         if not err and meta:
-            out(f"  - cambiado por última vez: {meta.get('LastChangedDate', '?')} (la API lo lee al arrancar)")
+            out(f"  - cambiado por última vez: {meta.get('LastChangedDate', '?')} (la API lo relee cada minuto)")
 
 
 def stopped_tasks() -> None:

@@ -168,7 +168,20 @@ describe("API", () => {
     const container = (taskDef as { Properties: { ContainerDefinitions: Record<string, unknown>[] } }).Properties.ContainerDefinitions[0]!;
     expect((container.Secrets as { Name: string }[]).map((e) => e.Name)).toEqual(expect.arrayContaining(["POLAR_ACCESS_TOKEN", "POLAR_WEBHOOK_SECRET"]));
     const env = Object.fromEntries((container.Environment as { Name: string; Value: string }[]).map((e) => [e.Name, e.Value]));
-    expect(env).toMatchObject({ BILLING_ENABLED: "false", POLAR_SERVER: "sandbox" });
+    expect(env).toMatchObject({
+      BILLING_ENABLED: "false",
+      POLAR_SERVER: "sandbox",
+      POLAR_ACCESS_TOKEN_SECRET_ID: "clipflow-staging/polar-access-token",
+      POLAR_WEBHOOK_SECRET_ID: "clipflow-staging/polar-webhook-secret",
+    });
+    // La API puede releerlos (solo leer) sin desplegar.
+    t.api.hasResourceProperties("AWS::IAM::Policy", {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({ Action: Match.arrayWith(["secretsmanager:GetSecretValue"]), Resource: { Ref: Match.stringLikeRegexp("PolarAccessToken") } }),
+        ]),
+      },
+    });
     expect(JSON.stringify(t.api.toJSON())).not.toMatch(/paddle|PADDLE/);
   });
 

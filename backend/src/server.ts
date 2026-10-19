@@ -5,6 +5,7 @@ import { createCognitoEmailLookup, createCognitoVerifier } from "./auth.js";
 import { buildApp } from "./app.js";
 import { createEcsLauncher, noopLauncher } from "./launcher.js";
 import { createSqsQueue } from "./queue.js";
+import { createLiveSecret } from "./secrets.js";
 import { createS3Storage } from "./storage.js";
 
 const config = loadApiConfig();
@@ -37,6 +38,10 @@ const app = await buildApp({
   launcher,
   product,
   billing: config,
+  billingSecrets: {
+    accessToken: config.POLAR_ACCESS_TOKEN_SECRET_ID ? createLiveSecret(config.POLAR_ACCESS_TOKEN_SECRET_ID, config.AWS_REGION) : undefined,
+    webhookSecret: config.POLAR_WEBHOOK_SECRET_ID ? createLiveSecret(config.POLAR_WEBHOOK_SECRET_ID, config.AWS_REGION) : undefined,
+  },
   verifyToken: createCognitoVerifier(config.COGNITO_USER_POOL_ID, config.COGNITO_CLIENT_ID),
   lookupEmail: createCognitoEmailLookup(config.AWS_REGION),
 });
