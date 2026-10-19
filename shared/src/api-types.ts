@@ -97,6 +97,8 @@ export interface JobDto {
   maxAttempts: number;
   /** Mensaje apto para el usuario si falló. */
   errorMessage: string | null;
+  /** Código del error (p. ej. "no_minutes": no alcanzaban los minutos y hay que elegir un tramo). */
+  errorCode: string | null;
   params: JobParams;
   result: JobResult | null;
   queuedAt: string;

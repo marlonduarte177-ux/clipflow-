@@ -166,6 +166,7 @@ const EXACT: Record<string, string> = {
     "Cancel your plan before deleting your account (Account → Plan → Manage subscription).",
   "Firma inválida.": "Invalid signature.",
   "Plan inválido.": "Invalid plan.",
+  "Tramo inválido.": "Invalid part.",
   "Los pagos todavía no están disponibles.": "Payments are not available yet.",
   "Ya tienes un plan. Cámbialo en Gestionar suscripción.": "You already have a plan. Change it in Manage subscription.",
   "No se pudo abrir el pago. Intenta de nuevo.": "Couldn't open checkout. Try again.",
@@ -199,6 +200,10 @@ const RULES: Rule[] = [
   [/^OpenAI rechazó la solicitud \((.+)\)$/, (m) => `OpenAI rejected the request (${m[1]})`],
   [/^OpenAI tuvo un error temporal \((.+)\)$/, (m) => `OpenAI had a temporary error (${m[1]})`],
   [/^OpenAI respondió (.+)$/, (m) => `OpenAI responded ${m[1]}`],
+  [
+    /^Este video dura (\d+) min y te quedan (\d+) min\. Elige un tramo más corto en «Duración del video» o mejora tu plan\.$/,
+    (m) => `This video is ${m[1]} min long and you have ${m[2]} min left. Choose a shorter part in “Video length” or upgrade your plan.`,
+  ],
   [
     /^Este video dura (\d+) min y te quedan (\d+) min de tu plan\. Se recargan con la próxima renovación\.$/,
     (m) => `This video is ${m[1]} min long and you have ${m[2]} min left in your plan. They refill at your next renewal.`,

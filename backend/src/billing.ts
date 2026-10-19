@@ -8,6 +8,9 @@ import {
   NO_MINUTES_MESSAGE,
   NO_PLAN_CODE,
   NO_PLAN_MESSAGE,
+  NOT_ENOUGH_MINUTES_CODE,
+  notEnoughMinutesMessage,
+  minutesForSeconds,
   MONTHLY_PLANS,
   PLANS,
   type BillingResponse,
@@ -118,6 +121,35 @@ export async function replyIfBlocked(
   if (!block) return false;
   await sendError(reply, 402, block.code, block.message);
   return true;
+}
+
+/**
+ * ¿Le alcanzan los minutos para este video (o el tramo elegido)? Si no, responde 402 antes de empezar:
+ * así no se descarga ni se procesa nada que después no se podría cobrar. `seconds` null = duración
+ * todavía desconocida (el procesador la mide y vuelve a revisar). Devuelve true si respondió.
+ */
+export async function replyIfNotEnoughMinutes(
+  db: Database,
+  settings: BillingSettings,
+  user: Pick<AuthUser, "id" | "email">,
+  seconds: number | null | undefined,
+  reply: FastifyReply,
+): Promise<boolean> {
+  if (!seconds || !settings.BILLING_ENABLED || isBillingExempt(user.email, settings.BILLING_FREE_EMAILS)) return false;
+  const need = minutesForSeconds(seconds);
+  const left = await getCreditBalance(db, user.id);
+  if (need <= left) return false;
+  await sendError(reply, 402, NOT_ENOUGH_MINUTES_CODE, notEnoughMinutesMessage(need, left));
+  return true;
+}
+
+/** Segundos que se van a procesar: el tramo elegido o el video completo. */
+export function secondsToProcess(params: { rangeStartSeconds?: number; rangeEndSeconds?: number }, videoSeconds: number | null | undefined) {
+  if (params.rangeStartSeconds !== undefined && params.rangeEndSeconds !== undefined) {
+    const end = videoSeconds ? Math.min(params.rangeEndSeconds, videoSeconds) : params.rangeEndSeconds;
+    return Math.max(0, end - params.rangeStartSeconds);
+  }
+  return videoSeconds ?? null;
 }
 
 /**
@@ -244,10 +276,13 @@ export async function applyPolarEvent(db: Database, settings: BillingSettings, r
     }
     const userId = await resolveUser(db, [sub.customer?.external_id, userIdIn(sub.metadata)], sub.id);
     if (!userId) throw new RetryLater("suscripción sin usuario");
-    const status = STATUS[sub.status] ?? "expired";
+    // Canceló durante la prueba: la prueba termina ya (sin minutos). Si no, alguien podría empezarla,
+    // cancelarla en seguida y usar los 60 min gratis sin llegar nunca a pagar.
+    const trialCanceled = sub.status === "trialing" && Boolean(sub.cancel_at_period_end);
+    const status = trialCanceled ? "canceled" : (STATUS[sub.status] ?? "expired");
     const values = {
       userId,
-      planCode: (status === "trialing" ? "trial" : plan) as PlanCode,
+      planCode: (sub.status === "trialing" ? "trial" : plan) as PlanCode,
       status,
       provider: PROVIDER,
       providerSubscriptionId: sub.id,
@@ -273,11 +308,20 @@ export async function applyPolarEvent(db: Database, settings: BillingSettings, r
         set: values,
         setWhere: sql`${subscriptions.providerEventAt} is null or ${subscriptions.providerEventAt} <= ${occurredAt}`,
       });
-    if (status === "trialing") {
-      // La prueba no tiene cobro: sus minutos se cargan con la suscripción (una sola vez).
+    // Los minutos solo los cambia la suscripción más reciente (si ya contrató otra, la vieja no se los quita).
+    const latest = await latestSubscription(db, userId);
+    const isLatest = !latest || (latest.provider === PROVIDER && latest.providerSubscriptionId === sub.id);
+    if (isLatest && status === "trialing") {
+      // La prueba no tiene cobro: sus minutos se cargan con la suscripción (una sola vez; si la cancela y
+      // la reactiva, no vuelven: los del Básico llegan con el primer cobro).
       await setPlanMinutes(db, { userId, minutes: PLANS.trial.minutes, eventId: `polar:${sub.id}:trial`, note: "prueba de 7 días" });
-    } else if (status === "canceled" || status === "expired") {
-      await setPlanMinutes(db, { userId, minutes: 0, eventId: `polar:${sub.id}:${status}`, note: "plan terminado" });
+    } else if (isLatest && (status === "canceled" || status === "expired")) {
+      await setPlanMinutes(db, {
+        userId,
+        minutes: 0,
+        eventId: `polar:${sub.id}:${trialCanceled ? "trial-canceled" : status}`,
+        note: trialCanceled ? "prueba cancelada" : "plan terminado",
+      });
     }
     log.info({ event: event.type, status }, "suscripción actualizada");
     return;

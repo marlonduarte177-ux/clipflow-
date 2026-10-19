@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FEATURES, translateMessage, type ClipDto, type ClipListResponse, type JobDto, type JobListResponse, type SubtitleStyle, type VideoDownloadResponse, type VideoDto } from "@clipflow/shared";
+import { FEATURES, NO_MINUTES_CODE, translateMessage, type BillingResponse, type ClipDto, type ClipListResponse, type JobDto, type JobListResponse, type SubtitleStyle, type VideoDownloadResponse, type VideoDto } from "@clipflow/shared";
 import { ClipViewer, FullTranscript, scoreOf } from "@/components/clip-viewer";
 import { DEFAULT_DURATION, DurationPicker, SubtitlePicker } from "@/components/clip-options";
 import { BackIcon, CheckIcon, DownloadIcon, RetryIcon, ShareIcon, TrashIcon } from "@/components/icons";
 import { isActive, JobProgressPanel } from "@/components/job-progress";
+import { RangePicker, type VideoRange } from "@/components/range-picker";
 import { Alert } from "@/components/ui";
 import { errorMessage } from "@/i18n/locale";
 import { useLocale, useT } from "@/i18n/provider";
@@ -55,6 +56,31 @@ export function VideoView({ videoId }: { videoId: string }) {
   // Herramienta interna: solo el dueño ve «Comparar versión actual y nueva».
   const [admin, setAdmin] = useState(false);
   const [comparing, setComparing] = useState(false);
+  // No alcanzaban los minutos: se elige un tramo más corto y se reintenta con él.
+  const [picking, setPicking] = useState(false);
+  const [billing, setBilling] = useState<BillingResponse | null>(null);
+  const noMinutes = data?.job?.status === "failed" && data.job.errorCode === NO_MINUTES_CODE;
+
+  useEffect(() => {
+    if (!noMinutes) return;
+    apiFetch<BillingResponse>("/billing")
+      .then(setBilling)
+      .catch(() => setBilling(null));
+  }, [noMinutes]);
+
+  async function retryWithRange(range: VideoRange | null) {
+    if (!data?.job) return;
+    setPicking(false);
+    try {
+      const job = await apiFetch<JobDto>(`/jobs/${data.job.id}/retry`, {
+        method: "POST",
+        body: range ? { rangeStartSeconds: range.startSeconds, rangeEndSeconds: range.endSeconds } : {},
+      });
+      setData({ ...data, job });
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
 
   useEffect(() => {
     if (!apiConfigured) return;
@@ -251,11 +277,32 @@ export function VideoView({ videoId }: { videoId: string }) {
             {job.status === "failed" ? (job.params.downloadOnly ? t.video.downloadFailed : t.video.processFailed) : t.video.cancelled}
           </p>
           {job.errorMessage ? <p className="text-sm text-muted">{translateMessage(job.errorMessage, locale)}</p> : null}
-          <button onClick={() => jobAction("retry")} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-accent font-bold text-on-accent">
-            <RetryIcon size={18} />
-            {t.common.retry}
-          </button>
+          {noMinutes && video.durationSeconds ? (
+            <button onClick={() => setPicking(true)} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-accent font-bold text-on-accent">
+              {t.upload.pickShorter}
+            </button>
+          ) : (
+            <button onClick={() => jobAction("retry")} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-accent font-bold text-on-accent">
+              <RetryIcon size={18} />
+              {t.common.retry}
+            </button>
+          )}
         </div>
+      ) : null}
+
+      {picking && video.durationSeconds ? (
+        <RangePicker
+          durationSeconds={video.durationSeconds}
+          value={
+            billing?.enabled && !billing.exempt && billing.creditMinutes * 60 >= 120
+              ? { startSeconds: 0, endSeconds: Math.min(Math.floor(video.durationSeconds), billing.creditMinutes * 60) }
+              : null
+          }
+          thumbnailUrl={video.thumbnailUrl ?? null}
+          availableMinutes={billing?.enabled && !billing.exempt ? billing.creditMinutes : null}
+          onCancel={() => setPicking(false)}
+          onConfirm={retryWithRange}
+        />
       ) : null}
 
       {!job && (video.status === "uploaded" || video.status === "ready") ? (

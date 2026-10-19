@@ -186,10 +186,17 @@ export async function requestCancel(db: DbExecutor, jobId: string, userId: strin
  * Reintento pedido por el usuario: trabajos fallidos, cancelados o terminados sin análisis de IA.
  * Reinicia los intentos.
  */
-export async function resetJobForRetry(db: DbExecutor, jobId: string, userId: string): Promise<Job | undefined> {
+export async function resetJobForRetry(
+  db: DbExecutor,
+  jobId: string,
+  userId: string,
+  /** Opciones nuevas (p. ej. un tramo más corto cuando no alcanzaban los minutos). */
+  params?: Record<string, unknown>,
+): Promise<Job | undefined> {
   const [row] = await db
     .update(processingJobs)
     .set({
+      ...(params ? { params } : {}),
       status: "queued",
       result: null,
       stage: null,

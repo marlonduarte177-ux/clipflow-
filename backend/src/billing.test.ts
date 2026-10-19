@@ -243,6 +243,55 @@ describe("pagos con Polar", () => {
     expect(rows).toHaveLength(1);
   });
 
+  it("si los minutos no alcanzan, no empieza: hay que elegir un tramo más corto", async () => {
+    ctx = await createTestApp(undefined, settings);
+    const { userId } = await me("fran");
+    await webhook("subscription.created", { id: "sub_f", status: "trialing", product_id: "prod-basic", customer: { external_id: userId } });
+    // Video de 82 min con 60 min de prueba: la subida empieza (aún no eligió el tramo)…
+    const created = await app().inject({
+      method: "POST",
+      url: "/videos",
+      headers: bearer("fran"),
+      payload: { projectId: await newProject("fran"), filename: "v.mp4", mimeType: "video/mp4", sizeBytes: 1000, durationSeconds: 82 * 60 },
+    });
+    expect(created.statusCode).toBe(201);
+    const id = created.json().video.id as string;
+    const complete = (extra: Record<string, unknown>) =>
+      app().inject({ method: "POST", url: `/videos/${id}/complete`, headers: bearer("fran"), payload: { parts: [{ partNumber: 9, etag: '"e"' }], ...extra } });
+    // …pero el video completo no se procesa.
+    const full = await complete({});
+    expect(full.statusCode).toBe(402);
+    expect(full.json().error).toMatchObject({ code: "not_enough_minutes" });
+    expect(full.json().error.message).toContain("82 min");
+    // Con un tramo de 50 min pasa la revisión de minutos (y sigue con la subida).
+    const part = await complete({ rangeStartSeconds: 600, rangeEndSeconds: 3600 });
+    expect(part.json().error.code).toBe("incomplete_upload");
+  });
+
+  it("cancelar durante la prueba la termina ya: sin minutos; puede contratar un plan pagado", async () => {
+    const polar = fakePolar();
+    ctx = await createTestApp(undefined, settings, { billingFetch: polar.fetch });
+    const { userId } = await me("gabi");
+    const sub = { id: "sub_g", status: "trialing", product_id: "prod-basic", customer: { external_id: userId }, cancel_at_period_end: false };
+    await webhook("subscription.created", sub);
+    expect((await billing("gabi")).creditMinutes).toBe(60);
+    await webhook("subscription.canceled", { ...sub, cancel_at_period_end: true });
+    expect(await billing("gabi")).toMatchObject({ creditMinutes: 0, trialEligible: false, subscription: { planCode: "trial", status: "canceled" } });
+    expect((await startUpload("gabi")).json().error.code).toBe("no_plan");
+    // Si la reactiva, los 60 min no vuelven (llegan los del Básico con el primer cobro).
+    await webhook("subscription.uncanceled", sub);
+    expect(await billing("gabi")).toMatchObject({ creditMinutes: 0, subscription: { status: "trialing" } });
+    await webhook("subscription.canceled", { ...sub, cancel_at_period_end: true });
+
+    // Contrata Pro (sin prueba). Cuando la prueba vieja termina, no le quita los minutos del Pro.
+    expect((await checkout("gabi", "pro")).statusCode).toBe(200);
+    expect(polar.calls.at(-1)!.body).toMatchObject({ allow_trial: false });
+    await webhook("subscription.created", { id: "sub_g2", status: "active", product_id: "prod-pro", customer: { external_id: userId } });
+    await webhook("order.paid", { id: "ord_g2", total_amount: 1999, billing_reason: "subscription_create", product_id: "prod-pro", subscription_id: "sub_g2" });
+    await webhook("subscription.revoked", { ...sub, status: "canceled", ended_at: "2026-10-25T00:00:00Z" });
+    expect(await billing("gabi")).toMatchObject({ creditMinutes: 400, subscription: { planCode: "pro", status: "active" } });
+  });
+
   it("un pago de un usuario que no existe se reintenta más tarde (no se pierde)", async () => {
     ctx = await createTestApp(undefined, settings);
     const res = await webhook("order.paid", { id: "ord_x", total_amount: 999, billing_reason: "subscription_cycle", product_id: "prod-pro", subscription_id: "sub_x" });

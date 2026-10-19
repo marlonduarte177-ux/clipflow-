@@ -1,14 +1,19 @@
 import type { FastifyInstance, FastifyReply, preHandlerHookHandler } from "fastify";
 import { and, count, desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import type { JobDto, JobListResponse } from "@clipflow/shared";
+import { checkRange, NO_MINUTES_CODE, type JobDto, type JobListResponse } from "@clipflow/shared";
 import { requestCancel, resetJobForRetry, schema, type Database, type Job } from "@clipflow/shared/db";
-import { replyIfBlocked, type BillingSettings } from "./billing.js";
+import { replyIfBlocked, replyIfNotEnoughMinutes, secondsToProcess, type BillingSettings } from "./billing.js";
 import { sendError } from "./http.js";
 import type { WorkerLauncher } from "./launcher.js";
 import type { JobQueue } from "./queue.js";
 
-const { processingJobs } = schema;
+const { processingJobs, videos } = schema;
+
+const RetryBody = z.object({
+  rangeStartSeconds: z.number().int().min(0).max(24 * 3600).optional(),
+  rangeEndSeconds: z.number().int().min(1).max(24 * 3600).optional(),
+});
 const IdParams = z.object({ id: z.uuid() });
 const ListQuery = z.object({ videoId: z.uuid().optional() });
 
@@ -26,6 +31,7 @@ export function toJobDto(job: Job): JobDto {
     attempts: job.attempts,
     maxAttempts: job.maxAttempts,
     errorMessage: job.errorMessage,
+    errorCode: job.errorCode,
     params: job.params as JobDto["params"],
     result: (job.result as JobDto["result"]) ?? null,
     queuedAt: job.queuedAt.toISOString(),
@@ -125,12 +131,28 @@ export function jobRoutes(deps: {
       if (!existing) return notFound(reply);
       const downloadOnly = (existing.params as { downloadOnly?: boolean } | null)?.downloadOnly === true;
       if (!downloadOnly && (await replyIfBlocked(db, billing, request.user!, reply))) return reply;
+      // Reintentar con un tramo más corto (p. ej. cuando no alcanzaban los minutos).
+      const body = RetryBody.safeParse(request.body ?? {});
+      if (!body.success) return sendError(reply, 400, "invalid_range", "Tramo inválido.");
+      const range = checkRange(body.data.rangeStartSeconds, body.data.rangeEndSeconds);
+      if (!range.ok) return sendError(reply, 400, "invalid_range", range.message);
+      const jobParams = (existing.params ?? {}) as Record<string, unknown> & { rangeStartSeconds?: number; rangeEndSeconds?: number };
+      const newParams = range.range && !downloadOnly ? { ...jobParams, rangeStartSeconds: range.range.startSeconds, rangeEndSeconds: range.range.endSeconds } : undefined;
+      // Falló porque no alcanzaban los minutos: reintentar igual volvería a fallar (no se procesa nada).
+      if (!downloadOnly && (existing.errorCode === NO_MINUTES_CODE || newParams)) {
+        const [video] = await db
+          .select({ durationSeconds: videos.durationSeconds, declared: videos.declaredDurationSeconds })
+          .from(videos)
+          .where(and(eq(videos.id, existing.videoId), eq(videos.userId, userId)));
+        const seconds = secondsToProcess(newParams ?? jobParams, video?.durationSeconds ?? video?.declared);
+        if (await replyIfNotEnoughMinutes(db, billing, request.user!, seconds, reply)) return reply;
+      }
 
       let job: Job | undefined;
       if (existing.status === "queued" && Date.now() - existing.queuedAt.getTime() > STUCK_QUEUED_MS) {
         job = existing; // nunca llegó al worker: se reenvía tal cual
       } else {
-        job = await resetJobForRetry(db, existing.id, userId);
+        job = await resetJobForRetry(db, existing.id, userId, newParams);
       }
       if (!job) return sendError(reply, 409, "not_retryable", "Solo se pueden reintentar trabajos fallidos, cancelados o que terminaron sin análisis de IA.");
       if (!(await enqueue(queue, job, request.log))) {
