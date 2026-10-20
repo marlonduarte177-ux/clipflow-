@@ -316,6 +316,18 @@ describe("cola y worker", () => {
     expect(Object.values(outputs).map((o) => o.Export?.Name)).toContain("worker:ExportsOutputRefDownloadProxy046CB95F71939659");
   });
 
+  it("editor de clips: el worker lee clips, subtítulos y la música, y solo puede listar la carpeta music/", () => {
+    const policies = JSON.stringify(t.worker.findResources("AWS::IAM::Policy"));
+    expect(policies).toContain("/music/*");
+    t.worker.hasResourceProperties("AWS::IAM::Policy", {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({ Action: "s3:ListBucket", Condition: { StringLike: { "s3:prefix": ["music/*", "music/"] } } }),
+        ]),
+      },
+    });
+  });
+
   it("la clave de OpenAI vive en Secrets Manager y llega al worker como secreto", () => {
     t.worker.hasResourceProperties("AWS::SecretsManager::Secret", { Name: "clipflow-staging/openai-api-key" });
     const [taskDef] = Object.values(t.worker.findResources("AWS::ECS::TaskDefinition"));

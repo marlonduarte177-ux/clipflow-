@@ -124,6 +124,11 @@ export async function replyIfBlocked(
   return true;
 }
 
+/** Editor de clips (modo viral y, más adelante, el editor manual): por ahora solo los administradores. */
+export function canEditClips(settings: BillingSettings, user: Pick<AuthUser, "email">): boolean {
+  return isBillingExempt(user.email, settings.BILLING_FREE_EMAILS);
+}
+
 /** «Guardar» (bajar un video de otra plataforma tal cual): solo para los correos de administrador. */
 export function canSaveVideos(settings: BillingSettings, user: Pick<AuthUser, "email">): boolean {
   return FEATURES.downloadOnly && isBillingExempt(user.email, settings.BILLING_FREE_EMAILS);

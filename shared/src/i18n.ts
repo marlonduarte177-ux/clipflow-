@@ -167,6 +167,13 @@ const EXACT: Record<string, string> = {
   "Firma inválida.": "Invalid signature.",
   "Plan inválido.": "Invalid plan.",
   "Tramo inválido.": "Invalid part.",
+  "Estos clips se crearon antes del editor y su video original ya no está guardado. Vuelve a crear los clips del video para editarlos.":
+    "These clips were created before the editor and the original video is no longer stored. Create the video's clips again to edit them.",
+  "Este clip se creó antes del editor y su video original ya no está guardado. Vuelve a crear los clips del video para editarlos.":
+    "This clip was created before the editor and the original video is no longer stored. Create the video's clips again to edit it.",
+  "Ya se están editando clips de este video. Espera a que termine.": "Clips from this video are already being edited. Wait for it to finish.",
+  "No hay clips para editar.": "There are no clips to edit.",
+  "Los clips ya no existen.": "The clips no longer exist.",
   "Los pagos todavía no están disponibles.": "Payments are not available yet.",
   "Ya tienes un plan. Cámbialo en Gestionar suscripción.": "You already have a plan. Change it in Manage subscription.",
   "No se pudo abrir el pago. Intenta de nuevo.": "Couldn't open checkout. Try again.",

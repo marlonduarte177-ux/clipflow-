@@ -17,6 +17,10 @@ const FONT = "Montserrat ExtraBold";
 /** Verde de ClipFlow (#c6f432) en el formato de color de ASS (&HBBGGRR). */
 const LIME = "&H32F4C6&";
 const WHITE = "&HFFFFFF&";
+/** Amarillo del modo viral (#ffd60a) en formato ASS. */
+const YELLOW = "&H0AD6FF&";
+/** Modo viral: el texto en el tercio inferior (por encima de los botones de TikTok y Reels). */
+const KARAOKE_MARGIN_V = 430;
 /** Distancia del texto al borde inferior (px de un video de 1920 de alto). */
 const MARGIN_V = 470;
 
@@ -63,7 +67,7 @@ export function buildAss(
 interface AssEvent {
   start: number;
   end: number;
-  style: "Highlight" | "Classic";
+  style: "Highlight" | "Classic" | "Karaoke";
   text: string;
 }
 
@@ -128,7 +132,41 @@ function groupEnds(groups: TranscriptWord[][], clipDurationSeconds: number): num
   });
 }
 
-function highlightEvents(words: TranscriptWord[], clipDurationSeconds: number): AssEvent[] {
+/**
+ * Subtítulos del modo viral: palabra por palabra, la que suena en amarillo y un poco más grande (un
+ * «pop» corto), letra grande y gruesa con borde negro, centrados en el tercio inferior.
+ */
+export function buildKaraokeAss(words: TranscriptWord[], clipDurationSeconds: number): string | null {
+  const timed = words
+    .map((w) => ({ ...w, text: clean(w.text) }))
+    .filter((w) => w.text && w.endSeconds > w.startSeconds && w.startSeconds < clipDurationSeconds)
+    .sort((a, b) => a.startSeconds - b.startSeconds);
+  const events = highlightEvents(timed, clipDurationSeconds, { color: YELLOW, style: "Karaoke", pop: true });
+  if (events.length === 0) return null;
+  return [
+    "[Script Info]",
+    "ScriptType: v4.00+",
+    "PlayResX: 1080",
+    "PlayResY: 1920",
+    "WrapStyle: 0",
+    "ScaledBorderAndShadow: yes",
+    "",
+    "[V4+ Styles]",
+    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+    `Style: Karaoke,${FONT},96,&H00FFFFFF,&H00FFFFFF,&H00000000,&H78000000,-1,0,0,0,100,100,1,0,1,9,4,2,70,70,${KARAOKE_MARGIN_V},1`,
+    "",
+    "[Events]",
+    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ...events.map((e) => `Dialogue: 0,${assTime(e.start)},${assTime(e.end)},${e.style},,0,0,0,,${e.text}`),
+    "",
+  ].join("\n");
+}
+
+function highlightEvents(
+  words: TranscriptWord[],
+  clipDurationSeconds: number,
+  look: { color: string; style: AssEvent["style"]; pop?: boolean } = { color: LIME, style: "Highlight" },
+): AssEvent[] {
   const groups = group(words, HIGHLIGHT_MAX_WORDS, HIGHLIGHT_MAX_CHARS);
   const ends = groupEnds(groups, clipDurationSeconds);
   const events: AssEvent[] = [];
@@ -138,8 +176,12 @@ function highlightEvents(words: TranscriptWord[], clipDurationSeconds: number): 
       const start = w.startSeconds;
       const end = i === g.length - 1 ? ends[gi]! : g[i + 1]!.startSeconds;
       if (end - start < 0.02) return;
-      const text = upper.map((t, j) => (j === i ? `{\\c${LIME}}${t}{\\c${WHITE}}` : t)).join(" ");
-      events.push({ start, end, style: "Highlight", text });
+      // «Pop»: la palabra que suena empieza un poco más grande y vuelve a su tamaño en 0.1 s.
+      const pop = look.pop ? "\\fscx118\\fscy118\\t(0,100,\\fscx100\\fscy100)" : "";
+      const text = upper
+        .map((t, j) => (j === i ? `{\\c${look.color}${pop}}${t}{\\c${WHITE}${look.pop ? "\\fscx100\\fscy100" : ""}}` : t))
+        .join(" ");
+      events.push({ start, end, style: look.style, text });
     });
   });
   return events;

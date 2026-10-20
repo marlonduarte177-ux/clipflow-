@@ -50,6 +50,13 @@
       "when": 1791437852811,
       "tag": "0006_billing_paddle",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792513702201,
+      "tag": "0007_clip_editor",
+      "breakpoints": true
     }
   ]
 }

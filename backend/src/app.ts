@@ -113,7 +113,7 @@ export async function buildApp({ config, verifyToken, lookupEmail, db, storage, 
     videoRoutes({ db, auth, storage, queue, launcher, product, billing, uploadUrlExpiresSeconds: config.S3_UPLOAD_URL_EXPIRES_SECONDS, linkPreview, linkDetails }),
   );
   await app.register(jobRoutes({ db, auth, queue, launcher, billing }));
-  await app.register(clipRoutes({ db, auth, storage }));
+  await app.register(clipRoutes({ db, auth, storage, billing, queue, launcher }));
 
   return app;
 }

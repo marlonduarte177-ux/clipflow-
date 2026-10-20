@@ -132,9 +132,33 @@ export interface JobParams {
    */
   rangeStartSeconds?: number;
   rangeEndSeconds?: number;
+  /**
+   * Editor de clips (solo administradores por ahora): guardar cada clip también sin subtítulos
+   * dibujados, con sus palabras y sonidos, para poder editarlo después.
+   */
+  editable?: boolean;
+  /** Trabajo de edición ("render_clip"): los clips a editar y cómo. */
+  clipIds?: string[];
+  edit?: ClipEditOptions;
+}
+
+/** Cómo se edita un clip. "viral": subtítulos karaoke, zoom golpe, temblor y flash, música, 60 fps. */
+export interface ClipEditOptions {
+  mode: "viral";
+  /** Música de fondo a volumen bajo (si hay pistas cargadas). */
+  music: boolean;
+}
+
+/** Datos guardados de un clip para editarlo (palabras y sonidos con tiempos relativos al clip). */
+export interface ClipEditData {
+  version: 1;
+  durationSeconds: number;
+  words: { startSeconds: number; endSeconds: number; text: string }[];
+  sounds: { kind: string; startSeconds: number; endSeconds: number; confidence: number }[];
 }
 
 export interface JobResult {
+  /** Clips generados (en un trabajo de edición: clips editados). */
   clipCount: number;
   /** Fue una importación "solo descargar": el video quedó listo para bajarlo, sin clips. */
   downloadOnly?: boolean;
@@ -195,6 +219,11 @@ export interface ClipDto {
   /** Subtítulos del clip (si hubo transcripción). */
   subtitlesVttUrl: string | null;
   subtitlesSrtUrl: string | null;
+  /** Editor de clips: se puede editar (tiene copia sin subtítulos o se puede rehacer del original). */
+  editable?: boolean;
+  /** Última versión editada (URL temporal) y con qué opciones. */
+  editedVideoUrl?: string | null;
+  edit?: (ClipEditOptions & { at: string; jobId: string }) | null;
   createdAt: string;
 }
 
