@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ClipDto } from "@clipflow/shared";
-import { BackIcon, CheckIcon, CloseIcon, DownloadIcon, LinesIcon, NextIcon, RetryIcon, ShareIcon, SubtitlesIcon, TrashIcon } from "./icons";
+import { BackIcon, CheckIcon, CloseIcon, DownloadIcon, LinesIcon, NextIcon, RetryIcon, ShareIcon, SparklesIcon, SubtitlesIcon, TrashIcon } from "./icons";
 import { CopyTextButton, CueList, LanguageBadge, useCues } from "./transcript";
 import { errorMessage } from "@/i18n/locale";
 import { useT } from "@/i18n/provider";
@@ -26,6 +26,7 @@ export function ClipViewer({
   onStatus,
   onShowFullTranscript,
   onError,
+  onEdit,
 }: {
   clips: ClipDto[];
   index: number;
@@ -37,6 +38,8 @@ export function ClipViewer({
   onStatus: (clip: ClipDto, status: ClipDto["status"]) => void;
   onShowFullTranscript?: () => void;
   onError: (message: string) => void;
+  /** Editor de clips (solo administradores): abre «¿Cómo quieres editarlo?». */
+  onEdit?: () => void;
 }) {
   const t = useT();
   const clip = clips[index]!;
@@ -48,6 +51,10 @@ export function ClipViewer({
   const touchX = useRef<number | null>(null);
   const hasPrev = index > 0;
   const hasNext = index < clips.length - 1;
+  // Clip ya editado: se ve la versión viral (y se puede volver a la original).
+  const [version, setVersion] = useState<"viral" | "original">("viral");
+  const showViral = Boolean(clip.editedVideoUrl) && version === "viral";
+  const src = showViral ? clip.editedVideoUrl : clip.videoUrl;
 
   // Teclado (computadora): Esc cierra, flechas cambian de clip. La página de atrás no se desplaza.
   useEffect(() => {
@@ -68,7 +75,7 @@ export function ClipViewer({
   async function download() {
     setBusy("download");
     try {
-      const { url } = await apiFetch<{ url: string }>(`/clips/${clip.id}/download`);
+      const { url } = await apiFetch<{ url: string }>(`/clips/${clip.id}/download${showViral ? "?edited=1" : ""}`);
       window.location.href = url;
     } catch (err) {
       onError(errorMessage(err));
@@ -78,11 +85,11 @@ export function ClipViewer({
   }
 
   async function share() {
-    if (!clip.videoUrl) return;
+    if (!src) return;
     setBusy("share");
     setNote("");
     try {
-      const result = await shareVideoFile(clip.videoUrl, `clipflow-${Math.round(clip.startSeconds)}s.mp4`, titleOf(clip));
+      const result = await shareVideoFile(src, `clipflow-${Math.round(clip.startSeconds)}s${showViral ? "-viral" : ""}.mp4`, titleOf(clip));
       if (result === "unsupported") setNote(t.common.shareUnsupported);
     } catch (err) {
       onError(errorMessage(err));
@@ -113,11 +120,11 @@ export function ClipViewer({
             if (end > start && hasPrev) onIndex(index - 1);
           }}
         >
-          {clip.videoUrl ? (
+          {src ? (
             <video
-              key={clip.id}
+              key={`${clip.id}-${showViral ? "viral" : "original"}`}
               ref={videoRef}
-              src={clip.videoUrl}
+              src={src}
               poster={clip.thumbnailUrl ?? undefined}
               controls
               playsInline
@@ -153,17 +160,52 @@ export function ClipViewer({
             </p>
           </div>
 
+          {clip.editedVideoUrl ? (
+            <div role="tablist" aria-label={t.editor.title} className="grid grid-cols-2 gap-1 rounded-2xl border border-line bg-surface p-1">
+              {(
+                [
+                  ["viral", t.editor.viralTab],
+                  ["original", t.editor.original],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  role="tab"
+                  aria-selected={(showViral ? "viral" : "original") === id}
+                  onClick={() => setVersion(id)}
+                  className={`h-10 rounded-xl text-sm font-semibold transition ${(showViral ? "viral" : "original") === id ? "bg-accent text-on-accent" : "text-muted"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+
           <div className="grid grid-cols-2 gap-2.5">
             <button onClick={download} disabled={busy !== null} className="flex h-[54px] items-center justify-center gap-2 rounded-2xl bg-accent text-base font-bold text-on-accent disabled:opacity-60">
               <DownloadIcon size={20} strokeWidth={2.4} />
               {busy === "download" ? t.common.preparing : t.common.download}
             </button>
-            <button onClick={share} disabled={busy !== null || !clip.videoUrl} className="flex h-[54px] items-center justify-center gap-2 rounded-2xl border border-[#2a3040] bg-surface text-base font-semibold disabled:opacity-60">
+            <button onClick={share} disabled={busy !== null || !src} className="flex h-[54px] items-center justify-center gap-2 rounded-2xl border border-[#2a3040] bg-surface text-base font-semibold disabled:opacity-60">
               <ShareIcon size={20} />
               {busy === "share" ? t.common.preparing : t.common.share}
             </button>
           </div>
           <p className="-mt-2 text-xs text-muted">{note || t.clip.shareHint}</p>
+
+          {onEdit && clip.editable !== undefined ? (
+            clip.editable ? (
+              <button
+                onClick={onEdit}
+                className="flex h-[54px] items-center justify-center gap-2 rounded-2xl border border-accent bg-[#1a110c] text-base font-bold text-[#ff7a45]"
+              >
+                <SparklesIcon size={20} />
+                {t.editor.edit}
+              </button>
+            ) : (
+              <p className="rounded-2xl border border-dashed border-line p-3 text-xs text-muted">{t.editor.notEditable}</p>
+            )
+          ) : null}
 
           <div className="grid grid-cols-3 gap-2">
             {clip.status === "approved" ? (

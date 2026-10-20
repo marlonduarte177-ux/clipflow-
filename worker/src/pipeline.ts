@@ -10,6 +10,9 @@ import {
   checkRange,
   fitToSentences,
   fullTranscriptKey,
+  cleanClipKey,
+  clipEditDataKey,
+  type ClipEditData,
   isBillingExempt,
   minutesForSeconds,
   NO_MINUTES_CODE,
@@ -69,7 +72,7 @@ import {
 } from "./ffmpeg.js";
 import type { WorkerStorage } from "./storage.js";
 import { AIProviderError } from "./ai/openai.js";
-import { buildAss, SUBTITLE_FONTS_DIR } from "./subtitles.js";
+import { buildAss, SUBTITLE_FONTS_DIR, timedWords } from "./subtitles.js";
 import {
   DownloadError,
   downloadFromUrl,
@@ -630,6 +633,8 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     }
     const requested = (job.params as JobParams).subtitleStyle;
     const subtitleStyle: SubtitleStyle = requested === "classic" || requested === "none" ? requested : "highlight";
+    // Editor de clips (solo administradores por ahora): cada clip también sin subtítulos y con sus datos.
+    const editable = (job.params as JobParams).editable === true;
 
     // 4. Generar clips verticales y miniaturas; subir a S3 con rutas fijas por trabajo.
     const outputs: {
@@ -638,6 +643,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       thumbKey: string;
       title: string | null;
       subtitleKeys: { srt: string; vtt: string } | null;
+      edit: { cleanKey: string; dataKey: string } | null;
     }[] = [];
     // Progreso real de cada clip (se generan de a varios a la vez).
     const clipProgress = new Array<number>(finalMoments.length).fill(0);
@@ -688,6 +694,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
       const moment = finalMoments[index]!;
       const duration = moment.endSeconds - moment.startSeconds;
       const clipFile = path.join(dir, `clip-${index}.mp4`);
+      const cleanFile = path.join(dir, `clip-${index}-clean.mp4`);
       const thumbFile = path.join(dir, `thumb-${index}.jpg`);
       const source = await clipSource(index, moment);
       const segment = { startSeconds: moment.startSeconds - source.offset, durationSeconds: duration };
@@ -719,6 +726,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
           signal: controller.signal,
           crop: framing,
           subtitles: burn,
+          cleanOutput: editable ? cleanFile : undefined,
           onProgress: (sec) => {
             clipProgress[index] = Math.min(0.95, sec / duration);
             void reportClips();
@@ -785,7 +793,32 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
         await deps.storage.upload(srtFile, subtitleKeys.srt, "application/x-subrip");
         await deps.storage.upload(vttFile, subtitleKeys.vtt, "text/vtt");
       }
-      outputs[index] = { moment, key, thumbKey, title: titles[index] ?? null, subtitleKeys };
+      let edit: { cleanKey: string; dataKey: string } | null = null;
+      if (editable) {
+        // Sin subtítulos dibujados, el clip normal ya está limpio: se usa el mismo archivo.
+        const cleanKey = burn ? cleanClipKey(job.userId, job.id, index) : key;
+        if (burn) await deps.storage.upload(cleanFile, cleanKey, "video/mp4");
+        const data: ClipEditData = {
+          version: 1,
+          durationSeconds: duration,
+          words: timedWords(clipSegments, duration),
+          sounds: (ai.sounds ?? [])
+            .filter((e) => e.endSeconds > moment.startSeconds && e.startSeconds < moment.endSeconds)
+            .map((e) => ({
+              kind: e.kind,
+              startSeconds: Math.max(0, e.startSeconds - moment.startSeconds),
+              endSeconds: Math.min(duration, e.endSeconds - moment.startSeconds),
+              confidence: e.confidence,
+            })),
+        };
+        const dataFile = path.join(dir, `edit-${index}.json`);
+        await writeFile(dataFile, JSON.stringify(data));
+        const dataKey = clipEditDataKey(job.userId, job.id, index);
+        await deps.storage.upload(dataFile, dataKey, "application/json");
+        edit = { cleanKey, dataKey };
+        await rm(cleanFile, { force: true });
+      }
+      outputs[index] = { moment, key, thumbKey, title: titles[index] ?? null, subtitleKeys, edit };
       clipProgress[index] = 1;
       await reportClips(true);
     };
@@ -810,7 +843,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
         const inserted = await tx
           .insert(clips)
           .values(
-            outputs.map(({ moment, key, thumbKey, title }) => ({
+            outputs.map(({ moment, key, thumbKey, title, edit }) => ({
               userId: job.userId,
               videoId: job.videoId,
               jobId: job.id,
@@ -823,6 +856,8 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
               aiReason: moment.reason ?? null,
               s3Key: key,
               thumbnailS3Key: thumbKey,
+              cleanS3Key: edit?.cleanKey ?? null,
+              editDataS3Key: edit?.dataKey ?? null,
             })),
           )
           .returning({ id: clips.id });

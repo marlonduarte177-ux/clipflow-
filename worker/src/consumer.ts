@@ -8,6 +8,7 @@ import {
 import { eq } from "drizzle-orm";
 import type { JobQueueMessage, WarmupQueueMessage } from "@clipflow/shared";
 import { claimJob, completeJob, failJob, markJobCancelled, refundVideoMinutes, schema, type Job } from "@clipflow/shared/db";
+import { processEditJob } from "./edit.js";
 import { JobError, JobStopped, jobRun, processAnalyzeJob, type PipelineDeps } from "./pipeline.js";
 
 /**
@@ -115,7 +116,8 @@ export async function handleMessage(message: Message, options: ConsumerOptions):
     (options.visibilitySeconds * 1000) / 3,
   );
   try {
-    const result = await processAnalyzeJob(job, deps);
+    // «Editar clips» (modo viral) o el procesamiento normal del video.
+    const result = job.type === "render_clip" ? await processEditJob(job, deps) : await processAnalyzeJob(job, deps);
     await completeJob(deps.db, job.id, deps.workerId, { ...result });
     deps.log.info({ jobId, clipCount: result.clipCount, ai: result.ai }, "trabajo completado");
     await remove();

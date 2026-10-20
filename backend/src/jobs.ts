@@ -15,7 +15,11 @@ const RetryBody = z.object({
   rangeEndSeconds: z.number().int().min(1).max(24 * 3600).optional(),
 });
 const IdParams = z.object({ id: z.uuid() });
-const ListQuery = z.object({ videoId: z.uuid().optional() });
+/**
+ * `type`: sin valor, los procesamientos del video (como siempre); "render_clip", los de editar clips
+ * (no se mezclan: la página del video toma el más reciente como su procesamiento).
+ */
+const ListQuery = z.object({ videoId: z.uuid().optional(), type: z.enum(["analyze_video", "render_clip"]).optional() });
 
 /** Un trabajo en cola durante más de esto sin empezar se considera atascado y se puede reenviar. */
 const STUCK_QUEUED_MS = 5 * 60 * 1000;
@@ -98,6 +102,7 @@ export function jobRoutes(deps: {
           and(
             eq(processingJobs.userId, request.user!.id),
             query.data.videoId ? eq(processingJobs.videoId, query.data.videoId) : undefined,
+            eq(processingJobs.type, query.data.type ?? "analyze_video"),
           ),
         )
         .orderBy(desc(processingJobs.createdAt))
