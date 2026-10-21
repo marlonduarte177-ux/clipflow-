@@ -20,7 +20,7 @@ import {
   type SubtitleStyle,
   type VideoDto,
 } from "@clipflow/shared";
-import { DEFAULT_DURATION, DurationPicker, SubtitlePicker } from "@/components/clip-options";
+import { DEFAULT_DURATION, DurationPicker, HdToggle, SubtitlePicker } from "@/components/clip-options";
 import { CheckIcon, CloseIcon, DownIcon, DownloadIcon, LinesIcon, NextIcon, UploadIcon, VideosIcon } from "@/components/icons";
 import { formatRangeTime, RangePicker, type VideoRange } from "@/components/range-picker";
 import { Alert } from "@/components/ui";
@@ -72,6 +72,8 @@ export function UploadView() {
   const [range, setRange] = useState<VideoRange | null>(null);
   // «Guardar» (bajar el video sin clips): solo para los administradores.
   const admin = useIsAdmin();
+  // Calidad HD (solo administradores por ahora; la API la ignora para los demás).
+  const [hd, setHd] = useState(true);
   const [picking, setPicking] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
@@ -214,7 +216,10 @@ export function UploadView() {
     }
   }
 
-  const rangeBody = range ? { rangeStartSeconds: range.startSeconds, rangeEndSeconds: range.endSeconds } : {};
+  const rangeBody = {
+    ...(range ? { rangeStartSeconds: range.startSeconds, rangeEndSeconds: range.endSeconds } : {}),
+    ...(admin ? { hd } : {}),
+  };
 
   // Al continuar, el usuario confirma que tiene derechos (el aviso está debajo de la tarjeta).
   async function onImport(mode: "clips" | "download") {
@@ -441,6 +446,7 @@ export function UploadView() {
 
       <DurationPicker value={clipSeconds} onChange={setClipSeconds} disabled={confirmed} />
       <SubtitlePicker value={subtitleStyle} onChange={setSubtitleStyle} disabled={confirmed} />
+      {admin ? <HdToggle value={hd} onChange={setHd} disabled={confirmed} /> : null}
 
       {projects && projects.length > 0 ? (
         <label className="relative flex min-h-[52px] items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-4">

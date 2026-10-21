@@ -46,6 +46,28 @@ export function DurationPicker({
 const STYLES: SubtitleStyle[] = ["highlight", "classic", "none"];
 
 /** Estilo de los subtítulos dibujados en el video, con una vista previa de cada uno. */
+/** Calidad HD (por ahora solo administradores): interruptor activado por defecto. */
+export function HdToggle({ value, onChange, disabled }: { value: boolean; onChange: (hd: boolean) => void; disabled?: boolean }) {
+  const t = useT();
+  return (
+    <label className="flex min-h-[56px] items-center gap-3 rounded-2xl border border-line bg-surface px-4">
+      <span className="rounded-md bg-accent px-1.5 py-0.5 text-[11px] font-extrabold text-on-accent">HD</span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="text-[15px] font-semibold">{t.options.hd}</span>
+        <span className="text-xs text-muted">{t.options.hdHint}</span>
+      </span>
+      <input
+        type="checkbox"
+        role="switch"
+        checked={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        className="h-6 w-6 accent-[#ff5a1f]"
+      />
+    </label>
+  );
+}
+
 export function SubtitlePicker({
   value,
   onChange,

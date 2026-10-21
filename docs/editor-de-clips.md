@@ -45,3 +45,18 @@ El procesador solo puede **leer** esa carpeta (y listar su contenido); no puede 
 
 El modo viral es un trabajo de FFmpeg aparte: ~1 a 2 veces el tiempo de generar ese clip (sale a 60 fps
 con efectos). Sin IA ni servicios externos: solo el tiempo del procesador (se registra en `usage`).
+
+## Fase 2: calidad HD
+
+Activada por defecto (por ahora solo en la cuenta de administrador; para el resto no cambia nada). Se
+puede apagar en «Nuevo video» y en la pantalla del modo viral.
+
+- Sobre el recorte, **antes** de agrandarlo (cuesta menos): menos ruido (`hqdn3d=1.5:1.2:4:4`) y
+  nitidez suave solo en la luz (`unsharp=3:3:0.5:3:3:0`).
+- Escalado a 1080x1920 con **lanczos**; después, un poco más de contraste y color
+  (`eq=contrast=1.05:saturation=1.12`).
+- H.264 con **CRF 18** (antes 20).
+- Se aplica al clip, a su copia limpia y, en el modo viral, al clip limpio que no la tenía (clips viejos).
+
+Medido con un video 1080p (recorte vertical típico, 2 núcleos): FFmpeg tarda **~22 % más por clip**
+(~10 % del trabajo completo, que también transcribe y analiza) y los archivos pesan ~30–45 % más.
