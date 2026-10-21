@@ -8,7 +8,7 @@ import { claimJob, createJob, schema, type DbHandle } from "@clipflow/shared/db"
 import { createTestDb } from "@clipflow/shared/db/testing";
 import { processEditJob, wordsFromVtt } from "./edit.js";
 import { processAnalyzeJob } from "./pipeline.js";
-import { renderVerticalClip } from "./ffmpeg.js";
+import { renderVerticalClip, verticalFilter } from "./ffmpeg.js";
 import { buildKaraokeAss, SUBTITLE_FONTS_DIR } from "./subtitles.js";
 import { makeDeps, makeSampleVideo, seedVideoJob } from "./test-helpers.js";
 import { pickActionMoments, viralVideoFilter } from "./viral.js";
@@ -60,6 +60,24 @@ describe("modo viral: momentos fuertes", () => {
   });
 });
 
+describe("calidad HD", () => {
+  it("menos ruido y nitidez ANTES de agrandar, lanczos, contraste y color después; sin HD, como siempre", () => {
+    const crop = { x: 0, y: 0, width: 608, height: 1080 };
+    const hd = verticalFilter(crop as never, { hd: true });
+    expect(hd).toMatch(/crop=608:1080:0:0,hqdn3d=[^,]+,unsharp=[^,]+,scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920,eq=contrast=1\.05:saturation=1\.12,setsar=1\[v\]$/);
+    expect(verticalFilter(crop as never)).not.toMatch(/hqdn3d|lanczos|eq=/);
+    // Relleno difuminado: la mejora solo en la imagen de adelante.
+    const blur = verticalFilter({ ...crop, fill: "blur" } as never, { hd: true });
+    expect(blur).toContain("[fgsrc]hqdn3d=");
+    expect(blur).toContain("overlay=(W-w)/2:(H-h)/2,eq=contrast=1.05");
+  });
+
+  it("el modo viral mejora un clip limpio que no tenía HD antes de los efectos", () => {
+    expect(viralVideoFilter([], undefined, true)).toMatch(/^\[0:v:0\]hqdn3d=.*eq=contrast=1\.05:saturation=1\.12,fps=60,/);
+    expect(viralVideoFilter([])).toMatch(/^\[0:v:0\]fps=60,/);
+  });
+});
+
 describe("subtítulos karaoke", () => {
   it("palabra por palabra en MAYÚSCULAS, la que suena en amarillo con un «pop», en el tercio inferior", () => {
     const ass = buildKaraokeAss(
@@ -99,6 +117,7 @@ describe("editar clips con FFmpeg", () => {
     await renderVerticalClip({ ffmpegPath: "ffmpeg", ffprobePath: "ffprobe" }, sample, out, { startSeconds: 2, durationSeconds: 3 }, {
       subtitles: { file: ass, fontsDir: SUBTITLE_FONTS_DIR },
       cleanOutput: clean,
+      hd: true,
     });
     for (const f of [out, clean]) expect(Number(JSON.parse(streamInfo(f)).format.duration)).toBeCloseTo(3, 0);
     // El texto amarillo y blanco cambia la imagen: la copia limpia no lo tiene.

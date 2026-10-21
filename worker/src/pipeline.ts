@@ -727,6 +727,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
           crop: framing,
           subtitles: burn,
           cleanOutput: editable ? cleanFile : undefined,
+          hd: (job.params as JobParams).hd === true,
           onProgress: (sec) => {
             clipProgress[index] = Math.min(0.95, sec / duration);
             void reportClips();
@@ -801,6 +802,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
         const data: ClipEditData = {
           version: 1,
           durationSeconds: duration,
+          hd: (job.params as JobParams).hd === true,
           words: timedWords(clipSegments, duration),
           sounds: (ai.sounds ?? [])
             .filter((e) => e.endSeconds > moment.startSeconds && e.startSeconds < moment.endSeconds)

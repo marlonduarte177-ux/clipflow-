@@ -405,7 +405,10 @@ export function videoRoutes(deps: VideoRouteDeps) {
         // Otra clave para "solo descargar": así después se puede crear clips (analyze:) del mismo video.
         idempotencyKey: `${downloadOnly ? "download" : "analyze"}:${videoId}`,
         // Editor de clips (solo administradores): cada clip se guarda también listo para editar.
-        params: { ...options.params, ...(!options.params.downloadOnly && canEditClips(billing, request.user!) ? { editable: true } : {}) },
+        params: {
+          ...options.params,
+          ...(!options.params.downloadOnly && canEditClips(billing, request.user!) ? { editable: true, hd: input.data.hd ?? true } : {}),
+        },
       });
       // Solo el dominio en los registros: el enlace completo puede llevar datos privados.
       request.log.info({ videoId, host: new URL(checked.url).hostname, downloadOnly }, "importación por enlace iniciada");
@@ -504,7 +507,10 @@ export function videoRoutes(deps: VideoRouteDeps) {
         type: "analyze_video",
         idempotencyKey: `analyze:${row.id}`,
         // Editor de clips (solo administradores): cada clip se guarda también listo para editar.
-        params: { ...options.params, ...(!options.params.downloadOnly && canEditClips(billing, request.user!) ? { editable: true } : {}) },
+        params: {
+          ...options.params,
+          ...(!options.params.downloadOnly && canEditClips(billing, request.user!) ? { editable: true, hd: input.data.hd ?? true } : {}),
+        },
       });
       if (created) {
         await enqueue(queue, job, request.log);
@@ -566,7 +572,10 @@ export function videoRoutes(deps: VideoRouteDeps) {
         type: "analyze_video",
         idempotencyKey: `analyze:${row.id}`,
         // Editor de clips (solo administradores): cada clip se guarda también listo para editar.
-        params: { ...options.params, ...(!options.params.downloadOnly && canEditClips(billing, request.user!) ? { editable: true } : {}) },
+        params: {
+          ...options.params,
+          ...(!options.params.downloadOnly && canEditClips(billing, request.user!) ? { editable: true, hd: input.data.hd ?? true } : {}),
+        },
       });
       if (!created) return sendError(reply, 409, "already_processing", "Este video ya tiene un procesamiento. Usa Reintentar si falló.");
       await enqueue(queue, job, request.log);

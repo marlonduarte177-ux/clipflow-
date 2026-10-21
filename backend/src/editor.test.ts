@@ -17,7 +17,7 @@ const app = () => ctx!.app;
 const db = () => ctx!.database.db;
 
 /** Sube un video, lo completa (crea su trabajo) y le agrega un clip. */
-async function videoWithClip(sub: string, clip: Partial<typeof schema.clips.$inferInsert> = {}) {
+async function videoWithClip(sub: string, clip: Partial<typeof schema.clips.$inferInsert> = {}, options: Record<string, unknown> = {}) {
   const project = (await app().inject({ method: "POST", url: "/projects", headers: bearer(sub), payload: { name: "P" } })).json();
   const { video } = (
     await app().inject({
@@ -33,7 +33,7 @@ async function videoWithClip(sub: string, clip: Partial<typeof schema.clips.$inf
       method: "POST",
       url: `/videos/${video.id}/complete`,
       headers: bearer(sub),
-      payload: { parts: [1, 2].map((n) => ({ partNumber: n, etag: "e" })) },
+      payload: { parts: [1, 2].map((n) => ({ partNumber: n, etag: "e" })), ...options },
     })
   ).json();
   const [user] = await db().select().from(schema.users).where(eq(schema.users.cognitoSub, sub));
@@ -47,9 +47,14 @@ async function videoWithClip(sub: string, clip: Partial<typeof schema.clips.$inf
 describe("editor de clips (solo administradores)", () => {
   it("los trabajos de un administrador guardan los clips listos para editar; los del público, no", async () => {
     const admin = await videoWithClip("admin");
-    expect(admin.job.params).toMatchObject({ editable: true });
+    // Calidad HD activada por defecto (solo administradores por ahora).
+    expect(admin.job.params).toMatchObject({ editable: true, hd: true });
     const alice = await videoWithClip("alice");
     expect(alice.job.params.editable).toBeUndefined();
+    expect(alice.job.params.hd).toBeUndefined();
+    // El administrador puede apagarla para un video.
+    const off = await videoWithClip("admin", {}, { hd: false });
+    expect(off.job.params).toMatchObject({ editable: true, hd: false });
   });
 
   it("el público no ve el editor ni puede usarlo", async () => {
@@ -83,7 +88,7 @@ describe("editor de clips (solo administradores)", () => {
       payload: { clipIds: [clip.id, other!.id], mode: "viral", music: false },
     });
     expect(res.statusCode).toBe(201);
-    expect(res.json()).toMatchObject({ type: "render_clip", status: "queued", params: { clipIds: [clip.id, other!.id], edit: { mode: "viral", music: false } } });
+    expect(res.json()).toMatchObject({ type: "render_clip", status: "queued", params: { clipIds: [clip.id, other!.id], edit: { mode: "viral", music: false, hd: true } } });
     expect(ctx!.queue.sent).toContain(res.json().id);
 
     const again = await app().inject({ method: "POST", url: `/videos/${video.id}/edit`, headers: bearer("admin"), payload: { clipIds: [clip.id], mode: "viral" } });
