@@ -9,6 +9,7 @@ import {
   type JobResult,
   type ProductConfig,
   type SubtitleStyle,
+  SubtitleStyleSchema,
 } from "@clipflow/shared";
 import { createJob, schema, type Database } from "@clipflow/shared/db";
 import { sendError } from "./http.js";
@@ -25,7 +26,7 @@ const COPY_PREFIX: Record<AnalysisPipeline, string> = { classic: "[Actual]", v2:
 
 const CompareBody = z.object({
   clipDurationSeconds: z.number().int().positive().optional(),
-  subtitleStyle: z.enum(["highlight", "classic", "none"]).optional(),
+  subtitleStyle: SubtitleStyleSchema.optional(),
 });
 
 /** USD por hora de video (redondeado a 4 decimales). */

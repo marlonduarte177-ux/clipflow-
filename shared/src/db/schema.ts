@@ -260,12 +260,11 @@ export const clips = pgTable(
     s3Key: text("s3_key"),
     thumbnailS3Key: text("thumbnail_s3_key"),
     /**
-     * Editor de clips (por ahora solo administradores): el mismo clip SIN subtítulos dibujados y sus
-     * datos para editar (palabras con tiempo y sonidos), guardados al crearlo.
+     * Columnas del editor de clips (modo viral), retirado el 22/10/2026. Ya no se usan; se conservan
+     * porque la migración 0007 ya se aplicó (quitarlas sería otra migración).
      */
     cleanS3Key: text("clean_s3_key"),
     editDataS3Key: text("edit_data_s3_key"),
-    /** Última versión editada (p. ej. modo viral) y con qué opciones se hizo. */
     editedS3Key: text("edited_s3_key"),
     edit: jsonb("edit"),
     createdAt: createdAt(),

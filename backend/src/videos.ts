@@ -29,7 +29,7 @@ import { createJob, schema, type Database } from "@clipflow/shared/db";
 import { deleteVideoRows, purgeVideoFiles } from "./cleanup.js";
 import { sendError, sendValidationError } from "./http.js";
 import { enqueue, toJobDto, wakeWorkers } from "./jobs.js";
-import { canEditClips, canSaveVideos, replyIfBlocked, replyIfNotEnoughMinutes, secondsToProcess, type BillingSettings } from "./billing.js";
+import { canSaveVideos, replyIfBlocked, replyIfNotEnoughMinutes, secondsToProcess, type BillingSettings } from "./billing.js";
 import { fetchLinkDetails, fetchLinkPreview, type LinkDetails } from "./link-preview.js";
 
 const defaultLinkDetails = (url: string) => fetchLinkDetails(url);
@@ -404,8 +404,7 @@ export function videoRoutes(deps: VideoRouteDeps) {
         type: "analyze_video",
         // Otra clave para "solo descargar": así después se puede crear clips (analyze:) del mismo video.
         idempotencyKey: `${downloadOnly ? "download" : "analyze"}:${videoId}`,
-        // Editor de clips (solo administradores): cada clip se guarda también listo para editar.
-        params: { ...options.params, ...(!options.params.downloadOnly && canEditClips(billing, request.user!) ? { editable: true } : {}) },
+        params: { ...options.params },
       });
       // Solo el dominio en los registros: el enlace completo puede llevar datos privados.
       request.log.info({ videoId, host: new URL(checked.url).hostname, downloadOnly }, "importación por enlace iniciada");
@@ -503,8 +502,7 @@ export function videoRoutes(deps: VideoRouteDeps) {
         videoId: row.id,
         type: "analyze_video",
         idempotencyKey: `analyze:${row.id}`,
-        // Editor de clips (solo administradores): cada clip se guarda también listo para editar.
-        params: { ...options.params, ...(!options.params.downloadOnly && canEditClips(billing, request.user!) ? { editable: true } : {}) },
+        params: { ...options.params },
       });
       if (created) {
         await enqueue(queue, job, request.log);
@@ -565,8 +563,7 @@ export function videoRoutes(deps: VideoRouteDeps) {
         videoId: row.id,
         type: "analyze_video",
         idempotencyKey: `analyze:${row.id}`,
-        // Editor de clips (solo administradores): cada clip se guarda también listo para editar.
-        params: { ...options.params, ...(!options.params.downloadOnly && canEditClips(billing, request.user!) ? { editable: true } : {}) },
+        params: { ...options.params },
       });
       if (!created) return sendError(reply, 409, "already_processing", "Este video ya tiene un procesamiento. Usa Reintentar si falló.");
       await enqueue(queue, job, request.log);

@@ -180,27 +180,3 @@ export const LogoutIcon = (p: IconProps) => (
     <path d="M14 8l4 4-4 4M18 12H9" />
   </Icon>
 );
-
-/** Rayo relleno de trazo (modo viral). */
-export const ViralIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" />
-  </Icon>
-);
-
-/** Tijeras (editar a mano). */
-export const ScissorsIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <circle cx="6" cy="6" r="3" />
-    <circle cx="6" cy="18" r="3" />
-    <path d="M20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12" />
-  </Icon>
-);
-
-/** Destellos (editar). */
-export const SparklesIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" />
-    <path d="M19 17l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z" />
-  </Icon>
-);

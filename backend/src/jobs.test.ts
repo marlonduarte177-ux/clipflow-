@@ -65,6 +65,14 @@ describe("trabajos de procesamiento", () => {
     expect(done.job.params).toEqual({ clipDurationSeconds: 60, subtitleStyle: "none" });
   });
 
+  it("acepta los estilos de subtítulos nuevos (karaoke, pop, gamer, caja, minimal)", async () => {
+    for (const style of ["karaoke", "pop", "gamer", "box", "minimal"]) {
+      const { complete } = await uploadedVideo(`u-${style}`);
+      const done = (await complete({ subtitleStyle: style })).json();
+      expect(done.job.params).toMatchObject({ subtitleStyle: style });
+    }
+  });
+
   it("rechaza una duración no permitida sin terminar la subida ni crear el trabajo", async () => {
     const { video, complete } = await uploadedVideo("alice");
     const res = await complete({ clipDurationSeconds: 37 });

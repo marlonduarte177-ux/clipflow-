@@ -18,7 +18,6 @@ En construcción por fases. Ver `docs/`:
 - [Importar videos por enlace (con aviso de derechos de autor)](docs/importar-por-enlace.md)
 - [Fase 10 — Producción: alertas y pendientes](docs/fase-10-produccion.md)
 - [Planes, minutos y descargas](docs/planes-y-creditos.md) · [Pagos con Polar (pasos)](docs/pagos-polar.md)
-- [Editor de clips (modo viral, solo administradores)](docs/editor-de-clips.md)
 
 ## Estructura
 

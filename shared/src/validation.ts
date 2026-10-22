@@ -29,7 +29,7 @@ export const UploadPartsRequestSchema = z.object({
 });
 
 /** Estilo de los subtítulos quemados en el video. */
-export const SUBTITLE_STYLES = ["highlight", "classic", "none"] as const;
+export const SUBTITLE_STYLES = ["highlight", "karaoke", "pop", "gamer", "box", "classic", "minimal", "none"] as const;
 export const SubtitleStyleSchema = z.enum(SUBTITLE_STYLES);
 
 /** Tramo a procesar: como mínimo 2 minutos. */

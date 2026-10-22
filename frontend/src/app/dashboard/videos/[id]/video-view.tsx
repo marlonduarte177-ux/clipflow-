@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FEATURES, NO_MINUTES_CODE, translateMessage, type BillingResponse, type ClipDto, type ClipListResponse, type JobDto, type JobListResponse, type SubtitleStyle, type VideoDownloadResponse, type VideoDto } from "@clipflow/shared";
 import { ClipViewer, FullTranscript, scoreOf } from "@/components/clip-viewer";
-import { EditModeSheet, EditProgress } from "@/components/edit-mode";
 import { DEFAULT_DURATION, DurationPicker, SubtitlePicker } from "@/components/clip-options";
 import { BackIcon, CheckIcon, DownloadIcon, RetryIcon, ShareIcon, TrashIcon } from "@/components/icons";
 import { isActive, JobProgressPanel } from "@/components/job-progress";
@@ -23,20 +22,17 @@ const MAX_SHARE_BYTES = 200 * 1024 * 1024;
 interface Data {
   video: VideoDto;
   job: JobDto | undefined;
-  /** Última edición de clips (modo viral), si hubo. */
-  editJob: JobDto | undefined;
   clips: ClipDto[];
   transcript: ClipListResponse["transcript"];
 }
 
 async function fetchData(videoId: string): Promise<Data> {
-  const [video, jobs, clips, edits] = await Promise.all([
+  const [video, jobs, clips] = await Promise.all([
     apiFetch<VideoDto>(`/videos/${videoId}`),
     apiFetch<JobListResponse>(`/jobs?videoId=${videoId}`),
     apiFetch<ClipListResponse>(`/videos/${videoId}/clips`),
-    apiFetch<JobListResponse>(`/jobs?videoId=${videoId}&type=render_clip`),
   ]);
-  return { video, job: jobs.jobs[0], editJob: edits.jobs[0], clips: clips.clips, transcript: clips.transcript ?? null };
+  return { video, job: jobs.jobs[0], clips: clips.clips, transcript: clips.transcript ?? null };
 }
 
 type Filter = "all" | "approved" | "discarded";
@@ -57,10 +53,6 @@ export function VideoView({ videoId }: { videoId: string }) {
   const [saving, setSaving] = useState<"download" | "share" | null>(null);
   const [note, setNote] = useState("");
   const processing = isActive(data?.job);
-  // Editor de clips (solo administradores: la API solo a ellos les dice si un clip se puede editar).
-  const editing = isActive(data?.editJob);
-  const [editSheet, setEditSheet] = useState<number | null>(null);
-  const [startingEdit, setStartingEdit] = useState(false);
   // Herramienta interna: solo el dueño ve «Comparar versión actual y nueva».
   const [admin, setAdmin] = useState(false);
   const [comparing, setComparing] = useState(false);
@@ -122,13 +114,13 @@ export function VideoView({ videoId }: { videoId: string }) {
         .then((d) => active && (setData(d), setError("")))
         .catch((err: Error) => active && setError(errorMessage(err)));
     void load();
-    // Progreso real cada 4 s solo mientras se procesa (o se editan clips).
-    const timer = processing || editing ? setInterval(load, 4000) : undefined;
+    // Progreso real cada 4 s solo mientras se procesa.
+    const timer = processing ? setInterval(load, 4000) : undefined;
     return () => {
       active = false;
       clearInterval(timer);
     };
-  }, [videoId, processing, editing, reloadKey]);
+  }, [videoId, processing, reloadKey]);
 
   async function jobAction(action: "cancel" | "retry") {
     if (!data?.job) return;
@@ -217,28 +209,6 @@ export function VideoView({ videoId }: { videoId: string }) {
     filter === "all" ? c.status !== "discarded" : filter === "approved" ? c.status === "approved" : c.status === "discarded",
   );
   const closeViewer = useCallback(() => setViewer(null), []);
-  /** Abrir un clip: si se puede editar y todavía no tiene versión viral, primero «¿Cómo quieres editarlo?». */
-  const openClip = (i: number) => {
-    const clip = visible[i];
-    if (clip?.editable && !clip.editedVideoUrl && !editing) setEditSheet(i);
-    else setViewer(i);
-  };
-  async function startEdit(clip: ClipDto, options: { applyAll: boolean; music: boolean }) {
-    setStartingEdit(true);
-    try {
-      const clipIds = options.applyAll
-        ? sorted.filter((c) => c.editable && c.status !== "discarded").map((c) => c.id)
-        : [clip.id];
-      const editJob = await apiFetch<JobDto>(`/videos/${videoId}/edit`, { method: "POST", body: { clipIds, mode: "viral", music: options.music } });
-      setData((d) => d && { ...d, editJob });
-      setEditSheet(null);
-      setViewer(null);
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setStartingEdit(false);
-    }
-  }
   // Sin título: "Clip N" en orden cronológico (la API los devuelve por tiempo de inicio).
   const titleOf = (clip: ClipDto) => clip.title ?? t.video.clipN((data?.clips.findIndex((c) => c.id === clip.id) ?? 0) + 1);
 
@@ -413,8 +383,6 @@ export function VideoView({ videoId }: { videoId: string }) {
             </button>
           ) : null}
 
-          {data.editJob ? <EditProgress job={data.editJob} /> : null}
-
           <div className="-mx-5 flex gap-2 overflow-x-auto px-5 sm:mx-0 sm:px-0" role="tablist" aria-label={t.video.filter}>
             {(
               [
@@ -451,7 +419,7 @@ export function VideoView({ videoId }: { videoId: string }) {
                 const score = scoreOf(clip);
                 return (
                   <li key={clip.id}>
-                    <button onClick={() => openClip(i)} className="group flex w-full flex-col gap-2 text-left">
+                    <button onClick={() => setViewer(i)} className="group flex w-full flex-col gap-2 text-left">
                       <span className="relative block aspect-[9/16] w-full overflow-hidden rounded-2xl bg-[#1d2433]">
                         {clip.thumbnailUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element -- URL firmada de S3 que caduca: no se optimiza
@@ -511,32 +479,6 @@ export function VideoView({ videoId }: { videoId: string }) {
           onStatus={setClipStatus}
           onError={setError}
           onShowFullTranscript={transcript ? () => setFullTranscript(true) : undefined}
-          onEdit={
-            editing
-              ? undefined
-              : () => {
-                  const i = viewer;
-                  setViewer(null);
-                  setEditSheet(i);
-                }
-          }
-        />
-      ) : null}
-      {editSheet !== null && visible[editSheet] ? (
-        <EditModeSheet
-          clip={visible[editSheet]}
-          index={editSheet}
-          total={visible.length}
-          editableCount={sorted.filter((c) => c.editable && c.status !== "discarded").length}
-          title={titleOf(visible[editSheet])}
-          score={scoreOf(visible[editSheet])}
-          busy={startingEdit}
-          onBack={() => {
-            const i = editSheet;
-            setEditSheet(null);
-            setViewer(i);
-          }}
-          onStart={(options) => void startEdit(visible[editSheet]!, options)}
         />
       ) : null}
       {fullTranscript && transcript ? (

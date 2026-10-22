@@ -200,21 +200,6 @@ export class WorkerStack extends Stack {
         resources: ["clips/*", "thumbnails/*", "subtitles/*", "tmp/*"].map((p) => props.bucket.arnForObjects(p)),
       }),
     );
-    // Editor de clips: leer el clip sin subtítulos y sus datos (palabras, sonidos) para editarlo, y la
-    // música libre de derechos que el dueño sube a la carpeta music/ (solo esa carpeta se puede listar).
-    taskDefinition.taskRole.addToPrincipalPolicy(
-      new iam.PolicyStatement({
-        actions: ["s3:GetObject"],
-        resources: ["clips/*", "subtitles/*", "music/*"].map((p) => props.bucket.arnForObjects(p)),
-      }),
-    );
-    taskDefinition.taskRole.addToPrincipalPolicy(
-      new iam.PolicyStatement({
-        actions: ["s3:ListBucket"],
-        resources: [props.bucket.bucketArn],
-        conditions: { StringLike: { "s3:prefix": ["music/*", "music/"] } },
-      }),
-    );
     // Transcripciones guardadas por video: se leen al reprocesar (no se paga Whisper dos veces).
     taskDefinition.taskRole.addToPrincipalPolicy(
       new iam.PolicyStatement({
