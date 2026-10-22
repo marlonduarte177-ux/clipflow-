@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { ClipEditData } from "@clipflow/shared";
-import { crfFor, FFMPEG_BASE, HD_AFTER_SCALE, HD_BEFORE_SCALE, parseMetadataFile, run, type FfmpegTools } from "./ffmpeg.js";
+import { FFMPEG_BASE, parseMetadataFile, run, type FfmpegTools } from "./ffmpeg.js";
 
 /**
  * Modo viral: el clip limpio (1080x1920, sin subtítulos) con subtítulos karaoke, zoom tipo «golpe»,
@@ -113,17 +113,12 @@ function pulses(times: number[], length: number, v: string): string {
  * Filtros de video del modo viral sobre el clip limpio de 1080x1920: 60 fps, zoom golpe y temblor
  * (zoompan sobre el tiempo de cada fotograma), flash (brillo) y, encima, los subtítulos karaoke.
  */
-export function viralVideoFilter(
-  moments: ActionMoment[],
-  subtitles?: { file: string; fontsDir: string },
-  /** Calidad HD para un clip limpio que no la tenía (clips anteriores): mejora antes de los efectos. */
-  enhance = false,
-): string {
+export function viralVideoFilter(moments: ActionMoment[], subtitles?: { file: string; fontsDir: string }): string {
   const zoom = pulses(moments.filter((m) => m.zoom).map((m) => m.atSeconds), ZOOM_SECONDS, "it");
   const shake = pulses(moments.filter((m) => m.shake).map((m) => m.atSeconds), SHAKE_SECONDS, "it");
   const flash = pulses(moments.filter((m) => m.flash).map((m) => m.atSeconds), FLASH_SECONDS, "t");
   const parts = [
-    `[0:v:0]${enhance ? `${HD_BEFORE_SCALE}${HD_AFTER_SCALE}` : ""}fps=60`,
+    "[0:v:0]fps=60",
     `zoompan=z='1+${ZOOM_AMOUNT}*(${zoom})'` +
       `:x='iw/2-iw/zoom/2+${SHAKE_PX}*(${shake})*sin(it*71)'` +
       `:y='ih/2-ih/zoom/2+${SHAKE_PX}*(${shake})*cos(it*89)'` +
@@ -153,16 +148,12 @@ export async function renderViralClip(
     moments: ActionMoment[];
     subtitles?: { file: string; fontsDir: string };
     music?: string;
-    /** Calidad HD: CRF 18 (el clip limpio normalmente ya viene mejorado). */
-    hd?: boolean;
-    /** Además mejorar la imagen (clip limpio hecho sin calidad HD). */
-    enhance?: boolean;
     signal?: AbortSignal;
     onProgress?: (seconds: number) => void;
   },
 ): Promise<void> {
   const d = options.durationSeconds.toFixed(3);
-  const filters = [viralVideoFilter(options.moments, options.subtitles, options.enhance)];
+  const filters = [viralVideoFilter(options.moments, options.subtitles)];
   const inputs = ["-i", input];
   let audioMap = options.hasAudio ? ["-map", "0:a:0"] : [];
   if (options.music) {
@@ -196,7 +187,7 @@ export async function renderViralClip(
       "-preset",
       "veryfast",
       "-crf",
-      crfFor(options.hd),
+      "20",
       "-r",
       "60",
       "-g",

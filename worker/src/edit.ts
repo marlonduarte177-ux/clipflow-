@@ -115,7 +115,6 @@ export async function processEditJob(job: Job, deps: PipelineDeps): Promise<JobR
         await renderVerticalClip(deps.tools, original.file, source, segment, {
           signal: controller.signal,
           crop,
-          hd: edit.hd === true,
           onProgress: (sec) => {
             done[index] = Math.min(0.4, (sec / duration) * 0.4);
             void report();
@@ -155,9 +154,6 @@ export async function processEditJob(job: Job, deps: PipelineDeps): Promise<JobR
         moments,
         subtitles: subtitlesFile,
         music: musicFile,
-        hd: edit.hd === true,
-        // Clip limpio guardado sin calidad HD: se mejora aquí (si se rehízo del original, ya la tiene).
-        enhance: edit.hd === true && Boolean(clip.cleanS3Key) && !data?.hd,
         signal: controller.signal,
         onProgress: (sec) => {
           done[index] = start + (1 - start) * Math.min(0.95, sec / info.durationSeconds);

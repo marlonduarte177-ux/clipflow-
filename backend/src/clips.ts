@@ -18,8 +18,6 @@ const EditBody = z.object({
   clipIds: z.array(z.uuid()).min(1).max(50),
   mode: z.literal("viral"),
   music: z.boolean().default(true),
-  /** Calidad HD (activada por defecto). */
-  hd: z.boolean().default(true),
 });
 
 /**
@@ -222,7 +220,7 @@ export function clipRoutes(deps: {
           ),
         );
       if (active) return sendError(reply, 409, "already_editing", "Ya se están editando clips de este video. Espera a que termine.");
-      const edit: ClipEditOptions = { mode: input.data.mode, music: input.data.music, hd: input.data.hd };
+      const edit: ClipEditOptions = { mode: input.data.mode, music: input.data.music };
       const { job } = await createJob(db, {
         userId,
         videoId: video.id,

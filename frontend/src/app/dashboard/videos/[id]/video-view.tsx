@@ -223,13 +223,13 @@ export function VideoView({ videoId }: { videoId: string }) {
     if (clip?.editable && !clip.editedVideoUrl && !editing) setEditSheet(i);
     else setViewer(i);
   };
-  async function startEdit(clip: ClipDto, options: { applyAll: boolean; music: boolean; hd: boolean }) {
+  async function startEdit(clip: ClipDto, options: { applyAll: boolean; music: boolean }) {
     setStartingEdit(true);
     try {
       const clipIds = options.applyAll
         ? sorted.filter((c) => c.editable && c.status !== "discarded").map((c) => c.id)
         : [clip.id];
-      const editJob = await apiFetch<JobDto>(`/videos/${videoId}/edit`, { method: "POST", body: { clipIds, mode: "viral", music: options.music, hd: options.hd } });
+      const editJob = await apiFetch<JobDto>(`/videos/${videoId}/edit`, { method: "POST", body: { clipIds, mode: "viral", music: options.music } });
       setData((d) => d && { ...d, editJob });
       setEditSheet(null);
       setViewer(null);
