@@ -597,21 +597,8 @@ async function bestWindow(
   return Math.min(area.width - targetWidth, even((best / w) * area.width));
 }
 
-/**
- * Calidad HD: quitar un poco de ruido y dar nitidez suave sobre el recorte ANTES de agrandarlo (así
- * cuesta menos: el recorte suele ser más chico que 1080x1920), escalar con lanczos y, al final, un poco
- * más de contraste y color. Medido: ~+20 % de tiempo de FFmpeg con CRF 18.
- */
-export const HD_BEFORE_SCALE = "hqdn3d=1.5:1.2:4:4,unsharp=3:3:0.5:3:3:0,";
-export const HD_AFTER_SCALE = "eq=contrast=1.05:saturation=1.12,";
-/** CRF de H.264: 18 con calidad HD (más detalle, archivos ~30 % más grandes), 20 sin ella. */
-export const crfFor = (hd: boolean | undefined) => (hd ? "18" : "20");
-
 /** Filtros de FFmpeg: recorte elegido → 1080x1920 (rellenando o mostrando completo). */
-export function verticalFilter(crop: VerticalCrop | null, options: { hd?: boolean } = {}): string {
-  const before = options.hd ? HD_BEFORE_SCALE : "";
-  const after = options.hd ? HD_AFTER_SCALE : "";
-  const lanczos = options.hd ? ":flags=lanczos" : "";
+export function verticalFilter(crop: VerticalCrop | null): string {
   const x = crop?.path?.length ? `'${pathExpression(crop.path)}'` : crop?.x;
   let cut = crop ? `${keepFrameSize(crop.source)}crop=${crop.width}:${crop.height}:${x}:${crop.y},` : "";
   if (crop?.content) {
@@ -625,14 +612,14 @@ export function verticalFilter(crop: VerticalCrop | null, options: { hd?: boolea
     return (
       `[0:v:0]${cut}split=2[fgsrc][bgsrc];` +
       "[bgsrc]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,boxblur=12:2,scale=1080:1920,eq=brightness=-0.06[bg];" +
-      `[fgsrc]${before}scale=1080:1920:force_original_aspect_ratio=decrease:force_divisible_by=2${lanczos}[fg];` +
-      `[bg][fg]overlay=(W-w)/2:(H-h)/2,${after}setsar=1[v]`
+      "[fgsrc]scale=1080:1920:force_original_aspect_ratio=decrease:force_divisible_by=2[fg];" +
+      "[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[v]"
     );
   }
   const size = crop?.fit
-    ? `scale=1080:1920:force_original_aspect_ratio=decrease:force_divisible_by=2${lanczos},pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black`
-    : `scale=1080:1920:force_original_aspect_ratio=increase${lanczos},crop=1080:1920`;
-  return `[0:v:0]${cut}${before}${size},${after}setsar=1[v]`;
+    ? "scale=1080:1920:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black"
+    : "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920";
+  return `[0:v:0]${cut}${size},setsar=1[v]`;
 }
 
 /** Recorta un segmento y lo convierte a vertical 9:16 (1080x1920), listo para redes. */
@@ -652,11 +639,9 @@ export async function renderVerticalClip(
      * el video una sola vez). Solo se usa si hay subtítulos.
      */
     cleanOutput?: string;
-    /** Calidad HD (ver HD_BEFORE_SCALE). */
-    hd?: boolean;
   } = {},
 ): Promise<void> {
-  let filter = verticalFilter(options.crop ?? null, { hd: options.hd });
+  let filter = verticalFilter(options.crop ?? null);
   const clean = options.subtitles ? options.cleanOutput : undefined;
   if (options.subtitles) {
     // Se dibujan sobre el 1080x1920 final. Rutas entre comillas: pueden tener ":".
@@ -671,9 +656,9 @@ export async function renderVerticalClip(
     "libx264",
     "-preset",
     "veryfast",
-    // 20: más nítido que el 23 de antes (detalle fino, texto y caras), archivos ~40 % más grandes; 18 en HD.
+    // 20: más nítido que el 23 de antes (detalle fino, texto y caras), archivos ~40 % más grandes.
     "-crf",
-    crfFor(options.hd),
+    "20",
     "-pix_fmt",
     "yuv420p",
     "-c:a",

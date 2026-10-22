@@ -30,12 +30,11 @@ export function EditModeSheet({
   score: number | null;
   busy: boolean;
   onBack: () => void;
-  onStart: (options: { applyAll: boolean; music: boolean; hd: boolean }) => void;
+  onStart: (options: { applyAll: boolean; music: boolean }) => void;
 }) {
   const t = useT();
   const [applyAll, setApplyAll] = useState(editableCount > 1);
   const [music, setMusic] = useState(true);
-  const [hd, setHd] = useState(true);
   const seconds = Math.round(clip.endSeconds - clip.startSeconds);
 
   // Mientras está abierta, la página de atrás no se mueve; Esc vuelve.
@@ -136,11 +135,6 @@ export function EditModeSheet({
             <input type="checkbox" checked={music} onChange={(e) => setMusic(e.target.checked)} className="h-5 w-5 accent-[#ff5a1f]" />
             <span className="flex-1">{t.editor.music}</span>
           </label>
-          <label className="flex min-h-[52px] items-center gap-3 rounded-[14px] border border-line bg-surface px-4 text-sm">
-            <input type="checkbox" checked={hd} onChange={(e) => setHd(e.target.checked)} className="h-5 w-5 accent-[#ff5a1f]" />
-            <span className="flex-1">{t.editor.hd}</span>
-            <span className="rounded-md bg-accent px-1.5 py-0.5 text-[11px] font-extrabold text-on-accent">HD</span>
-          </label>
         </div>
 
         <div className="flex-1" />
@@ -148,7 +142,7 @@ export function EditModeSheet({
         <div className="mt-5 flex flex-col gap-2.5 border-t border-[#1a1d24] px-5 pb-[max(env(safe-area-inset-bottom),28px)] pt-4">
           <button
             type="button"
-            onClick={() => onStart({ applyAll: applyAll && editableCount > 1, music, hd })}
+            onClick={() => onStart({ applyAll: applyAll && editableCount > 1, music })}
             disabled={busy}
             className="flex h-14 items-center justify-center gap-2 rounded-2xl bg-accent text-[17px] font-extrabold text-on-accent transition active:scale-[0.99] disabled:opacity-60"
           >

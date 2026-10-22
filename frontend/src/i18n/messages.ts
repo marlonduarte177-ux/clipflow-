@@ -115,8 +115,6 @@ const es = {
     genericError: "No se pudo completar la operación. Inténtalo de nuevo.",
   },
   options: {
-    hd: "Calidad HD",
-    hdHint: "Más nitidez y color, menos ruido. Tarda un poco más.",
     duration: "Duración de cada clip",
     durationHint: "Cada clip dura eso ±5 segundos, sin cortar frases a la mitad.",
     subtitles: "Subtítulos en el video",
@@ -295,7 +293,6 @@ const es = {
     soon: "Pronto",
     applyAll: (n: number) => `Aplicar a los ${n} clips`,
     music: "Música de fondo",
-    hd: "Calidad HD",
     go: "Hacerlo viral",
     goHint: "Después puedes ajustar cualquier detalle a mano",
     working: (n: number) => (n === 1 ? "Haciendo viral el clip…" : `Haciendo virales ${n} clips…`),
@@ -568,8 +565,6 @@ const en: Messages = {
     genericError: "The operation could not be completed. Please try again.",
   },
   options: {
-    hd: "HD quality",
-    hdHint: "Sharper, richer color, less noise. Takes a little longer.",
     duration: "Length of each clip",
     durationHint: "Each clip lasts that long ±5 seconds, without cutting sentences in half.",
     subtitles: "Captions on the video",
@@ -748,7 +743,6 @@ const en: Messages = {
     soon: "Soon",
     applyAll: (n: number) => `Apply to all ${n} clips`,
     music: "Background music",
-    hd: "HD quality",
     go: "Make it viral",
     goHint: "You can fine-tune any detail by hand later",
     working: (n: number) => (n === 1 ? "Making the clip viral…" : `Making ${n} clips viral…`),

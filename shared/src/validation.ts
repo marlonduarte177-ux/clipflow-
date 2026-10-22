@@ -57,8 +57,6 @@ const ProcessingOptions = {
   subtitleStyle: SubtitleStyleSchema.optional(),
   rangeStartSeconds: z.number().int().min(0).max(24 * 3600).optional(),
   rangeEndSeconds: z.number().int().min(1).max(24 * 3600).optional(),
-  /** Calidad HD (por ahora solo la usan los administradores; sin valor: activada). */
-  hd: z.boolean().optional(),
 };
 
 export const CompleteUploadSchema = z.object({

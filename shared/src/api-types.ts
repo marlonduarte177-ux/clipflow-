@@ -137,11 +137,6 @@ export interface JobParams {
    * dibujados, con sus palabras y sonidos, para poder editarlo después.
    */
   editable?: boolean;
-  /**
-   * Calidad HD: menos ruido, nitidez suave, escalado lanczos, un poco más de contraste y color, y
-   * CRF 18. Por ahora solo en trabajos de administradores (activada por defecto).
-   */
-  hd?: boolean;
   /** Trabajo de edición ("render_clip"): los clips a editar y cómo. */
   clipIds?: string[];
   edit?: ClipEditOptions;
@@ -152,16 +147,12 @@ export interface ClipEditOptions {
   mode: "viral";
   /** Música de fondo a volumen bajo (si hay pistas cargadas). */
   music: boolean;
-  /** Calidad HD (activada por defecto). */
-  hd?: boolean;
 }
 
 /** Datos guardados de un clip para editarlo (palabras y sonidos con tiempos relativos al clip). */
 export interface ClipEditData {
   version: 1;
   durationSeconds: number;
-  /** El clip limpio ya se hizo con calidad HD. */
-  hd?: boolean;
   words: { startSeconds: number; endSeconds: number; text: string }[];
   sounds: { kind: string; startSeconds: number; endSeconds: number; confidence: number }[];
 }
