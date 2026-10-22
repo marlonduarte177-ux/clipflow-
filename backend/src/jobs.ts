@@ -16,8 +16,8 @@ const RetryBody = z.object({
 });
 const IdParams = z.object({ id: z.uuid() });
 /**
- * `type`: sin valor, los procesamientos del video (como siempre); "render_clip", los de editar clips
- * (no se mezclan: la página del video toma el más reciente como su procesamiento).
+ * `type`: sin valor, los procesamientos del video. Los trabajos "render_clip" (del editor de clips ya
+ * retirado) quedan fuera: la página del video toma el más reciente como su procesamiento.
  */
 const ListQuery = z.object({ videoId: z.uuid().optional(), type: z.enum(["analyze_video", "render_clip"]).optional() });
 

@@ -1,9 +1,9 @@
 import { createReadStream, createWriteStream } from "node:fs";
-import { copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 
 /** Lo que el worker necesita de S3. */
@@ -12,8 +12,6 @@ export interface WorkerStorage {
   upload(file: string, key: string, contentType: string): Promise<void>;
   /** Borra un archivo (solo videos originales bajados de un enlace, ya usados para los clips). */
   remove(key: string): Promise<void>;
-  /** Archivos de una carpeta (solo la de música del modo viral; como mucho 1000). */
-  list?(prefix: string): Promise<string[]>;
 }
 
 export function createS3WorkerStorage(options: { bucket: string; region: string; client?: S3Client }): WorkerStorage {
@@ -58,10 +56,6 @@ export function createS3WorkerStorage(options: { bucket: string; region: string;
     async remove(key) {
       await s3.send(new DeleteObjectCommand({ Bucket, Key: key }));
     },
-    async list(prefix) {
-      const res = await s3.send(new ListObjectsV2Command({ Bucket, Prefix: prefix, MaxKeys: 1000 }));
-      return (res.Contents ?? []).map((o) => o.Key ?? "").filter(Boolean);
-    },
   };
 }
 
@@ -82,10 +76,6 @@ export function createLocalStorage(root: string): WorkerStorage {
     },
     async remove(key) {
       await rm(path.join(root, key), { force: true });
-    },
-    async list(prefix) {
-      const names = await readdir(path.join(root, prefix)).catch(() => [] as string[]);
-      return names.map((n) => `${prefix}${n}`);
     },
   };
 }

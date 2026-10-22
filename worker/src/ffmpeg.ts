@@ -36,7 +36,7 @@ interface RunOptions {
 }
 
 /** Ejecuta un proceso y devuelve stdout. Se puede cancelar con `signal` (mata el proceso). */
-export function run(command: string, args: string[], options: RunOptions = {}): Promise<string> {
+function run(command: string, args: string[], options: RunOptions = {}): Promise<string> {
   return new Promise((resolve, reject) => {
     if (options.signal?.aborted) return reject(new DOMException("Cancelado", "AbortError"));
     const child = spawn(command, args, { cwd: options.cwd, stdio: ["ignore", "pipe", "pipe"] });
@@ -72,7 +72,7 @@ export function run(command: string, args: string[], options: RunOptions = {}): 
   });
 }
 
-export const FFMPEG_BASE = ["-hide_banner", "-nostdin", "-y", "-loglevel", "error"];
+const FFMPEG_BASE = ["-hide_banner", "-nostdin", "-y", "-loglevel", "error"];
 
 /** Ejecuta FFmpeg y devuelve la salida binaria (p. ej. píxeles en crudo). */
 function runRaw(command: string, args: string[], signal?: AbortSignal): Promise<Buffer> {
@@ -634,42 +634,16 @@ export async function renderVerticalClip(
     crop?: VerticalCrop | null;
     /** Subtítulos a quemar: archivo ASS (tiempos relativos al clip) y carpeta de fuentes. */
     subtitles?: { file: string; fontsDir: string };
-    /**
-     * Editor de clips: además, el mismo clip SIN los subtítulos en este archivo (se lee y recorta
-     * el video una sola vez). Solo se usa si hay subtítulos.
-     */
-    cleanOutput?: string;
   } = {},
 ): Promise<void> {
   let filter = verticalFilter(options.crop ?? null);
-  const clean = options.subtitles ? options.cleanOutput : undefined;
   if (options.subtitles) {
     // Se dibujan sobre el 1080x1920 final. Rutas entre comillas: pueden tener ":".
     const quote = (p: string) => `'${p.replace(/'/g, "")}'`;
-    const burn = `ass=filename=${quote(options.subtitles.file)}:fontsdir=${quote(options.subtitles.fontsDir)}`;
-    filter = clean
-      ? filter.replace(/\[v\]$/, "[vbase]") + `;[vbase]split=2[vsub][vclean];[vsub]${burn}[v]`
-      : filter.replace(/\[v\]$/, "[vbase]") + `;[vbase]${burn}[v]`;
+    filter =
+      filter.replace(/\[v\]$/, "[vbase]") +
+      `;[vbase]ass=filename=${quote(options.subtitles.file)}:fontsdir=${quote(options.subtitles.fontsDir)}[v]`;
   }
-  const encode = [
-    "-c:v",
-    "libx264",
-    "-preset",
-    "veryfast",
-    // 20: más nítido que el 23 de antes (detalle fino, texto y caras), archivos ~40 % más grandes.
-    "-crf",
-    "20",
-    "-pix_fmt",
-    "yuv420p",
-    "-c:a",
-    "aac",
-    "-b:a",
-    "128k",
-    "-ac",
-    "2",
-    "-movflags",
-    "+faststart",
-  ];
   await run(
     tools.ffmpegPath,
     [
@@ -689,10 +663,24 @@ export async function renderVerticalClip(
       "[v]",
       "-map",
       "0:a:0?",
-      ...encode,
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      // 20: más nítido que el 23 de antes (detalle fino, texto y caras), archivos ~40 % más grandes.
+      "-crf",
+      "20",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "128k",
+      "-ac",
+      "2",
+      "-movflags",
+      "+faststart",
       output,
-      // Las opciones de salida valen para un solo archivo: la copia limpia repite el largo.
-      ...(clean ? ["-map", "[vclean]", "-map", "0:a:0?", "-t", segment.durationSeconds.toFixed(3), ...encode, clean] : []),
     ],
     { signal: options.signal, onProgress: options.onProgress },
   );
