@@ -125,6 +125,13 @@ const EXACT: Record<string, string> = {
   "La plataforma no permitió descargar este video desde nuestros servidores. Descárgalo y súbelo como archivo.":
     "The platform did not allow downloading this video from our servers. Download it and upload it as a file.",
   "La plataforma no respondió. Lo intentaremos de nuevo.": "The platform did not respond. We'll try again.",
+  "No se pudo conectar con el servicio de YouTube. Lo intentaremos de nuevo.": "Could not connect to the YouTube service. We'll try again.",
+  "La clave de Apify no es válida. Revísala en AWS.": "The Apify key is not valid. Check it in AWS.",
+  "La cuenta de Apify no tiene saldo para descargar de YouTube.": "The Apify account has no balance to download from YouTube.",
+  "El servicio de YouTube no respondió. Lo intentaremos de nuevo.": "The YouTube service did not respond. We'll try again.",
+  "No pudimos descargar ese video de YouTube.": "We couldn't download that YouTube video.",
+  "Ese video de YouTube es privado o ya no existe.": "That YouTube video is private or no longer exists.",
+  "La importación de YouTube no está activada: falta la clave de Apify en AWS.": "YouTube import is not turned on: the Apify key is missing in AWS.",
   "No encontramos un video en ese enlace (puede que se haya borrado).": "We couldn't find a video at that link (it may have been deleted).",
   "No encontramos un video en ese enlace.": "We couldn't find a video at that link.",
   "No pudimos bajar un tramo del video. Lo intentaremos de nuevo.": "We couldn't download part of the video. We'll try again.",
