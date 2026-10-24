@@ -94,7 +94,7 @@ export function UploadView() {
   }, []);
 
   // Paso 1 con enlace: la tarjeta sale sola al pegarlo (sin bajar el video).
-  const linkReady = source === "link" && checkImportUrl(link.trim()).ok;
+  const linkReady = source === "link" && checkImportUrl(link.trim(), { youtube: admin }).ok;
   useEffect(() => {
     const raw = link.trim();
     if (!linkReady) return;
@@ -218,7 +218,7 @@ export function UploadView() {
 
   // Al continuar, el usuario confirma que tiene derechos (el aviso está debajo de la tarjeta).
   async function onImport(mode: "clips" | "download") {
-    const checked = checkImportUrl(link);
+    const checked = checkImportUrl(link, { youtube: admin });
     if (!checked.ok) {
       setError(translateMessage(checked.message, locale));
       return;
@@ -335,7 +335,7 @@ export function UploadView() {
               // Otro enlace: otra tarjeta (y otro tramo).
               setPreview(null);
               setRange(null);
-              setPreviewLoading(checkImportUrl(e.target.value.trim()).ok);
+              setPreviewLoading(checkImportUrl(e.target.value.trim(), { youtube: admin }).ok);
             }}
             placeholder="https://kick.com/…/videos/…"
             className="h-12 w-full rounded-xl border border-line bg-background px-3.5 text-base outline-none focus:border-accent"

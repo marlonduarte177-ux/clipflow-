@@ -55,6 +55,23 @@ describe("tarjeta del enlace (sin bajar el video)", () => {
     expect(f.calls[0]!.url).toBe(`https://www.tiktok.com/oembed?url=${encodeURIComponent("https://www.tiktok.com/@ana/video/1")}`);
   });
 
+  it("YouTube: título por oEmbed y duración de la página (direcciones armadas con el código del video)", async () => {
+    const f = fakeFetch((url) =>
+      url.includes("/oembed")
+        ? Response.json({ title: "Charla" })
+        : new Response('<html><script>var x = {"videoDetails":{"lengthSeconds":"5432"}}</script></html>'),
+    );
+    const preview = await fetchLinkPreview("https://youtu.be/dQw4w9WgXcQ?si=abc", { fetch: f.fn });
+    expect(preview).toEqual({ platform: "YouTube", title: "Charla", durationSeconds: 5432, thumbnailUrl: "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg" });
+    expect(f.calls.map((c) => c.url).sort()).toEqual([
+      "https://www.youtube.com/oembed?format=json&url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3DdQw4w9WgXcQ",
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    ]);
+    // Shorts y en vivo también; un enlace sin código de video, sin datos.
+    expect((await fetchLinkPreview("https://m.youtube.com/shorts/dQw4w9WgXcQ", { fetch: f.fn }))?.durationSeconds).toBe(5432);
+    expect(await fetchLinkPreview("https://www.youtube.com/@canal", { fetch: f.fn })).toEqual({ platform: "YouTube", title: null, durationSeconds: null, thumbnailUrl: null });
+  });
+
   it("Instagram y Facebook: tarjeta sin datos y sin consultar nada", async () => {
     const f = fakeFetch(() => Response.json({}));
     expect(await fetchLinkPreview("https://www.instagram.com/reel/abc/", { fetch: f.fn })).toEqual({ platform: "Instagram", title: null, durationSeconds: null, thumbnailUrl: null });
@@ -140,7 +157,7 @@ describe("POST /videos/preview", () => {
     expect((await ctx!.app.inject({ method: "POST", url: "/videos/preview", headers: bearer("alice"), payload: { url: "https://kick.com/canal/videos/01a0b24f-2b40-7d20-b9d1-f1238dd1b2e8", deep: true } })).json()).toMatchObject({
       preview: { durationSeconds: 9616 },
     });
-    // YouTube sigue sin importarse: lo dice antes de intentar.
+    // YouTube solo para administradores: al resto se lo dice antes de intentar.
     const yt = await ask("https://www.youtube.com/watch?v=x");
     expect(yt.statusCode).toBe(400);
     expect(yt.json().error.message).toContain("YouTube");

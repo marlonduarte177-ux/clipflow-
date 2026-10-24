@@ -11,6 +11,7 @@ import type { LinkPreview } from "@clipflow/shared";
  * - Kick: la página del video trae su registro (título, duración en segundos y miniatura).
  * - TikTok: oEmbed (título y miniatura; los videos son cortos y no informa la duración).
  * - Instagram y Facebook: piden sesión; se muestra la tarjeta sin datos.
+ * - YouTube (solo administradores): oEmbed (título) y la página del video (duración).
  * Si algo falla o tarda, la tarjeta sale con lo que haya (nunca un error para el usuario).
  */
 export interface PreviewOptions {
@@ -35,6 +36,7 @@ export function platformOf(url: URL): LinkPreview["platform"] | null {
   if (hostIs(host, "tiktok.com")) return "TikTok";
   if (hostIs(host, "instagram.com")) return "Instagram";
   if (hostIs(host, "facebook.com") || hostIs(host, "fb.com") || hostIs(host, "fb.watch")) return "Facebook";
+  if (hostIs(host, "youtube.com") || hostIs(host, "youtu.be") || hostIs(host, "youtube-nocookie.com")) return "YouTube";
   return null;
 }
 
@@ -47,6 +49,17 @@ export function twitchIds(url: URL): { videoId?: string; clipSlug?: string } {
     ? url.pathname.match(/^\/([\w-]{3,120})\/?$/)
     : url.pathname.match(/^\/[\w-]+\/clip\/([\w-]{3,120})\/?$/);
   return clip ? { clipSlug: clip[1] } : {};
+}
+
+/** Código de un video de YouTube (watch?v=, youtu.be/, shorts/, live/, embed/). */
+export function youtubeId(url: URL): string | null {
+  const host = url.hostname.toLowerCase();
+  const id = hostIs(host, "youtu.be")
+    ? url.pathname.slice(1).split("/")[0]
+    : url.pathname === "/watch"
+      ? url.searchParams.get("v")
+      : url.pathname.match(/^\/(?:shorts|live|embed)\/([^/]+)/)?.[1];
+  return id && /^[\w-]{11}$/.test(id) ? id : null;
 }
 
 /** Canal y código de un video guardado de Kick (kick.com/canal/videos/uuid). */
@@ -185,6 +198,27 @@ async function tiktokPreview(url: URL, get: typeof fetch, signal: AbortSignal): 
   return { title: text(data.title), thumbnailUrl: httpsUrl(data.thumbnail_url) };
 }
 
+/** YouTube: título por oEmbed y duración de la página del video (armadas con el código, no con el enlace pegado). */
+async function youtubePreview(url: URL, get: typeof fetch, signal: AbortSignal): Promise<Partial<LinkPreview>> {
+  const id = youtubeId(url);
+  if (!id) return {};
+  const watch = `https://www.youtube.com/watch?v=${id}`;
+  const [oembed, page] = await Promise.allSettled([
+    get(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(watch)}`, { redirect: "error", signal }).then((r) =>
+      r.ok ? (r.json() as Promise<{ title?: unknown }>) : ({} as { title?: unknown }),
+    ),
+    get(watch, { headers: { "user-agent": BROWSER_UA, "accept-language": "en" }, redirect: "error", signal }).then((r) =>
+      r.ok ? readCapped(r, MAX_PAGE_BYTES) : "",
+    ),
+  ]);
+  const html = page.status === "fulfilled" ? page.value : "";
+  return {
+    title: oembed.status === "fulfilled" ? text(oembed.value.title) : null,
+    durationSeconds: seconds(Number(html.match(/"lengthSeconds":"(\d+)"/)?.[1])),
+    thumbnailUrl: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
+  };
+}
+
 /** Tarjeta del enlace (ya revisado con checkImportUrl). Nunca lanza: si falla, sin datos. */
 export async function fetchLinkPreview(raw: string, options: PreviewOptions = {}): Promise<LinkPreview | null> {
   const url = new URL(raw);
@@ -197,6 +231,7 @@ export async function fetchLinkPreview(raw: string, options: PreviewOptions = {}
     if (platform === "Twitch") found = await twitchPreview(url, get, signal);
     else if (platform === "Kick") found = await kickPreview(url, get, signal);
     else if (platform === "TikTok") found = await tiktokPreview(url, get, signal);
+    else if (platform === "YouTube") found = await youtubePreview(url, get, signal);
   } catch {
     found = {};
   }
@@ -230,7 +265,13 @@ let running = 0;
  */
 export async function fetchLinkDetails(raw: string, options: DetailsOptions = {}): Promise<LinkDetails | null> {
   const url = new URL(raw);
-  if (!platformOf(url) || running >= MAX_RUNNING) return null;
+  const platform = platformOf(url);
+  // YouTube bloquea a yt-dlp en servidores: se vuelve a leer su página, con más tiempo.
+  if (platform === "YouTube") {
+    const found = await youtubePreview(url, fetch, AbortSignal.timeout(options.timeoutMs ?? 10_000)).catch(() => ({}) as Partial<LinkPreview>);
+    return found.durationSeconds ? found : { ...found, errors: ["youtube: sin duración en la página"] };
+  }
+  if (!platform || running >= MAX_RUNNING) return null;
   running++;
   try {
     const stdout = await new Promise<string>((resolve) => {

@@ -16,6 +16,9 @@ describe("enlaces para importar videos", () => {
     expect(checkImportUrl("https://vimeo.com/1")).toMatchObject({ ok: false });
     // Un dominio que solo se parece no se confunde.
     expect(checkImportUrl("https://notyoutube.com/v.mp4")).toMatchObject({ ok: true });
+    // Administradores: YouTube sí (lo baja Apify); las demás siguen rechazadas.
+    expect(checkImportUrl("https://youtu.be/dQw4w9WgXcQ", { youtube: true })).toEqual({ ok: true, url: "https://youtu.be/dQw4w9WgXcQ" });
+    expect(checkImportUrl("https://vimeo.com/1", { youtube: true })).toMatchObject({ ok: false });
   });
 
   it("reconoce TikTok, Instagram, Facebook y Kick sin dejarse engañar", () => {

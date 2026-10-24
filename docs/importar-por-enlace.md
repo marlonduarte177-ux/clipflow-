@@ -10,7 +10,22 @@ procesa igual que un video subido.
 > o Facebook bloquean a nuestros servidores, la app lo dice claro («descárgalo y súbelo como archivo»).
 > Lo que sigue sobre el proxy queda como historia.
 
-**YouTube, por ahora no (02/10/2026).** Se probó con proxy residencial (Evomi) y con el generador
+**YouTube con Apify, solo administradores (24/10/2026).** Los correos de `BILLING_FREE_EMAILS`
+pueden pegar enlaces de YouTube (videos, Shorts, en vivo terminados). El procesador no usa yt-dlp:
+le pide el video al actor de Apify `api-ninja/youtube-video-downloader` y baja el archivo que entrega.
+- Siempre formato **1080** (la opción rápida del actor; 1440p y 4K son lentas y en un clip vertical
+  de 1080x1920 no se notan) y **sin almacenamiento** (`ttl: none`, el enlace dura ~15 min y se baja
+  enseguida, sin costo extra).
+- Costo: 0,05 USD por ejecución + 0,02 USD por video en planes pagos de Apify (0,08 en el gratis):
+  ~0,07–0,13 USD por video. Tope por ejecución: 0,50 USD.
+- Apify baja el video entero; si se eligió un tramo, se recorta después (como un enlace directo).
+- La tarjeta (título, miniatura y duración) sale de oEmbed y de la página del video.
+- La clave va en Secrets Manager: `clipflow-<etapa>/apify-token` (empieza con `apify_api_`). Mientras
+  tenga el valor de relleno, YouTube dice «La importación de YouTube no está activada». El
+  procesador la lee al encender (si ya estaba encendido, la usa en el siguiente encendido).
+- Para el resto de usuarios YouTube sigue con el aviso de siempre.
+
+**YouTube, por ahora no (02/10/2026; ver arriba para administradores).** Se probó con proxy residencial (Evomi) y con el generador
 de tokens de YouTube, y YouTube siguió bloqueando la descarga (403). A pedido del dueño del producto
 se quitó; se retomará más adelante.
 - La API y la web avisan al pegar el enlace: "Por ahora no se pueden importar videos de YouTube.

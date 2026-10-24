@@ -141,6 +141,8 @@ export interface PipelineDeps {
   faceTracking?: boolean;
   /** yt-dlp, para importar videos de TikTok, Instagram, Facebook y Kick. */
   ytDlpPath?: string;
+  /** Clave de Apify: importa YouTube (solo administradores). */
+  apifyToken?: string;
   /** Descarga de enlaces (se reemplaza en tests). */
   download?: typeof downloadFromUrl;
   /** Streams largos: datos del enlace, URLs del video y tramos (se reemplazan en tests). */
@@ -266,6 +268,7 @@ export async function processAnalyzeJob(job: Job, deps: PipelineDeps): Promise<J
     maxBytes: deps.product.upload.maxBytes,
     maxDurationSeconds: deps.product.upload.maxDurationSeconds,
     signal: controller.signal,
+    apifyToken: deps.apifyToken,
   });
 
   /**

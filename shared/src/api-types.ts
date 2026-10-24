@@ -50,7 +50,7 @@ export interface ImportVideoResponse {
 
 /** Datos de un enlace antes de importarlo (sin descargar el video). */
 export interface LinkPreview {
-  platform: "TikTok" | "Instagram" | "Facebook" | "Kick" | "Twitch";
+  platform: "TikTok" | "Instagram" | "Facebook" | "Kick" | "Twitch" | "YouTube";
   title: string | null;
   /** Imagen de la plataforma (la carga el navegador). */
   thumbnailUrl: string | null;

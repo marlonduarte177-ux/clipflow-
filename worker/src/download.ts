@@ -8,12 +8,14 @@ import { isIP } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { pipeline } from "node:stream/promises";
-import { checkImportUrl, isImportPlatformUrl, isPrivateAddress } from "@clipflow/shared";
+import { checkImportUrl, isImportPlatformUrl, isPrivateAddress, isYoutubeUrl } from "@clipflow/shared";
+import { fetchYoutubeViaApify, isApifyToken, type ApifyOptions } from "./apify.js";
 
 /**
  * Descarga de videos importados por enlace.
- * - TikTok, Instagram, Facebook, Kick y Twitch: yt-dlp. YouTube y otras plataformas por ahora no (las rechaza
+ * - TikTok, Instagram, Facebook, Kick y Twitch: yt-dlp. Otras plataformas por ahora no (las rechaza
  *   `checkImportUrl`: bloquean la descarga desde servidores).
+ * - YouTube (solo administradores; la API no deja crear el trabajo a nadie más): con Apify (`apify.ts`).
  * - Cualquier otro enlace: debe ser un archivo de video directo. Se descarga con protección
  *   contra SSRF: en cada paso (también en redirecciones) se comprueba la IP REAL a la que se
  *   conecta, para no llegar nunca a direcciones internas (p. ej. las credenciales de ECS en
@@ -59,6 +61,10 @@ export interface DownloadOptions {
    * más rápido. El límite de duración se aplica al tramo, no al video entero.
    */
   section?: { startSeconds: number; endSeconds: number };
+  /** Clave de Apify para YouTube (sin ella, YouTube no está activado). */
+  apifyToken?: string;
+  /** Solo para tests: API de Apify falsa. */
+  apify?: Pick<ApifyOptions, "apiBase" | "fetch" | "waitSeconds">;
 }
 
 export interface Downloaded {
@@ -71,13 +77,35 @@ export interface Downloaded {
 /** Descarga el video del enlace dentro de `dir`. */
 export async function downloadFromUrl(url: string, dir: string, options: DownloadOptions): Promise<Downloaded> {
   // También aquí: un enlace guardado antes de un cambio de reglas (p. ej. YouTube) se rechaza claro.
-  const checked = checkImportUrl(url);
+  const youtube = isYoutubeUrl(url);
+  const checked = checkImportUrl(url, { youtube });
   if (!checked.ok && !options.allowHosts?.includes(new URL(url).hostname)) throw new DownloadError(checked.message, false);
-  const result = isPlatformUrl(url) ? await downloadWithYtDlp(url, dir, options) : await downloadDirect(url, dir, options);
+  const result = youtube
+    ? await downloadYoutube(url, dir, options)
+    : isPlatformUrl(url)
+      ? await downloadWithYtDlp(url, dir, options)
+      : await downloadDirect(url, dir, options);
   const size = (await stat(result.file)).size;
   if (size === 0) throw new DownloadError("El enlace no devolvió ningún video.", false);
   if (size > options.maxBytes) throw new DownloadError("El video supera el tamaño máximo permitido.", false);
   return { ...result, sizeBytes: size };
+}
+
+/**
+ * YouTube: Apify baja el video (siempre entero, en 1080p) y nosotros bajamos su archivo. Un tramo
+ * elegido se recorta después, como con un enlace directo.
+ */
+async function downloadYoutube(url: string, dir: string, options: DownloadOptions): Promise<Omit<Downloaded, "sizeBytes">> {
+  if (!isApifyToken(options.apifyToken)) {
+    throw new DownloadError("La importación de YouTube no está activada: falta la clave de Apify en AWS.", false, false, "apify: sin clave");
+  }
+  const { downloadUrl, title } = await fetchYoutubeViaApify(url, {
+    token: options.apifyToken,
+    signal: options.signal,
+    ...options.apify,
+  });
+  const file = await downloadDirect(downloadUrl, dir, options);
+  return { ...file, title };
 }
 
 // ---------------------------------------------------------------------------
