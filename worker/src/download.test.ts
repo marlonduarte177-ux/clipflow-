@@ -95,8 +95,8 @@ describe("descarga por enlace directo", () => {
 });
 
 describe("plataformas (yt-dlp)", () => {
-  it("rechaza YouTube con un mensaje claro aunque llegue un enlace guardado antes", async () => {
-    await expect(downloadFromUrl("https://youtu.be/abc", target("yt"), options())).rejects.toThrow(/no se pueden importar videos de YouTube/);
+  it("YouTube sin clave de Apify: lo dice claro (no intenta con yt-dlp)", async () => {
+    await expect(downloadFromUrl("https://youtu.be/abc", target("yt"), options())).rejects.toThrow(/falta la clave de Apify/);
   });
 
   it("le pasa a yt-dlp la ruta COMPLETA de FFmpeg (con solo el nombre, yt-dlp seguía sin FFmpeg)", () => {

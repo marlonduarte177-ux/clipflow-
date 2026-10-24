@@ -129,6 +129,11 @@ export function canSaveVideos(settings: BillingSettings, user: Pick<AuthUser, "e
   return FEATURES.downloadOnly && isBillingExempt(user.email, settings.BILLING_FREE_EMAILS);
 }
 
+/** Importar de YouTube (con Apify, ~0,13 USD por video): solo los administradores. */
+export function canImportYoutube(settings: BillingSettings, user: Pick<AuthUser, "email">): boolean {
+  return isBillingExempt(user.email, settings.BILLING_FREE_EMAILS);
+}
+
 /**
  * ¿Le alcanzan los minutos para este video (o el tramo elegido)? Si no, responde 402 antes de empezar:
  * así no se descarga ni se procesa nada que después no se podría cobrar. `seconds` null = duración

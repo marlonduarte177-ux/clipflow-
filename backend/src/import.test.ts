@@ -54,6 +54,13 @@ describe("importar videos por enlace", () => {
     expect(ctx!.queue.sent).toEqual([]);
   });
 
+  it("YouTube: solo los administradores lo importan (con Apify)", async () => {
+    const projectId = await newProject("admin");
+    const res = await importVideo("admin", { projectId, url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", rightsConfirmed: true });
+    expect(res.statusCode).toBe(201);
+    expect(ctx!.queue.sent).toHaveLength(1);
+  });
+
   it("YouTube por ahora no se importa: responde con un mensaje claro y no crea nada", async () => {
     const projectId = await newProject("alice");
     const res = await importVideo("alice", { projectId, url: "https://youtu.be/abc", rightsConfirmed: true });

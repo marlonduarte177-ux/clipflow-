@@ -91,6 +91,15 @@ export class WorkerStack extends Stack {
       removalPolicy: props.stage === "production" || props.protectData ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     });
 
+    // Clave de Apify: importa videos de YouTube (solo administradores). Se crea con un valor de relleno:
+    // mientras no se pegue la clave real (apify_api_...), YouTube queda desactivado. Solo el worker la lee.
+    const apifyToken = new secretsmanager.Secret(this, "ApifyToken", {
+      secretName: `${prefix}/apify-token`,
+      description: "Clave de Apify para importar YouTube en ClipFlow. Reemplaza el valor por tu clave (apify_api_...).",
+      generateSecretString: { passwordLength: 32, excludePunctuation: true },
+      removalPolicy: props.stage === "production" || props.protectData ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
+    });
+
     // Secreto del antiguo proxy de descargas (Evomi). Ya no lo usa nadie, pero se conserva (vacío) y se sigue
     // exportando: la API lo importaba y CloudFormation no deja borrar una exportación en uso. Así el
     // despliegue pasa en un solo paso; si algún día se vuelve a usar un proxy, ya está aquí.
@@ -176,6 +185,7 @@ export class WorkerStack extends Stack {
         // una clave nueva se usa desde el siguiente video).
         OPENAI_API_KEY: ecs.Secret.fromSecretsManager(openAiKey),
         DEEPGRAM_API_KEY: ecs.Secret.fromSecretsManager(deepgramKey),
+        APIFY_TOKEN: ecs.Secret.fromSecretsManager(apifyToken),
         DB_USER: ecs.Secret.fromSecretsManager(dbSecret, "username"),
         DB_PASSWORD: ecs.Secret.fromSecretsManager(dbSecret, "password"),
       },
@@ -292,5 +302,6 @@ export class WorkerStack extends Stack {
     new CfnOutput(this, "QueueUrl", { value: this.queue.queueUrl });
     new CfnOutput(this, "OpenAiSecretName", { value: openAiKey.secretName });
     new CfnOutput(this, "DeepgramSecretName", { value: deepgramKey.secretName });
+    new CfnOutput(this, "ApifySecretName", { value: apifyToken.secretName });
   }
 }

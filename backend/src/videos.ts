@@ -29,7 +29,7 @@ import { createJob, schema, type Database } from "@clipflow/shared/db";
 import { deleteVideoRows, purgeVideoFiles } from "./cleanup.js";
 import { sendError, sendValidationError } from "./http.js";
 import { enqueue, toJobDto, wakeWorkers } from "./jobs.js";
-import { canSaveVideos, replyIfBlocked, replyIfNotEnoughMinutes, secondsToProcess, type BillingSettings } from "./billing.js";
+import { canImportYoutube, canSaveVideos, replyIfBlocked, replyIfNotEnoughMinutes, secondsToProcess, type BillingSettings } from "./billing.js";
 import { fetchLinkDetails, fetchLinkPreview, type LinkDetails } from "./link-preview.js";
 
 const defaultLinkDetails = (url: string) => fetchLinkDetails(url);
@@ -309,7 +309,7 @@ export function videoRoutes(deps: VideoRouteDeps) {
     app.post("/videos/preview", async (request, reply) => {
       const input = LinkPreviewSchema.safeParse(request.body);
       if (!input.success) return sendValidationError(reply, input.error);
-      const checked = checkImportUrl(input.data.url);
+      const checked = checkImportUrl(input.data.url, { youtube: canImportYoutube(billing, request.user!) });
       if (!checked.ok) return sendError(reply, 400, "invalid_url", checked.message);
       const now = Date.now();
       const key = `${input.data.deep ? "deep:" : ""}${checked.url}`;
@@ -341,7 +341,7 @@ export function videoRoutes(deps: VideoRouteDeps) {
     app.post("/videos/import", async (request, reply) => {
       const input = ImportVideoSchema.safeParse(request.body);
       if (!input.success) return sendValidationError(reply, input.error);
-      const checked = checkImportUrl(input.data.url);
+      const checked = checkImportUrl(input.data.url, { youtube: canImportYoutube(billing, request.user!) });
       if (!checked.ok) return sendError(reply, 400, "invalid_url", checked.message);
       // "Solo descargar": sin opciones de clips. Si después quiere clips, usa "Crear clips" en el video.
       const downloadOnly = input.data.downloadOnly === true;

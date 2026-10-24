@@ -15,6 +15,8 @@ const EnvSchema = z.object({
   FFPROBE_PATH: z.string().default("ffprobe"),
   /** yt-dlp para importar videos por enlace (TikTok, Instagram, Facebook, Kick). */
   YTDLP_PATH: z.string().default("yt-dlp"),
+  /** Clave de Apify para importar YouTube (solo administradores). En AWS la inyecta ECS; nunca se registra. */
+  APIFY_TOKEN: z.string().optional(),
   /** Tiempo que un mensaje queda oculto a otros workers; se renueva mientras se procesa. */
   SQS_VISIBILITY_SECONDS: z.coerce.number().int().min(60).max(43_200).default(300),
   /** Costo estimado por hora del worker (Fargate 4 vCPU / 8 GB x86 en us-east-1 ≈ 0.1975). */

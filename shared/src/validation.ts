@@ -138,8 +138,9 @@ const IMPORT_PLATFORM_DOMAINS = ["tiktok.com", "instagram.com", "facebook.com", 
  * Plataformas conocidas que por ahora NO se importan: bloquean la descarga desde servidores (YouTube
  * exige además tokens que no alcanzaron, probado el 02/10/2026). Se avisa antes de intentarlo.
  */
+const YOUTUBE_DOMAINS = ["youtube.com", "youtu.be", "youtube-nocookie.com"];
 const UNSUPPORTED_PLATFORMS: { name: string; domains: string[] }[] = [
-  { name: "YouTube", domains: ["youtube.com", "youtu.be", "youtube-nocookie.com"] },
+  { name: "YouTube", domains: YOUTUBE_DOMAINS },
   { name: "Vimeo", domains: ["vimeo.com"] },
   { name: "X", domains: ["x.com", "twitter.com"] },
   { name: "Dailymotion", domains: ["dailymotion.com", "dai.ly"] },
@@ -147,6 +148,15 @@ const UNSUPPORTED_PLATFORMS: { name: string; domains: string[] }[] = [
 ];
 
 const hostIn = (host: string, domains: string[]) => domains.some((d) => host === d || host.endsWith(`.${d}`));
+
+/** true si el enlace es de YouTube (solo los administradores lo importan, con Apify). */
+export function isYoutubeUrl(raw: string): boolean {
+  try {
+    return hostIn(new URL(raw).hostname.toLowerCase(), YOUTUBE_DOMAINS);
+  } catch {
+    return false;
+  }
+}
 
 /** true si el enlace es de TikTok, Instagram, Facebook, Kick o Twitch. */
 export function isImportPlatformUrl(raw: string): boolean {
@@ -157,7 +167,13 @@ export function isImportPlatformUrl(raw: string): boolean {
   }
 }
 
-export function checkImportUrl(raw: string): { ok: true; url: string } | { ok: false; message: string } {
+/**
+ * `youtube`: acepta YouTube (solo para los administradores; lo descarga Apify, no yt-dlp).
+ */
+export function checkImportUrl(
+  raw: string,
+  options: { youtube?: boolean } = {},
+): { ok: true; url: string } | { ok: false; message: string } {
   let url: URL;
   try {
     url = new URL(raw.trim());
@@ -173,7 +189,7 @@ export function checkImportUrl(raw: string): { ok: true; url: string } | { ok: f
     return { ok: false, message: "Ese enlace apunta a una dirección privada." };
   }
   if (!host.includes(".") && !host.includes(":")) return { ok: false, message: "Ese enlace no es válido." };
-  const unsupported = UNSUPPORTED_PLATFORMS.find((p) => hostIn(host, p.domains));
+  const unsupported = UNSUPPORTED_PLATFORMS.find((p) => hostIn(host, p.domains) && !(options.youtube && p.name === "YouTube"));
   if (unsupported) {
     return {
       ok: false,

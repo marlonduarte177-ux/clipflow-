@@ -5,6 +5,7 @@ import { loadProductConfig } from "@clipflow/shared";
 import { createDb, databaseUrlFromEnv } from "@clipflow/shared/db";
 import { DeepgramTranscriber, looksLikeDeepgramKey, withDeepgram } from "./ai/deepgram.js";
 import { OpenAIProvider } from "./ai/openai.js";
+import { isApifyToken } from "./apify.js";
 import { loadWorkerConfig, looksLikeOpenAIKey } from "./config.js";
 import { runConsumer } from "./consumer.js";
 import { createS3WorkerStorage } from "./storage.js";
@@ -74,6 +75,8 @@ log.info(
     workerId,
     ai: ai ? "openai (gpt)" : `desactivada (${aiDisabledReason})`,
     transcription,
+    // Solo si hay clave (nunca el valor).
+    youtube: isApifyToken(config.APIFY_TOKEN) ? "apify" : "desactivado (falta la clave de Apify)",
     pipeline: config.AI_PIPELINE,
     v2Model: aiV2 ? config.OPENAI_V2_MODEL : null,
     sounds: config.SOUND_DETECTION_ENABLED,
@@ -108,6 +111,7 @@ try {
       faceTracking: config.FACE_TRACKING_ENABLED,
       billing: { enabled: config.BILLING_ENABLED, freeEmails: config.BILLING_FREE_EMAILS },
       ytDlpPath: config.YTDLP_PATH,
+      apifyToken: config.APIFY_TOKEN?.trim(),
       vision: {
         enabled: config.AI_VISION_ENABLED,
         intervalSeconds: config.AI_VISION_INTERVAL_SECONDS,
